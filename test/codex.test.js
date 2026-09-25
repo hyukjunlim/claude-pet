@@ -62,6 +62,21 @@ test('stopped turns go quiet, errors fail, and approvals wait for you', () => {
   assert.deepEqual(rolloutStatus(ask, { now: T0 + 3000 }), { status: 'waiting', detail: 'Approve: rm -rf build', since: T0 + 2000 });
 });
 
+test('a turn is running even when the rollout is read from after its start', () => {
+  const work = (s, turn, type = 'item_completed') => (type === 'token_usage_record'
+    ? { timestamp: at(s), type, payload: { turn_id: turn } }
+    : { timestamp: at(s), type: 'event_msg', payload: { type, turn_id: turn } });
+  // A long rollout's tail: the current turn's task_started is further back.
+  const midTurn = rollout([meta(), work(40, 't2'), work(41, 't2', 'token_usage_record')]);
+  assert.equal(rolloutStatus(midTurn, { now: T0 + 45_000 }).status, 'running');
+  // Work that trails a finished turn doesn't bring it back.
+  const done = rollout([meta(), started(1), { ...complete(9), payload: { ...complete(9).payload, turn_id: 't1' } }, work(10, 't1')]);
+  assert.equal(done.turnActive, false);
+  // Older rollouts without turn ids: a tool call after the last turn ended means a new one.
+  const old = rollout([meta(), started(1), complete(9), shell(20, ['ls'])]);
+  assert.equal(old.turnActive, true);
+});
+
 test("Codex's own helper threads are recognized", () => {
   const s = rollout([meta({ source: { subagent: { other: 'guardian' } } })]);
   assert.equal(s.subagent, true);

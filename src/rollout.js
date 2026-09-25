@@ -27,10 +27,22 @@ function createRolloutState() {
     aborted: false,
     error: null,
     question: null,
+    endedTurns: new Set(),   // ids of recent turns that finished
   };
 }
 
 const fromSeconds = (v) => (Number.isFinite(v) && v > 0 ? v * 1000 : 0);
+
+function turnIdOf(p) {
+  const id = p.turn_id ?? p.internal_chat_message_metadata_passthrough?.turn_id;
+  return typeof id === 'string' ? id : null;
+}
+
+function markEnded(state, turnId) {
+  if (!turnId) return;
+  state.endedTurns.add(turnId);
+  if (state.endedTurns.size > 64) state.endedTurns.delete(state.endedTurns.values().next().value);
+}
 
 function applyRolloutEntry(state, entry) {
   if (!entry || typeof entry !== 'object') return;
@@ -43,6 +55,16 @@ function applyRolloutEntry(state, entry) {
     state.subagent = Boolean(p.source && typeof p.source === 'object' && p.source.subagent);
     state.fromDesktop = DESKTOP_ORIGINATOR_RE.test(String(p.originator || ''));
     return;
+  }
+  // Reading a long rollout from its tail can start after a turn's task_started. Work from a
+  // turn that hasn't finished still shows the turn is in progress.
+  const work = entry.type === 'response_item' || entry.type === 'token_usage_record'
+    || (entry.type === 'event_msg' && p.type === 'item_completed');
+  if (work && !state.turnActive) {
+    const turnId = turnIdOf(p);
+    if (turnId ? !state.endedTurns.has(turnId) : CALLS.has(p.type) && at > state.turnEndedAt) {
+      Object.assign(state, { turnActive: true, turnStartedAt: at, step: '', aborted: false, error: null, question: null });
+    }
   }
   if (entry.type === 'response_item') {
     if (CALL_OUTPUTS.has(p.type)) state.question = null;
@@ -57,6 +79,7 @@ function applyRolloutEntry(state, entry) {
       });
       return;
     case 'task_complete':
+      markEnded(state, turnIdOf(p));
       Object.assign(state, {
         turnActive: false,
         turnEndedAt: fromSeconds(p.completed_at) || at,
@@ -65,6 +88,7 @@ function applyRolloutEntry(state, entry) {
       });
       return;
     case 'turn_aborted':
+      markEnded(state, turnIdOf(p));
       Object.assign(state, { turnActive: false, turnEndedAt: at, aborted: true, question: null });
       return;
     case 'error':
