@@ -501,6 +501,7 @@ class SessionTracker extends EventEmitter {
         hostSessionId: r.hostSessionId,
         title: r.title || follower?.state.title || folderName(r.cwd) || 'Claude Code session',
         remote: r.remote && (name || r.remote),
+        project: projectName(r.cwd),
         cwd: r.cwd,
         ...derived,
       });
@@ -519,6 +520,7 @@ class SessionTracker extends EventEmitter {
         hostSessionId: null,
         title: follower.state.title || folderName(follower.state.cwd) || 'Claude Code (terminal)',
         remote: null,
+        project: projectName(follower.state.cwd),
         cwd: follower.state.cwd,
         ...derived,
       });
@@ -556,7 +558,8 @@ function desktopStatus(r, state, { now = Date.now(), skew = 0, dismissedAt, logT
     if (now - Math.max(hidden.since, r.lastActivityAt) > STALE_RUNNING_MS) {
       return state ? { status: 'idle', detail: '', since: hidden.since } : null;
     }
-    return { status: 'running', detail: r.machine ? `Working on ${r.machine}` : 'Working', since: hidden.since };
+    const where = projectName(r.cwd) || r.machine;   // the project, else the server
+    return { status: 'running', detail: where ? `Working on ${where}` : 'Working', since: hidden.since };
   }
   if (!state) return null;
   const derived = deriveStatus(state, {
@@ -671,6 +674,17 @@ function folderName(p) {
   return path.basename(p.replace(/\\/g, '/').replace(/\/+$/, ''));
 }
 
+// The project a session works in: its folder's name, unless that folder is one the app made
+// for a session started without a project.
+function projectName(cwd) {
+  if (!cwd) return null;
+  const parts = cwd.replace(/\\/g, '/').replace(/\/+$/, '').split('/');
+  if (parts.some((p) => p.toLowerCase() === 'scratch-workspaces')) return null;   // Claude's "No folder" sessions
+  const [grand, parent] = parts.slice(-3, -1);
+  if (/^codex$/i.test(grand || '') && /^\d{4}-\d{2}-\d{2}$/.test(parent || '')) return null;   // Codex: …/Codex/<date>/<topic>
+  return parts.at(-1) || null;
+}
+
 module.exports = {
   SessionTracker,
   FileFollower,
@@ -684,6 +698,7 @@ module.exports = {
   parseDesktopSession,
   parseLogLine,
   parseSshConnections,
+  projectName,
   HOST_ID_RE,
 };
 

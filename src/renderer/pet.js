@@ -153,13 +153,13 @@
     title.className = 'title';
     title.textContent = s.title;
     line.append(label, title);
-    // A long step gets cut short, but the time stays visible. Codex threads say so up front.
+    // "Claude · tokenizer · 5m": which app, the project, how long. A long project name gets cut
+    // short, but the time stays visible.
     const detail = document.createElement('span');
     detail.className = 'detail';
     const ago = formatAgo(s.since);
-    const what = codex ? ['Codex', s.remote, s.detail].filter(Boolean).join(' · ') : s.detail;
-    if (what) detail.append(span('what', what));
-    if (ago) detail.append(span('ago', what ? `· ${ago}` : ago));
+    detail.append(span('what', [codex ? 'Codex' : 'Claude', s.project].filter(Boolean).join(' · ')));
+    if (ago) detail.append(span('ago', `· ${ago}`));
     text.append(line, detail);
     el.append(text);
 

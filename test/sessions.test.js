@@ -6,7 +6,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { applyEntry, createTurnState } = require('../src/transcript');
-const { SessionTracker, desktopStatus, estimateSkew, parseDesktopSession, parseLogLine, parseSshConnections } = require('../src/sessions');
+const {
+  SessionTracker, desktopStatus, estimateSkew, parseDesktopSession, parseLogLine, parseSshConnections, projectName,
+} = require('../src/sessions');
 
 const T0 = Date.parse('2026-09-24T14:00:00.000Z');
 const SKEW = 345_000;                        // the SSH server's clock runs 5m45s ahead of ours
@@ -87,6 +89,11 @@ test('without the log, an SSH turn shows once the index records its prompt', () 
   assert.deepEqual(desktopStatus(r, null, { now: T0 + 120_000, skew: SKEW }), { status: 'running', detail: WORKING, since: T0 });
 });
 
+test('a running SSH turn is named after its project folder when the index has one', () => {
+  const r = sshSession({ latestUserFrameAt: remote(0), lastAssistantUuid: 'a1', cwd: '/srv/projects/tokenizer/' });
+  assert.equal(desktopStatus(r, null, { now: T0 + 120_000, skew: SKEW }).detail, 'Working on tokenizer');
+});
+
 test('an SSH session whose last turn was summarized is not running', () => {
   const r = sshSession({ latestUserFrameAt: remote(0), lastAssistantUuid: 'a1', postTurnSummaryFor: 'a1' });
   assert.equal(desktopStatus(r, null, { now: T0 + 120_000, skew: SKEW }), null);
@@ -106,6 +113,14 @@ test('the copy is used as soon as it has the latest reply', () => {
   const copy = copyOf([prompt(remote(0)), toolUse(remote(5), 'a1')]);
   const r = sshSession({ latestUserFrameAt: remote(0), lastAssistantUuid: 'a1' });
   assert.deepEqual(desktopStatus(r, copy, { now: T0 + 60_000, skew: SKEW }), { status: 'running', detail: 'python train.py', since: T0 });
+});
+
+test("a session's project is its folder, unless the app made that folder for it", () => {
+  assert.equal(projectName('/srv/projects/tokenizer'), 'tokenizer');
+  assert.equal(projectName('C:\\Users\\alice\\code\\billing\\'), 'billing');
+  assert.equal(projectName('C:\\Users\\alice\\AppData\\Roaming\\Claude\\scratch-workspaces\\a1\\b2\\scratch-2026-09-24-0f3a'), null);
+  assert.equal(projectName('/mnt/c/users/alice/documents/codex/2026-09-24/fix-the-hooks'), null);
+  assert.equal(projectName(''), null);
 });
 
 test('the app log lines the pet understands', () => {
@@ -209,7 +224,8 @@ test('a running SSH session is named after its saved connection', async () => {
     await tracker.tick();
     const [s] = tracker.sessions;
     assert.equal(s.status, 'running');
-    assert.equal(s.detail, 'Working on lab-server');
+    assert.equal(s.detail, 'Working on proj');   // its folder, /data/proj
+    assert.equal(s.project, 'proj');
     assert.equal(s.remote, 'lab-server');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

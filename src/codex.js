@@ -17,7 +17,7 @@ const fsp = fs.promises;
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
-const { FileFollower, folderName, readdirSafe, statSafe } = require('./sessions');
+const { FileFollower, folderName, projectName, readdirSafe, statSafe } = require('./sessions');
 const { UNREAD_WINDOW_MS, compareSessions } = require('./transcript');
 const { applyRolloutEntry, createRolloutState, rolloutStatus } = require('./rollout');
 const { CodexRemote } = require('./codex-remote');
@@ -452,6 +452,7 @@ class CodexTracker extends EventEmitter {
         hostSessionId: null,
         title: c?.title || this.threadNames.get(threadId) || folderName(c?.cwd || cwd) || 'Codex thread',
         remote: hostName(host, this.hostNames),
+        project: projectName(c?.cwd || cwd),
         cwd: c?.cwd || cwd,
         url: threadUrl(threadId, host),
         ...derived,

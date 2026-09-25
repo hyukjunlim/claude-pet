@@ -10,7 +10,7 @@
   --failed: #d93f3f;
   --review: #2e8b57;
   --badge: #c96442;
-  --pill-width: 320px;
+  --pill-width: 260px;
 }
 
 @media (prefers-color-scheme: dark) {

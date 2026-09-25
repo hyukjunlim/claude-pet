@@ -126,6 +126,7 @@ test('the tracker combines running threads here with unread threads on other hos
     assert.equal(ready.status, 'review');
     assert.equal(ready.title, 'Plan the migration');
     assert.equal(ready.remote, 'lab-server');
+    assert.equal(ready.project, 'proj');   // from the catalog's /data/proj
     assert.equal(ready.url, `codex://threads/${remoteThread}?hostId=remote-ssh-discovered%3Alab-server`);
     assert.equal(tracker.sessions.length, 2);
 

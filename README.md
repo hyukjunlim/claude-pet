@@ -30,14 +30,17 @@ the same option from the command line. `Ctrl+Alt+P` shows or hides the pet. Righ
 | waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, or ended its turn waiting on a decision from you |
 | failed        | **Error**     | The turn ended with an API error |
 | review        | **Ready**     | A turn finished and you haven't opened that session since |
-| running       | **Running**   | Claude is working. The bubble shows the current step, e.g. "Editing main.js" |
+| running       | **Running**   | Claude is working |
 | idle          | none          | Nothing to report |
 
 Every active session gets its own bubble, most urgent first, in the same order as ChatGPT's pet:
 Needs you, then Error, then Ready, then Running. The pet's animation follows the top one. Up to 4
 bubbles are shown; any others are listed in the tray menu. The **×** on a bubble dismisses it.
-Every bubble is the same width (`--pill-width` in [src/renderer/pet.css](src/renderer/pet.css)),
-and a long title or step ends in "…".
+
+A bubble shows the status and the session's title, and under them the app, the project and how
+long it has been in that state, e.g. "Claude · tokenizer · 5m". The project is the session's folder name; it's
+left out for sessions started without a folder. Every bubble is the same width (`--pill-width` in
+[src/renderer/pet.css](src/renderer/pet.css)), and a long title ends in "…".
 
 - **Click the pet** to bring the Claude window to the front, the way ChatGPT's pet opens its app.
 - **Click a bubble** to open that exact session in Claude, SSH sessions included.
@@ -93,18 +96,17 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 **Limitations:**
 - **Permission prompts aren't visible.** A tool waiting for your approval looks like "Running".
   Questions (`AskUserQuestion`) and plan approvals *are* detected.
-- **SSH turns show less detail.** A running SSH turn shows "Working on &lt;server&gt;" rather than
-  the current step. The server is named after its saved SSH connection in Claude (from
-  `%APPDATA%\Claude\ssh_configs.json`), or its address if it has no name. A question Claude
-  asks mid-turn shows as "Running" until the turn ends. If the app has to start the session's
-  CLI first, the bubble appears when the first reply arrives.
+- **SSH turns.** A question Claude asks mid-turn in an SSH session shows as "Running" until the
+  turn ends. If the app has to start the session's CLI first, the bubble appears when the first
+  reply arrives.
 - **Undocumented files.** The session index, the log and the transcript format belong to the
   Claude app and Claude Code, and can change in an update. If the pet stops reacting after an update,
   `node src/sessions.js` shows what it can still read.
 
 ## Codex
 
-If Codex is installed, its threads get bubbles next to Claude's, marked "Codex". Tray menu →
+If Codex is installed, its threads get bubbles next to Claude's, marked "Codex" and the thread's
+project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
 *Show Codex threads* turns them off. Clicking one opens that thread in Codex
 (`codex://threads/<id>?hostId=<host>`).
 
