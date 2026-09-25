@@ -180,8 +180,10 @@ class AppLogFollower extends FileFollower {
 
 const LOG_LINE_RE = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(?:[.,](\d{1,3}))? \[\w+\] (.*)$/;
 const LOG_EVENTS = [
-  // A prompt sent to a session whose CLI is already running.
+  // A prompt handed to the session's CLI. The app logs the "Mapping" line for every prompt it
+  // passes on (including ones it doesn't log as "Sending message", such as queued prompts).
   [/^Sending message to session (local_[\w-]+)/, 'start'],
+  [/^Mapping internal session (local_[\w-]+) to CLI session/, 'start'],
   // The first reply after the app (re)started a session's CLI for a prompt. ("Starting local
   // session" itself also appears for pre-warmed sessions and rewinds, which don't run a turn.)
   [/^\[CCD start-timing\] (local_[\w-]+)\b(?:.*?\btotal_to_assistant=(\d+)ms)?/, 'start'],

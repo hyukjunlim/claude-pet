@@ -130,6 +130,9 @@ test('the app log lines the pet understands', () => {
   const timing = `2026-09-24 23:47:50 [info] [CCD start-timing] ${id} preflight=2ms init=788ms first_assistant=19453ms | ccd_overhead=173ms total_to_init=974ms total_to_assistant=20430ms cache_hit`;
   assert.deepEqual(parseLogLine(timing), { kind: 'start', sessionId: id, at: local(50) - 20430 });
   assert.equal(parseLogLine(`2026-09-24 23:47:29 [info] Starting local session ${id} in /data/x`), null);   // may be a pre-warm
+  // A prompt passed to the CLI without a "Sending message" line (e.g. one that was queued).
+  assert.deepEqual(parseLogLine(`2026-09-24 23:47:36 [info] Mapping internal session ${id} to CLI session 7b1e2d3c-4a5f-4e6d-8c9b-0a1f2e3d4c5b`),
+    { kind: 'start', sessionId: id, at: local(36) });
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD CycleHealth] healthy cycle for ${id} (68s, hadFirstResponse=true)\r`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD CycleHealth] unhealthy cycle for ${id} (3s, hadFirstResponse=true, reason=api_error)`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [Stop hook] Query completed for session ${id}`).kind, 'end');
