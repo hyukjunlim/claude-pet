@@ -133,8 +133,8 @@ project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
 Below the lowest bubble, just above the pet, sits one more bubble with a row per app. Each row
 shows how much of that plan's weekly limit you've used against how far into the week you are:
 
-- **Used:** the row fills up from the left, with the percentage on the right. It turns amber at
-  75% and red at 90%.
+- **Used:** the row fills up from the left, with the percentage on the right. Claude's fills in
+  Claude's orange, with white text over it; Codex's in gray.
 - **Week gone by:** a thin line across the row.
 - **Reading it:** a fill that reaches past the line means you're using the limit faster than
   the week goes by.
@@ -143,10 +143,9 @@ The tray menu lists the same figures, with how far into the week you are and the
 reset. Tray menu → *Show weekly limits* turns the meter off. The pet reads both figures from files
 the two apps keep. It contacts no server itself (apart from the SSH hosts above).
 
-- **Claude:** every 15 minutes, the desktop app records your plan's usage (the 5-hour and the
-  weekly window, in percent) in `%APPDATA%\Claude\plan-usage-history.json`. The meter shows
-  the newest record, dimmed once it's more than an hour old, which happens when the desktop
-  app is closed.
+- **Claude:** while it runs, the desktop app records your plan's usage (the 5-hour and the
+  weekly window, in percent) in `%APPDATA%\Claude\plan-usage-history.json`, about every 15
+  minutes while the figures change. The meter shows the newest record.
 - **Claude's reset time:** the weekly limit resets at the same time every week, a time that's
   fixed for your account. Claude shows it in Settings → Usage. The desktop app doesn't save it
   anywhere the pet can read, so set it once: tray menu → *Claude's week resets* → the weekday

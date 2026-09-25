@@ -10,6 +10,7 @@
   --failed: #d93f3f;
   --review: #2e8b57;
   --badge: #c96442;
+  --claude: #d97757;             /* Claude's orange, for its row of the weekly-limit meter */
   --pill-width: 242px;           /* every bubble, the weekly-limit meter too */
 }
 
@@ -241,12 +242,18 @@ body {
 }
 
 .gauge {
-  --c: var(--muted);
+  --fill: color-mix(in srgb, var(--muted) 30%, transparent);
   position: relative;
   display: flex;
   align-items: baseline;
   gap: 5px;
   padding: 4px 13px 5px;
+}
+
+/* Claude's row in Claude's color, with white text where the fill runs under it. */
+.gauge.claude {
+  --fill: var(--claude);
+  --ink: #fff;
 }
 
 /* Between the rows, a divider that stops short of the edges. */
@@ -260,15 +267,11 @@ body {
   background: color-mix(in srgb, var(--text) 16%, transparent);
 }
 
-.gauge.high { --c: var(--waiting); }
-.gauge.full { --c: var(--failed); }
-.gauge.stale { opacity: 0.55; }    /* the desktop app hasn't sampled Claude's usage lately */
-
 /* How much is used: the row fills up from the left. */
 .gauge .fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background: color-mix(in srgb, var(--c) 30%, transparent);
+  background: var(--fill);
 }
 
 /* How far into the week it is: a line across the row. */
@@ -291,8 +294,25 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.gauge.high .pct,
-.gauge.full .pct { color: var(--c); }
+/* A row with a solid fill shows its text as two copies laid exactly over it, cut at the fill's
+   edge (pet.js sets the cuts): the usual color outside the fill, and the fill's own over it. */
+.gauge .base,
+.gauge .ink {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: baseline;
+  gap: 5px;
+  padding: inherit;
+}
+
+.gauge .ink { color: var(--ink); }
+
+.gauge.claude .base,
+.gauge.claude .ink { display: flex; }
+
+.gauge.claude > .name,
+.gauge.claude > .pct { visibility: hidden; }    /* still there, for the layout */
 
 @keyframes pop {
   from { opacity: 0; transform: translateY(4px) scale(0.97); }

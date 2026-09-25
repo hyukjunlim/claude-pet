@@ -18,7 +18,7 @@
 
   let sessions = [];
   let showActivity = true;
-  let usage = [];              // weekly limits: [{ app, name, percent, resetsIn, stale }]
+  let usage = [];              // weekly limits: [{ app, name, percent, elapsed, resetsIn }]
   let lookTimer = null;
   let remindTimer = null;
   let drag = null;
@@ -201,25 +201,21 @@
 
   // One bubble with a row per app: how much of its weekly limit is used (the fill, and the number
   // on the right), against how far into the week it is (the line across the row). A fill past the
-  // line means you're using it faster than the week goes by. It turns amber, then red, near the
-  // end. Clicks go through it, like through the empty parts of the window.
+  // line means you're using it faster than the week goes by. Clicks go through it, like through
+  // the empty parts of the window.
   meterEl.className = 'meter';
   meterEl.setAttribute('role', 'listitem');
 
   function renderMeter() {
     meterEl.replaceChildren(...usage.map(gauge));
-    const said = usage.map((u) => [
-      `${u.name} ${u.percent}% used`, u.elapsed != null && `${u.elapsed}% into the week`, u.stale && 'not updated lately',
-    ].filter(Boolean).join(', '));
+    const said = usage.map((u) => [`${u.name} ${u.percent}% used`, u.elapsed != null && `${u.elapsed}% into the week`]
+      .filter(Boolean).join(', '));
     meterEl.setAttribute('aria-label', `Weekly limits: ${said.join('; ')}`);
   }
 
   function gauge(u) {
     const el = document.createElement('div');
-    el.className = 'gauge';
-    if (u.percent >= 90) el.classList.add('full');
-    else if (u.percent >= 75) el.classList.add('high');
-    if (u.stale) el.classList.add('stale');
+    el.className = `gauge ${u.app}`;
     const fill = span('fill', '');
     fill.style.width = `${u.percent}%`;
     el.append(fill);
@@ -229,6 +225,14 @@
       el.append(now);
     }
     el.append(span('name', u.name), span('pct', `${u.percent}%`));
+    // Rows with a solid fill (Claude's) draw their text twice more, each copy cut at the fill's
+    // edge: the usual color outside the fill, and the fill's own text color over it.
+    for (const [layer, clip] of [['base', `inset(0 0 0 ${u.percent}%)`], ['ink', `inset(0 ${100 - u.percent}% 0 0)`]]) {
+      const copy = span(layer, '');
+      copy.append(span('name', u.name), span('pct', `${u.percent}%`));
+      copy.style.clipPath = clip;
+      el.append(copy);
+    }
     return el;
   }
 

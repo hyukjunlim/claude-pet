@@ -3,7 +3,7 @@
 // How much of this week's usage your Claude and Codex plans have used, from what the two apps
 // keep on this PC.
 //
-//   - Claude: the desktop app samples your plan's usage every 15 minutes into
+//   - Claude: the desktop app samples your plan's usage (every 15 minutes while it changes) into
 //     <appData>/Claude/plan-usage-history.json: { samples: [{ t, org, u: { fh, sd } }] }, with the
 //     5-hour (fh) and weekly (sd) windows in percent. It doesn't keep when they reset, but the
 //     weekly one resets at the same time every week (see withWeeklyResets).
@@ -15,7 +15,6 @@ const DAY_MINUTES = 24 * 60;
 const WEEK_MINUTES = 7 * DAY_MINUTES;
 const WEEK_MS = WEEK_MINUTES * 60_000;
 const FIVE_HOURS_MS = 5 * 60 * 60_000;
-const CLAUDE_STALE_MS = 60 * 60 * 1000;   // no sample for this long: the desktop app isn't running
 
 // The newest sample that has the weekly figure: { weekly, fiveHour, at }, each window
 // { percent, resetsAt, windowMs }.
@@ -74,7 +73,7 @@ function nextLocalTime(day, hour, now = Date.now()) {
   return t.getTime();
 }
 
-// What the pet shows: each app's weekly limit, [{ app, name, percent, elapsed, resetsIn, stale }].
+// What the pet shows: each app's weekly limit, [{ app, name, percent, elapsed, resetsIn }].
 // `percent` is how much of the limit is used and `elapsed` how much of the week has gone by, so
 // using more than `elapsed` means you'd run out before the reset. Without a known reset time,
 // `elapsed` and `resetsIn` are null.
@@ -93,8 +92,6 @@ function usageView({ claude = null, codex = null } = {}, now = Date.now()) {
       percent: reset ? 0 : pct(w.percent),
       elapsed: known && w.windowMs > 0 ? pct(100 - ((next - now) / w.windowMs) * 100) : null,
       resetsIn: known ? formatDuration(next - now) : null,
-      // Claude's figures only change while the desktop app runs; Codex's come with each reply.
-      stale: app === 'claude' && now - u.at > CLAUDE_STALE_MS,
     });
   }
   return out;

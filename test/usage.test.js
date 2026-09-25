@@ -57,14 +57,13 @@ test('the pet shows how much of each weekly limit is used, and how far into the 
   const claude = { weekly: { percent: 67.6, resetsAt: null, windowMs: WEEK }, fiveHour: null, at: T0 - 10 * MINUTE };
   const codex = { weekly: { percent: 99, resetsAt: T0 + 2 * DAY + 5 * HOUR, windowMs: WEEK }, fiveHour: null, at: T0 - DAY };
   assert.deepEqual(usageView({ claude, codex }, T0), [
-    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null, stale: false },   // no reset time set
-    { app: 'codex', name: 'Codex', percent: 99, elapsed: 68, resetsIn: '2d 5h', stale: false },    // 4d 19h of 7d gone
+    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null },   // no reset time set
+    { app: 'codex', name: 'Codex', percent: 99, elapsed: 68, resetsIn: '2d 5h' },    // 4d 19h of 7d gone
   ]);
-  // Three days on, Codex's week has turned over (the next one starts with its next reply), and
-  // Claude's figures are old (the desktop app is closed).
+  // Three days on, Codex's week has turned over (the next one starts with its next reply).
   assert.deepEqual(usageView({ claude, codex }, T0 + 3 * DAY), [
-    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null, stale: true },
-    { app: 'codex', name: 'Codex', percent: 0, elapsed: null, resetsIn: null, stale: false },
+    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null },
+    { app: 'codex', name: 'Codex', percent: 0, elapsed: null, resetsIn: null },
   ]);
   assert.deepEqual(usageView({ claude: null, codex: { weekly: null, fiveHour: { percent: 3, resetsAt: null }, at: T0 } }, T0), []);
 });

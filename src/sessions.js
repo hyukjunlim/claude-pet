@@ -421,7 +421,8 @@ class SessionTracker extends EventEmitter {
     }
   }
 
-  // The desktop app adds a sample of your plan's usage every 15 minutes while it runs.
+  // While it runs, the desktop app adds a sample of your plan's usage now and then (every 15
+  // minutes while the figures change).
   async loadUsage() {
     if (!this.planUsageFile) return;
     const st = await statSafe(this.planUsageFile);
