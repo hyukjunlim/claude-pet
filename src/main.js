@@ -22,7 +22,7 @@ const APP_ROOT = path.join(__dirname, '..');
 const RENDERER_DIR = path.join(__dirname, 'renderer');
 const CELL = { width: 192, height: 208 };
 const WIN_WIDTH = 400;
-const TRAY_HEIGHT = 280;        // room kept free above (or below) the pet for activity pills
+const TRAY_HEIGHT = 280;        // room kept above (or below) the pet for bubbles, at least
 const TRAY_GAP = 6;
 const EDGE_MARGIN = 24;
 const BUBBLE_MARGIN = 12;       // bubbles keep this distance from the monitor's edge
@@ -61,6 +61,7 @@ let drag = null;
 let momentumTimer = null;
 let cursorTimer = null;
 let lastCursor = null;
+let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
 let sessions = [];              // Claude and Codex together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
@@ -110,7 +111,8 @@ function defaultPosition() {
   return { x: wa.x + wa.width - width - EDGE_MARGIN - 40, y: wa.y + wa.height - height - EDGE_MARGIN };
 }
 
-// Bubbles only go above the pet when all of them would fit on the pet's monitor.
+// Bubbles go above the pet when there's room for a few of them there. The stack then grows
+// upward as sessions come in, and scrolls if it reaches the top of the monitor.
 function chooseLayout(pos) {
   const room = pos.y - displayForPet(pos).workArea.y;
   const need = TRAY_HEIGHT + TRAY_GAP;
@@ -121,10 +123,13 @@ function chooseLayout(pos) {
 
 // The window stays on the pet's monitor so the bubbles belong to it. Near an edge the
 // window stops at the edge and the pet moves within it, so the pet can still reach the edge.
+// It's as tall as the bubbles need, up to the edge of the monitor (then they scroll).
 function windowBounds() {
   const { width, height } = petSize();
-  const h = Math.ceil(height) + TRAY_GAP + TRAY_HEIGHT;
   const wa = displayForPet().workArea;
+  const petH = Math.ceil(height);
+  const room = (layout === 'above' ? petPos.y + height - wa.y : wa.y + wa.height - petPos.y) - petH - TRAY_GAP;
+  const h = petH + TRAY_GAP + Math.min(trayHeight, Math.max(TRAY_HEIGHT, Math.floor(room)));
   const centered = petPos.x + width / 2 - WIN_WIDTH / 2;
   const x = wa.width >= WIN_WIDTH ? Math.min(Math.max(centered, wa.x), wa.x + wa.width - WIN_WIDTH) : wa.x;
   return {
@@ -527,6 +532,13 @@ function registerIpc() {
     if (!fromPet(e) || typeof id !== 'string') return;
     trackerFor(id)?.dismiss(id);
     persistDismissed();
+  });
+  ipcMain.on('pet:tray-size', (e, h) => {
+    if (!fromPet(e) || !Number.isFinite(h)) return;
+    const next = Math.max(TRAY_HEIGHT, Math.min(10_000, Math.ceil(h)));
+    if (next === trayHeight) return;
+    trayHeight = next;
+    if (!drag && !momentumTimer) placeWindow();
   });
   ipcMain.on('pet:context-menu', (e, p) => {
     if (!fromPet(e)) return;

@@ -24,6 +24,16 @@ const STEPS = [
     { status: 'running', kind: 'codex', title: 'Port the tokenizer to Rust', detail: 'cargo test', remote: 'lab-server', project: 'tokenizer' },
   ],
   [{ status: 'failed', title: 'Dataset cleanup', detail: 'API Error: 529 overloaded', project: 'datasets' }],
+  // A busy moment: more bubbles than the default room, so the stack grows.
+  [
+    { status: 'waiting', title: 'Write the migration guide', project: 'docs' },
+    { status: 'failed', title: 'Dataset cleanup', project: 'datasets' },
+    { status: 'review', title: 'Refactor auth middleware', project: 'auth-service' },
+    { status: 'review', kind: 'codex', title: 'Port the tokenizer to Rust', project: 'tokenizer' },
+    { status: 'running', title: 'Migrate the billing service to the new events API', project: 'billing' },
+    { status: 'running', title: 'Tune the search ranking', project: 'search' },
+    { status: 'running', kind: 'codex', title: 'Add retries to the uploader', project: 'uploader' },
+  ],
 ];
 
 class DemoTracker extends EventEmitter {

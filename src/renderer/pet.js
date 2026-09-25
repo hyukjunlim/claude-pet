@@ -12,7 +12,7 @@
 
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
   const ATTENTION = new Set(['waiting', 'failed', 'review']);
-  const MAX_PILLS = 4;
+  const SHADOW_ROOM = 16;          // px kept around the bubbles so their shadows aren't cut off
   const REMIND_MS = 45_000;
 
   let sessions = [];
@@ -66,6 +66,19 @@
       const x = Math.min(Math.max(petCenterX - w / 2, bubbleMargin), width - bubbleMargin - w);
       el.style.marginLeft = `${Math.round(x)}px`;
     }
+    fitTray();
+  }
+
+  // Every session gets a bubble. The window grows to fit the stack (up to the monitor's edge);
+  // if even that isn't enough, the stack scrolls.
+  let reportedHeight = -1;
+  function fitTray() {
+    const needed = trayEl.children.length ? trayEl.scrollHeight + SHADOW_ROOM : 0;
+    if (Math.abs(needed - reportedHeight) > 1) {
+      reportedHeight = needed;
+      api.traySize(needed);
+    }
+    trayEl.classList.toggle('scroll', trayEl.scrollHeight > trayEl.clientHeight + 1);
   }
 
   // ---------------------------------------------------------- sessions
@@ -103,20 +116,13 @@
 
   function render() {
     trayEl.replaceChildren();
-    const visible = showActivity ? sessions.slice(0, MAX_PILLS) : [];
+    const visible = showActivity ? sessions : [];
     for (const s of visible) {
       const el = pill(s);
       if (!renderedIds.has(s.id)) el.classList.add('enter');
       trayEl.append(el);
     }
     renderedIds = new Set(visible.map((s) => s.id));
-    const hidden = showActivity ? sessions.length - visible.length : 0;
-    if (hidden > 0) {
-      const more = document.createElement('div');
-      more.className = 'more';
-      more.textContent = `+${hidden} more in the tray menu`;
-      trayEl.append(more);
-    }
     placeBubbles();
 
     // With bubbles hidden, a badge on the pet counts sessions that need attention.

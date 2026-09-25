@@ -34,8 +34,9 @@ the same option from the command line. `Ctrl+Alt+P` shows or hides the pet. Righ
 | idle          | none          | Nothing to report |
 
 Every active session gets its own bubble, most urgent first, in the same order as ChatGPT's pet:
-Needs you, then Error, then Ready, then Running. The pet's animation follows the top one. Up to 4
-bubbles are shown; any others are listed in the tray menu. The **×** on a bubble dismisses it.
+Needs you, then Error, then Ready, then Running. The pet's animation follows the top one. There's
+no limit: the stack grows as sessions come in, and scrolls (mouse wheel over a bubble) once it
+reaches the edge of the screen. The **×** on a bubble dismisses it.
 
 A bubble shows the status and the session's title, and under them the app, the project and how
 long it has been in that state, e.g. "Claude · tokenizer · 5m". The project is the session's folder name; it's
