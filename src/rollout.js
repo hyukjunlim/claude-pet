@@ -4,6 +4,7 @@
 // into a pet status. Used for rollouts on this PC and for those streamed from SSH hosts.
 
 const { STALE_RUNNING_MS, UNREAD_WINDOW_MS, oneLine } = require('./transcript');
+const { parseRateLimits } = require('./usage');
 
 const CLI_REVIEW_MS = 10 * 60 * 1000;            // the CLI has no unread list: "Ready" this long
 const DESKTOP_ORIGINATOR_RE = /desktop/i;        // "Codex Desktop", "codex_work_desktop"
@@ -28,6 +29,7 @@ function createRolloutState() {
     error: null,
     question: null,
     endedTurns: new Set(),   // ids of recent turns that finished
+    limits: null,            // the account's rate limits as of the newest reply (see rateLimitsOf)
   };
 }
 
@@ -100,9 +102,22 @@ function applyRolloutEntry(state, entry) {
       state.question = null;
       if (state.turnActive) state.step = describeCommand(p.command);
       return;
+    case 'token_count':
+      state.limits = rateLimitsOf(entry) || state.limits;
+      return;
     default:
       if (QUESTIONS.has(p.type) && state.turnActive) state.question = { detail: describeQuestion(p), at };
   }
+}
+
+// Each reply's token_count event carries the account's rate limits as they were then:
+// { weekly, fiveHour, at } (see usage.js), with `at` on the clock of the machine that wrote it.
+function rateLimitsOf(entry) {
+  const p = entry?.payload;
+  if (entry?.type !== 'event_msg' || p?.type !== 'token_count') return null;
+  const at = Date.parse(entry.timestamp) || 0;
+  const limits = at ? parseRateLimits(p.rate_limits, at) : null;
+  return limits && { ...limits, at };
 }
 
 function describeCommand(cmd) {
@@ -159,4 +174,4 @@ function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 
   return local({ status: 'review', detail: oneLine(state.lastMessage, 120) || 'Finished', since: ended });
 }
 
-module.exports = { applyRolloutEntry, createRolloutState, describeCall, describeCommand, rolloutStatus };
+module.exports = { applyRolloutEntry, createRolloutState, describeCall, describeCommand, rateLimitsOf, rolloutStatus };

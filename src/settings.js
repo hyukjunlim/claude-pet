@@ -9,6 +9,8 @@ const DEFAULTS = {
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
   showActivity: true,
+  showUsage: true,         // the weekly-limit meter next to the pet
+  claudeWeeklyResetAt: null,   // one of the times Claude's weekly limit resets (ms); it's the same every week
   showCodex: true,         // also show Codex threads, when Codex is installed
   codexOverSsh: true,      // and follow the ones running on Codex's SSH hosts
   shortcut: 'CommandOrControl+Alt+P',

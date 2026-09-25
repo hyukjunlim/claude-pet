@@ -10,7 +10,7 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { CodexTracker, parseConnections, parseUnread, threadUrl } = require('../src/codex');
 const { BOOTSTRAP, CodexRemote, LOADER, WATCHER } = require('../src/codex-remote');
-const { applyRolloutEntry, createRolloutState, rolloutStatus } = require('../src/rollout');
+const { applyRolloutEntry, createRolloutState, rateLimitsOf, rolloutStatus } = require('../src/rollout');
 
 const T0 = Date.parse('2026-09-25T04:00:00.000Z');
 const at = (s) => new Date(T0 + s * 1000).toISOString();
@@ -26,6 +26,16 @@ const complete = (s, message = 'Added the parser.') => ({
 });
 const shell = (s, command) => ({
   timestamp: at(s), type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: JSON.stringify({ command }) },
+});
+const RESETS_AT = T0 / 1000 + 3 * 86_400;
+const WEEK_MS = 7 * 86_400_000;
+// A reply's token count, with the weekly limit `weekly`% used.
+const tokenCount = (s, weekly) => ({
+  timestamp: at(s), type: 'event_msg',
+  payload: {
+    type: 'token_count', info: null,
+    rate_limits: { limit_id: 'codex', primary: { used_percent: weekly, window_minutes: 10080, resets_at: RESETS_AT }, secondary: null },
+  },
 });
 
 function rollout(entries) {
@@ -75,6 +85,13 @@ test('a turn is running even when the rollout is read from after its start', () 
   // Older rollouts without turn ids: a tool call after the last turn ended means a new one.
   const old = rollout([meta(), started(1), complete(9), shell(20, ['ls'])]);
   assert.equal(old.turnActive, true);
+});
+
+test("each reply's token count carries the account's rate limits", () => {
+  const noLimits = { timestamp: at(9), type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: null } };
+  const s = rollout([meta(), started(1), tokenCount(5, 40), tokenCount(8, 41), noLimits]);
+  assert.deepEqual(s.limits, { weekly: { percent: 41, resetsAt: RESETS_AT * 1000, windowMs: WEEK_MS }, fiveHour: null, at: T0 + 8000 });
+  assert.equal(s.turnActive, true, "they don't change the turn");
 });
 
 test("Codex's own helper threads are recognized", () => {
@@ -235,6 +252,27 @@ test('the SSH watcher follows the rollouts the host reports', async () => {
   remote.stop();
 });
 
+test('the SSH watcher keeps the newest rate limits it has seen on the host', async () => {
+  const { spawnFn, children } = fakeSsh();
+  const remote = new CodexRemote({ hostId: 'remote-ssh-discovered:lab-server', target: 'lab-server', spawnFn });
+  remote.on('error', () => {});
+  remote.start();
+  const [child] = children;
+  const say = (m) => child.stdout.write(`${JSON.stringify(m)}\n`);
+  say({ limits: JSON.stringify(tokenCount(5, 40)) });   // from an old rollout, at the start
+  await flush();
+  assert.equal(remote.limits.weekly.percent, 40);
+  say({ open: 1, path: '/home/me/.codex/sessions/2026/09/25/rollout-x.jsonl' });
+  say({ n: 1, l: JSON.stringify(tokenCount(20, 42)) });
+  say({ close: 1 });
+  await flush();
+  assert.equal(remote.limits.weekly.percent, 42, 'still there once the rollout is closed');
+  say({ limits: JSON.stringify(tokenCount(10, 41)) });   // older than what we have
+  await flush();
+  assert.equal(remote.limits.weekly.percent, 42);
+  remote.stop();
+});
+
 test('the tracker shows threads running on an SSH host', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
   const fake = new EventEmitter();
@@ -256,6 +294,40 @@ test('the tracker shows threads running on an SSH host', async () => {
     assert.equal(s.remote, 'lab-server');
     assert.equal(s.url, `codex://threads/${THREAD}?hostId=remote-ssh-discovered%3Alab-server`);
     assert.ok(Math.abs(s.since - (now - 60_000)) < 1000, 'since is on our clock');
+  } finally {
+    tracker.stop();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('the rate limits are the newest ones, from an old rollout here or from an SSH host', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const fake = new EventEmitter();
+  Object.assign(fake, { files: new Map(), skew: SKEW, limits: null, target: 'lab-server', port: null, identity: null, start() {}, stop() {} });
+  const tracker = new CodexTracker({ ...pathsIn(home), remoteFactory: () => fake });
+  const nextUsage = () => new Promise((resolve) => tracker.once('usage', ({ codex }) => resolve(codex)));
+  try {
+    fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
+      'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab-server', alias: 'lab-server' }],
+    }));
+    // Codex last ran here three hours ago: too long ago to follow that thread, but its limits count.
+    const then = Date.now() - 3 * 3600_000;
+    const day = path.join(home, 'sessions', '2026', '09', '24');
+    fs.mkdirSync(day, { recursive: true });
+    const file = path.join(day, `rollout-2026-09-24T10-00-00-${THREAD}.jsonl`);
+    fs.writeFileSync(file, `${JSON.stringify(meta())}\n${JSON.stringify({ ...tokenCount(0, 40), timestamp: new Date(then).toISOString() })}\n`);
+    fs.utimesSync(file, new Date(then), new Date(then));
+    const first = nextUsage();
+    tracker.start();
+    assert.deepEqual(await first, { weekly: { percent: 40, resetsAt: RESETS_AT * 1000, windowMs: WEEK_MS }, fiveHour: null, at: then });
+
+    // A reply on the SSH host a minute ago, stamped by its clock, which runs ahead of ours.
+    const second = nextUsage();
+    fake.limits = rateLimitsOf({ ...tokenCount(0, 55), timestamp: new Date(Date.now() - 60_000 + SKEW).toISOString() });
+    fake.emit('change');
+    const latest = await second;
+    assert.equal(latest.weekly.percent, 55);
+    assert.ok(Math.abs(latest.at - (Date.now() - 60_000)) < 2000, 'on our clock');
   } finally {
     tracker.stop();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
@@ -303,6 +375,39 @@ test('the watcher script streams a rollout and the lines added to it', { skip: !
     child.stdin.end();
     const late = new Promise((resolve) => setTimeout(() => resolve('still running'), 3000));
     assert.notEqual(await Promise.race([exited, late]), 'still running');
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('the watcher script sends the newest rate limits, even from a rollout too old to follow', { skip: !python && 'Python 3 is not installed' }, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const day = path.join(home, 'sessions', '2026', '09', '24');
+  fs.mkdirSync(day, { recursive: true });
+  const old = path.join(day, `rollout-2026-09-24T10-00-00-${THREAD}.jsonl`);
+  fs.writeFileSync(old, [meta(), tokenCount(5, 40), tokenCount(8, 41), complete(9)].map((e) => `${JSON.stringify(e)}\n`).join(''));
+  const then = new Date(Date.now() - 3 * 3600_000);
+  fs.utimesSync(old, then, then);
+  const child = spawn(python, ['-u', '-c', LOADER], { env: { ...process.env, CODEX_HOME: home }, windowsHide: true });
+  try {
+    const messages = [];
+    let buffer = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+        messages.push(JSON.parse(buffer.slice(0, nl)));
+        buffer = buffer.slice(nl + 1);
+      }
+    });
+    child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
+    for (let i = 0; i < 100 && !messages.some((m) => m.limits); i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 300));   // the rest of that round
+    const i = messages.findIndex((m) => m.limits);
+    assert.ok(i > 0 && typeof messages[0].now === 'number', 'the host clock comes first');
+    assert.equal(rateLimitsOf(JSON.parse(messages[i].limits)).weekly.percent, 41);
+    assert.ok(!messages.some((m) => m.open != null), 'the old rollout itself is not followed');
   } finally {
     child.kill();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });

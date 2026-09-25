@@ -120,12 +120,41 @@ project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
 - **SSH hosts:** a thread on an SSH host keeps its history on that host. For each host Codex
   works on, the pet keeps one SSH connection open, using your `~/.ssh/config`, and runs a
   small read-only Python watcher there. The watcher sends the new lines of rollouts written in
-  the last hour, plus the host's clock so the times line up. It exits as soon as the pet quits,
+  the last hour, plus the host's clock so the times line up, and once, when it starts, the
+  newest reply's rate limits (for the [weekly limits](#weekly-limits)). It exits as soon as the pet quits,
   even if the pet crashes. Tray menu → *Follow Codex on SSH hosts* turns this off. The host
   needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
 - **Not shown:** ChatGPT chats, and Codex's own helper threads such as its auto-reviewer.
+
+## Weekly limits
+
+Below the lowest bubble, just above the pet, sits one more bubble with a row per app. Each row
+shows how much of that plan's weekly limit you've used against how far into the week you are:
+
+- **Used:** the row fills up from the left, with the percentage on the right. It turns amber at
+  75% and red at 90%.
+- **Week gone by:** a thin line across the row.
+- **Reading it:** a fill that reaches past the line means you're using the limit faster than
+  the week goes by.
+
+The tray menu lists the same figures, with how far into the week you are and the time until each
+reset. Tray menu → *Show weekly limits* turns the meter off. The pet reads both figures from files
+the two apps keep. It contacts no server itself (apart from the SSH hosts above).
+
+- **Claude:** every 15 minutes, the desktop app records your plan's usage (the 5-hour and the
+  weekly window, in percent) in `%APPDATA%\Claude\plan-usage-history.json`. The meter shows
+  the newest record, dimmed once it's more than an hour old, which happens when the desktop
+  app is closed.
+- **Claude's reset time:** the weekly limit resets at the same time every week, a time that's
+  fixed for your account. Claude shows it in Settings → Usage. The desktop app doesn't save it
+  anywhere the pet can read, so set it once: tray menu → *Claude's week resets* → the weekday
+  → the hour. From then on the pet knows where each week starts and ends. Until you set it,
+  Claude's gauge has no line.
+- **Codex:** each reply in a rollout records the account's rate limits and when they reset. The
+  pet uses the newest reply it can see, on this PC or on an SSH host. After the reset time
+  passes, the meter shows 0% until the next reply.
 
 ## Pets
 
@@ -208,6 +237,7 @@ src/codex.js        Codex threads: the unread list, the thread list, local histo
 src/codex-remote.js Follows Codex histories on SSH hosts (SSH + a small Python watcher)
 src/rollout.js      Codex rollout entries → running / waiting / review / failed
 src/transcript.js   Transcript entries → running / waiting / review / failed
+src/usage.js        Weekly limits: Claude's usage samples, Codex's rate limits
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
 tools/make_clay.py  Generates Clay, the default pet

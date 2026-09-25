@@ -6,6 +6,7 @@
   const petEl = document.getElementById('pet');
   const spriteEl = document.getElementById('sprite');
   const trayEl = document.getElementById('tray');
+  const meterEl = document.createElement('div');   // the weekly limits, at the pet's end of the stack
   const badgeEl = document.getElementById('badge');
   const player = new window.SpritePlayer(spriteEl);
   player.onMeasured = (headroom) => stage.style.setProperty('--headroom', String(Math.min(0.5, headroom)));
@@ -17,6 +18,7 @@
 
   let sessions = [];
   let showActivity = true;
+  let usage = [];              // weekly limits: [{ app, name, percent, resetsIn, stale }]
   let lookTimer = null;
   let remindTimer = null;
   let drag = null;
@@ -93,6 +95,12 @@
     scheduleReminder(top);
   });
 
+  api.onUsage((items) => {
+    usage = Array.isArray(items) ? items : [];
+    renderMeter();
+    render();
+  });
+
   function reactToChanges() {
     const next = new Map(sessions.map((s) => [s.id, s.status]));
     let finished = false;
@@ -116,6 +124,7 @@
 
   function render() {
     trayEl.replaceChildren();
+    if (usage.length) trayEl.append(meterEl);   // next to the pet, with the bubbles beyond it
     const visible = showActivity ? sessions : [];
     for (const s of visible) {
       const el = pill(s);
@@ -187,6 +196,39 @@
       api.activate(s.id);
       player.playOnce('waving');
     });
+    return el;
+  }
+
+  // One bubble with a row per app: how much of its weekly limit is used (the fill, and the number
+  // on the right), against how far into the week it is (the line across the row). A fill past the
+  // line means you're using it faster than the week goes by. It turns amber, then red, near the
+  // end. Clicks go through it, like through the empty parts of the window.
+  meterEl.className = 'meter';
+  meterEl.setAttribute('role', 'listitem');
+
+  function renderMeter() {
+    meterEl.replaceChildren(...usage.map(gauge));
+    const said = usage.map((u) => [
+      `${u.name} ${u.percent}% used`, u.elapsed != null && `${u.elapsed}% into the week`, u.stale && 'not updated lately',
+    ].filter(Boolean).join(', '));
+    meterEl.setAttribute('aria-label', `Weekly limits: ${said.join('; ')}`);
+  }
+
+  function gauge(u) {
+    const el = document.createElement('div');
+    el.className = 'gauge';
+    if (u.percent >= 90) el.classList.add('full');
+    else if (u.percent >= 75) el.classList.add('high');
+    if (u.stale) el.classList.add('stale');
+    const fill = span('fill', '');
+    fill.style.width = `${u.percent}%`;
+    el.append(fill);
+    if (u.elapsed != null) {
+      const now = span('now', '');
+      now.style.left = `${u.elapsed}%`;
+      el.append(now);
+    }
+    el.append(span('name', u.name), span('pct', `${u.percent}%`));
     return el;
   }
 

@@ -235,6 +235,23 @@ test('a running SSH session is named after its saved connection', async () => {
   }
 });
 
+test("your plan's usage comes from the desktop app's samples", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  try {
+    const planUsage = path.join(root, 'plan-usage-history.json');
+    fs.writeFileSync(planUsage, JSON.stringify({ version: 2, samples: [{ t: T0 - 900_000, org: 'org', u: { fh: 12, sd: 67 } }, { t: T0, org: 'org', u: { fh: 18, sd: 68 } }] }));
+    const tracker = new SessionTracker({ sessionsRoot: path.join(root, 'sessions'), projectsRoot: path.join(root, 'projects'), planUsage });
+    const seen = [];
+    tracker.on('usage', (u) => seen.push(u));
+    await tracker.tick();
+    assert.equal(seen.length, 1);
+    const { claude } = seen[0];
+    assert.deepEqual([claude.weekly.percent, claude.fiveHour.percent, claude.at], [68, 18, T0]);   // the newest sample
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('file changes reach the pet right away, without waiting for the timer', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
   const index = path.join(root, 'sessions', 'acct', 'org');

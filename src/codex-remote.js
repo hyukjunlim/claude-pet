@@ -7,11 +7,13 @@
 
 const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
-const { applyRolloutEntry, createRolloutState } = require('./rollout');
+const { applyRolloutEntry, createRolloutState, rateLimitsOf } = require('./rollout');
 
 // Runs on the host (see BOOTSTRAP). Output, one JSON object per line:
 //   {"now": <host time, s>}  every 5 s      {"open": <n>, "path": …}  started following a rollout
 //   {"n": <n>, "l": <line>}  a rollout line  {"close": <n>}            stopped following it
+//   {"limits": <line>}       once, at the start: the newest rollout line with the account's rate
+//                            limits, which may be in a rollout too old to follow
 // It only reads files. It exits when the pet goes away: the pet keeps the watcher's stdin open,
 // and when the pet quits or dies, the pipe closes and stdin ends.
 const WATCHER = String.raw`
@@ -44,11 +46,42 @@ def lines_of(entry, data):
     entry[2] = parts.pop()
     return parts
 
+def newest_limits():
+    rollouts = []
+    for folder, _dirs, names in os.walk(ROOT):
+        for name in names:
+            if name.startswith('rollout-') and name.endswith('.jsonl'):
+                path = os.path.join(folder, name)
+                try:
+                    rollouts.append((os.stat(path).st_mtime, path))
+                except OSError:
+                    pass
+    rollouts.sort(reverse=True)
+    for _mtime, path in rollouts[:3]:
+        try:
+            with open(path, 'rb') as f:
+                size = os.fstat(f.fileno()).st_size
+                f.seek(max(0, size - TAIL))
+                lines = f.read().split(b'\n')
+        except OSError:
+            continue
+        if size > TAIL:
+            lines = lines[1:]    # cut off by the seek
+        for line in reversed(lines):
+            if b'"rate_limits":{' in line:
+                return line.decode('utf-8', 'replace')
+    return None
+
+limits = newest_limits()
+
 while True:
     now = time.time()
     if now - last_beat >= 5:
         send({'now': now})
         last_beat = now
+    if limits:                   # after the clock, so the pet can place it in time
+        send({'limits': limits})
+        limits = None
     seen = set()
     for folder, _dirs, names in os.walk(ROOT):
         for name in names:
@@ -103,6 +136,7 @@ class CodexRemote extends EventEmitter {
     Object.assign(this, { hostId, target, port, identity, spawnFn, now });
     this.files = new Map();     // id -> { path, state }
     this.skew = 0;              // how far the host's clock is ahead of ours, ms
+    this.limits = null;         // the newest rate limits seen on the host, on its clock
     this.child = null;
     this.stopped = true;
     this.attempt = 0;
@@ -207,6 +241,14 @@ class CodexRemote extends EventEmitter {
       this.files.set(m.open, { path: m.path, state: createRolloutState() });
     } else if (m?.close != null) {
       if (this.files.delete(m.close)) this.emit('change');
+    } else if (typeof m?.limits === 'string') {
+      let limits = null;
+      try {
+        limits = rateLimitsOf(JSON.parse(m.limits));
+      } catch {
+        return;
+      }
+      if (this.keepLimits(limits)) this.emit('change');
     } else if (m?.n != null && typeof m.l === 'string') {
       const f = this.files.get(m.n);
       if (!f) return;
@@ -215,8 +257,16 @@ class CodexRemote extends EventEmitter {
       } catch {
         return;   // a line we can't parse (or a newer format)
       }
+      this.keepLimits(f.state.limits);
       this.emit('change');
     }
+  }
+
+  // The newest rate limits stay after the rollout they came in is no longer followed.
+  keepLimits(limits) {
+    if (!limits || (this.limits && limits.at <= this.limits.at)) return false;
+    this.limits = limits;
+    return true;
   }
 }
 

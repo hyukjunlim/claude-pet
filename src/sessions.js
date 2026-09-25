@@ -10,6 +10,8 @@
 //     but only when a turn ends or you open the session. While a turn runs, the desktop
 //     index (which it saves as prompts and replies arrive) shows what the copy is missing.
 //   - Other recently active transcripts (terminal `claude` sessions) are reported as kind "cli".
+//   - Your plan's usage, which the desktop app samples into <appData>/Claude/plan-usage-history.json
+//     (reported as 'usage' events, for the weekly-limit meter).
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -17,6 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { STALE_RUNNING_MS, applyEntry, compareSessions, createTurnState, deriveStatus } = require('./transcript');
+const { parseClaudeUsage } = require('./usage');
 
 const HOST_ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
 const TRANSCRIPT_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
@@ -43,6 +46,7 @@ function defaultPaths(appDataDir) {
     projectsRoot: path.join(claudeHome, 'projects'),
     appLog: appLogPath(appDataDir),
     sshConnections: path.join(appDataDir, 'Claude', 'ssh_configs.json'),
+    planUsage: path.join(appDataDir, 'Claude', 'plan-usage-history.json'),
   };
 }
 
@@ -207,7 +211,9 @@ function parseLogLine(line) {
 }
 
 class SessionTracker extends EventEmitter {
-  constructor({ sessionsRoot, projectsRoot, appLog = null, sshConnections = null, pollMs = 1000, now = Date.now, dismissed = {} } = {}) {
+  constructor({
+    sessionsRoot, projectsRoot, appLog = null, sshConnections = null, planUsage = null, pollMs = 1000, now = Date.now, dismissed = {},
+  } = {}) {
     super();
     this.sessionsRoot = sessionsRoot;
     this.projectsRoot = projectsRoot;
@@ -215,6 +221,9 @@ class SessionTracker extends EventEmitter {
     this.sshConnectionsFile = sshConnections;
     this.connectionNames = new Map();  // machineKey -> the name you gave the SSH connection
     this.connectionsStamp = '';
+    this.planUsageFile = planUsage;
+    this.usage = null;                 // the newest sample of your plan's usage
+    this.usageStamp = '';
     this.pollMs = pollMs;
     this.now = now;
     this.desktop = new Map();          // hostSessionId -> record from the desktop index
@@ -337,6 +346,7 @@ class SessionTracker extends EventEmitter {
         this.lastMetaScan = now;
         await this.scanDesktopIndex();
         await this.loadConnectionNames();
+        await this.loadUsage();
       }
       const projectsDue = now - this.lastProjectScan >= (this.projectsDirty ? PROJECT_KICK_MIN_MS : PROJECT_SCAN_MS);
       if (projectsDue) {
@@ -409,6 +419,24 @@ class SessionTracker extends EventEmitter {
     } catch {
       // mid-write; keep the names we had and try again on the next scan
     }
+  }
+
+  // The desktop app adds a sample of your plan's usage every 15 minutes while it runs.
+  async loadUsage() {
+    if (!this.planUsageFile) return;
+    const st = await statSafe(this.planUsageFile);
+    const stamp = st ? `${st.mtimeMs}:${st.size}` : '';
+    if (stamp === this.usageStamp) return;
+    let usage = null;
+    try {
+      if (st) usage = parseClaudeUsage(JSON.parse(await fsp.readFile(this.planUsageFile, 'utf8')));
+    } catch {
+      return;   // mid-write; try again on the next scan
+    }
+    this.usageStamp = stamp;
+    if (JSON.stringify(usage) === JSON.stringify(this.usage)) return;
+    this.usage = usage;
+    this.emit('usage', { claude: usage });
   }
 
   async scanProjects() {

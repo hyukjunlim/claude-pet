@@ -12,6 +12,7 @@ const { discoverPets, petRoots } = require('./pets');
 const { SessionTracker, defaultPaths } = require('./sessions');
 const { CodexTracker, codexPaths } = require('./codex');
 const { compareSessions } = require('./transcript');
+const { nextLocalTime, usageView, withWeeklyResets } = require('./usage');
 const { DemoTracker } = require('./demo');
 
 const DEMO = process.argv.includes('--demo');
@@ -40,6 +41,7 @@ const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const FOREGROUND_HANDOFF_MS = 1500;
 
@@ -65,6 +67,9 @@ let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures i
 let sessions = [];              // Claude and Codex together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
+const usage = { claude: null, codex: null };   // each app's newest usage figures (see usage.js)
+let usageKey = '';
+let usageTimer = null;
 
 function log(...args) {
   console.log(`[claude-pet ${new Date().toTimeString().slice(0, 8)}.${String(Date.now() % 1000).padStart(3, '0')}]`, ...args);
@@ -352,6 +357,7 @@ function startCodex() {
     codexSessions = list;
     mergeSessions();
   });
+  codex.on('usage', setUsage);
   codex.on('error', (err) => log('codex tracker error:', err?.message || err));
   codex.start();
 }
@@ -361,10 +367,68 @@ function stopCodex() {
   codex = null;
   codexSessions = [];
   mergeSessions();
+  setUsage({ codex: null });
 }
 
 function trackerFor(id) {
   return String(id).startsWith('codex:') ? codex : tracker;
+}
+
+// ---------------------------------------------------------------- weekly limits
+
+function setUsage(patch) {
+  Object.assign(usage, patch);
+  sendUsage();
+}
+
+function currentUsage() {
+  return usageView({ claude: withWeeklyResets(usage.claude, settings.get('claudeWeeklyResetAt')), codex: usage.codex });
+}
+
+// Also runs every minute: a week can turn over, and figures can get old, with no news.
+function sendUsage(force = false) {
+  if (!win || win.isDestroyed()) return;
+  const items = settings.get('showUsage') ? currentUsage() : [];
+  const key = JSON.stringify(items);
+  if (key === usageKey && force !== true) return;
+  usageKey = key;
+  win.webContents.send('pet:usage', items);
+}
+
+// "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h"
+function usageLabel(u) {
+  return [
+    `${u.name}: ${u.percent}% of the weekly limit used`,
+    u.elapsed != null && `${u.elapsed}% into the week`,
+    u.resetsIn && `resets in ${u.resetsIn}`,
+  ].filter(Boolean).join(' · ');
+}
+
+// When Claude's week resets (see withWeeklyResets): a weekday, then an hour, on this PC's clock.
+function claudeResetMenu() {
+  const anchor = settings.get('claudeWeeklyResetAt');
+  const slot = Number.isFinite(anchor) ? new Date(anchor) : null;
+  const pad = (n) => String(n).padStart(2, '0');
+  const set = (value) => {
+    settings.set({ claudeWeeklyResetAt: value });
+    sendUsage();
+  };
+  return {
+    label: `Claude's week resets: ${slot ? `${WEEKDAYS[slot.getDay()].slice(0, 3)} ${pad(slot.getHours())}:${pad(slot.getMinutes())}` : 'not set'}`,
+    submenu: [
+      { label: 'Not set', type: 'radio', checked: !slot, click: () => set(null) },
+      { type: 'separator' },
+      ...WEEKDAYS.map((name, day) => ({
+        label: name,
+        submenu: Array.from({ length: 24 }, (_, hour) => ({
+          label: `${pad(hour)}:00`,
+          type: 'radio',
+          checked: slot?.getDay() === day && slot.getHours() === hour && slot.getMinutes() === 0,
+          click: () => set(nextLocalTime(day, hour)),
+        })),
+      })),
+    ],
+  };
 }
 
 function trayTooltip() {
@@ -491,6 +555,7 @@ function registerIpc() {
     sendPet();
     sendLayout();
     sendSessions();
+    sendUsage(true);
   });
   ipcMain.on('pet:interactive', (e, value) => {
     if (!fromPet(e)) return;
@@ -589,6 +654,7 @@ function buildMenu() {
       click: () => openSession(s.id),
     });
   }
+  for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
   items.push({ type: 'separator' });
   items.push({
     label: 'Show pet',
@@ -606,6 +672,16 @@ function buildMenu() {
       sendSessions();
     },
   });
+  items.push({
+    label: 'Show weekly limits',
+    type: 'checkbox',
+    checked: settings.get('showUsage'),
+    click: (mi) => {
+      settings.set({ showUsage: mi.checked });
+      sendUsage();
+    },
+  });
+  items.push(claudeResetMenu());
   if (codexInstalled() && !DEMO) {
     items.push({
       label: 'Show Codex threads',
@@ -738,9 +814,11 @@ if (!app.requestSingleInstanceLock()) {
       claudeSessions = list;
       mergeSessions();
     });
+    tracker.on('usage', setUsage);
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
     tracker.start();
     startCodex();
+    usageTimer = setInterval(sendUsage, 60_000);
 
     const shortcut = settings.get('shortcut');
     try {
@@ -774,6 +852,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     clearInterval(cursorTimer);
+    clearInterval(usageTimer);
     stopMomentum();
     tracker?.stop();
     codex?.stop();

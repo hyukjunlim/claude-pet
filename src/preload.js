@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('pet', {
   onPet: listen('pet:pet'),
   onLayout: listen('pet:layout'),
   onSessions: listen('pet:sessions'),
+  onUsage: listen('pet:usage'),
   onCursor: listen('pet:cursor'),
   onWake: listen('pet:wake'),
   onLanded: listen('pet:landed'),

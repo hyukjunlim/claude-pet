@@ -11,6 +11,7 @@
 //   - ~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl: the live history of threads that run on
 //     this PC (the app's local host, and the Codex CLI).
 //   - The same rollouts on each SSH host, streamed by a small watcher (see codex-remote.js).
+//     Each reply in a rollout also records the account's rate limits, for the weekly-limit meter.
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -19,7 +20,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { FileFollower, folderName, projectName, readdirSafe, statSafe } = require('./sessions');
 const { UNREAD_WINDOW_MS, compareSessions } = require('./transcript');
-const { applyRolloutEntry, createRolloutState, rolloutStatus } = require('./rollout');
+const { applyRolloutEntry, createRolloutState, rateLimitsOf, rolloutStatus } = require('./rollout');
 const { CodexRemote } = require('./codex-remote');
 
 const ROLLOUT_RE = /^rollout-.+[-_][0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
@@ -27,6 +28,7 @@ const HOST_KEY_RE = /^(.+):[0-9a-f]{64}$/;       // the unread list keys hosts a
 const ROLLOUT_TAIL_BYTES = 512 * 1024;
 const ROLLOUT_RECENT_MS = 60 * 60 * 1000;        // rollouts written this recently are followed
 const SCAN_MS = 60 * 1000;                       // look for rollouts the watcher didn't report
+const PAST_LIMITS_FILES = 3;                     // older rollouts to look through for rate limits
 const APP_STATE_MIN_MS = 1000;                   // the app's state file is ~3 MB
 const CATALOG_MIN_MS = 5000;
 const KICK_DELAY_MS = 100;
@@ -90,6 +92,23 @@ class RolloutFollower extends FileFollower {
       }
     } catch {
       // A partial write; try again when the file changes.
+    }
+  }
+}
+
+// Reads the newest rate limits from the tail of a rollout we don't follow.
+class LimitsReader extends FileFollower {
+  constructor(file) {
+    super(file, ROLLOUT_TAIL_BYTES);
+    this.limits = null;
+  }
+
+  handleLine(line) {
+    if (!line.includes('"rate_limits"')) return;
+    try {
+      this.limits = rateLimitsOf(JSON.parse(line)) || this.limits;
+    } catch {
+      // skip it
     }
   }
 }
@@ -190,6 +209,9 @@ class CodexTracker extends EventEmitter {
     this.catalog = new Map();         // threadId -> { hostId, title, updatedAt, cwd }
     this.threadNames = new Map();     // threadId -> a name from session_index.jsonl
     this.followers = new Map();       // rollout path -> RolloutFollower
+    this.limits = null;               // the newest rate limits Codex recorded, on our clock
+    this.pastLimits = null;           // ... found in a rollout too old to follow
+    this.limitsChecked = new Set();   // older rollouts read for them, as "path|mtime|size"
     this.stamps = {};
     this.lastAppStateRead = 0;
     this.lastCatalogRead = 0;
@@ -424,19 +446,42 @@ class CodexTracker extends EventEmitter {
 
   async scanRollouts(now) {
     const wanted = new Set();
+    const older = [];
     const walk = async (dir, depth) => {
       for (const e of await readdirSafe(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory() && depth < 3) await walk(full, depth + 1);
         else if (e.isFile() && ROLLOUT_RE.test(e.name)) {
           const st = await statSafe(full);
-          if (st && now - st.mtimeMs <= ROLLOUT_RECENT_MS) wanted.add(full);
+          if (!st) continue;
+          if (now - st.mtimeMs <= ROLLOUT_RECENT_MS) wanted.add(full);
+          else older.push({ file: full, mtimeMs: st.mtimeMs, size: st.size });
         }
       }
     };
     await walk(this.sessionsRoot, 0);
     for (const file of wanted) if (!this.followers.has(file)) this.followers.set(file, new RolloutFollower(file));
     for (const file of [...this.followers.keys()]) if (!wanted.has(file)) this.followers.delete(file);
+    await this.loadPastLimits(older);
+  }
+
+  // Rate limits come with every reply. When Codex hasn't run here for a while, the latest ones
+  // are in the newest rollout we don't follow. Each file is read once.
+  async loadPastLimits(older) {
+    older.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const { file, mtimeMs, size } of older.slice(0, PAST_LIMITS_FILES)) {
+      if (this.limits && this.limits.at >= mtimeMs) return;   // what we have is newer
+      const stamp = `${file}|${mtimeMs}|${size}`;
+      if (this.limitsChecked.has(stamp)) continue;
+      if (this.limitsChecked.size >= 100) this.limitsChecked.clear();
+      this.limitsChecked.add(stamp);
+      const reader = new LimitsReader(file);
+      await reader.poll().catch(() => {});
+      if (reader.limits) {
+        this.pastLimits = reader.limits;
+        return;
+      }
+    }
   }
 
   recompute(force = false) {
@@ -488,6 +533,21 @@ class CodexTracker extends EventEmitter {
       this.lastEmitted = key;
       this.emit('change', out);
     }
+    this.updateLimits();
+  }
+
+  // The rate limits are the account's, so the newest ones win, whichever machine they came from.
+  updateLimits() {
+    let newest = this.limits;
+    const consider = (l, skew = 0) => {
+      if (l && (!newest || l.at - skew > newest.at)) newest = { ...l, at: l.at - skew };
+    };
+    consider(this.pastLimits);
+    for (const f of this.followers.values()) consider(f.state.limits);
+    for (const remote of this.remotes.values()) consider(remote.limits, remote.skew);
+    if (newest === this.limits) return;
+    this.limits = newest;
+    this.emit('usage', { codex: newest });
   }
 }
 

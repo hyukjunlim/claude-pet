@@ -10,7 +10,7 @@
   --failed: #d93f3f;
   --review: #2e8b57;
   --badge: #c96442;
-  --pill-width: 260px;
+  --pill-width: 242px;           /* every bubble, the weekly-limit meter too */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -220,6 +220,79 @@ body {
 
 .pill:hover .close { opacity: 1; }
 .close:hover { color: var(--text); }
+
+/* ------------------------------------------------------------------ weekly limits */
+
+/* At the pet's end of the stack: one bubble, a row per app, so every fill starts at its left edge. */
+.meter {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--pill-width);
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.gauge {
+  --c: var(--muted);
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 13px 5px;
+}
+
+/* Between the rows, a divider that stops short of the edges. */
+.gauge + .gauge::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 12px;
+  height: 1px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+.gauge.high { --c: var(--waiting); }
+.gauge.full { --c: var(--failed); }
+.gauge.stale { opacity: 0.55; }    /* the desktop app hasn't sampled Claude's usage lately */
+
+/* How much is used: the row fills up from the left. */
+.gauge .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--c) 30%, transparent);
+}
+
+/* How far into the week it is: a line across the row. */
+.gauge .now {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  margin-left: -1px;
+  background: color-mix(in srgb, var(--text) 55%, transparent);
+}
+
+.gauge .name,
+.gauge .pct { position: relative; }    /* over the fill and the line */
+
+.gauge .name { font-weight: 600; }
+
+.gauge .pct {
+  margin-left: auto;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.gauge.high .pct,
+.gauge.full .pct { color: var(--c); }
 
 @keyframes pop {
   from { opacity: 0; transform: translateY(4px) scale(0.97); }
