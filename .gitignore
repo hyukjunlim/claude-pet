@@ -1,0 +1,5 @@
+node_modules/
+*.log
+__pycache__/
+# made on each PC by `npm run shortcut`
+*.lnk

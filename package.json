@@ -1,0 +1,19 @@
+{
+  "name": "claude-pet",
+  "version": "0.1.0",
+  "description": "A floating desktop pet that shows what your Claude desktop Code sessions are doing.",
+  "main": "src/main.js",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "demo": "electron . --demo",
+    "test": "node --test \"test/**/*.test.js\"",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-shortcut.ps1",
+    "sprite:clay": "python tools/make_clay.py",
+    "sprite:ember": "python tools/make_ember.py"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
+}

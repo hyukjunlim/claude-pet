@@ -1,0 +1,8 @@
+{
+  "id": "clay",
+  "displayName": "Clay",
+  "description": "A refined terracotta critter: types while Claude works, reads your results, sulks when things break.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.png",
+  "pixelArt": true
+}

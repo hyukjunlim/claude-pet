@@ -1,0 +1,8 @@
+{
+  "id": "ember",
+  "displayName": "Ember",
+  "description": "A little terracotta critter that keeps an eye on your Claude sessions.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.png",
+  "pixelArt": true
+}

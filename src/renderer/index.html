@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <title>Claude Pet</title>
+  <link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <div id="stage" class="above">
+    <div id="tray" role="list" aria-label="Claude sessions"></div>
+    <div id="pet" data-interactive role="button" aria-label="Claude Pet">
+      <div id="sprite" aria-hidden="true"></div>
+      <div id="badge" hidden></div>
+    </div>
+  </div>
+  <script src="sprite.js"></script>
+  <script src="pet.js"></script>
+</body>
+</html>
