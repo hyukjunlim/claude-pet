@@ -5,7 +5,7 @@
   --muted: #6f6a64;
   --border: rgba(31, 30, 29, 0.10);
   --shadow: 0 6px 18px rgba(20, 14, 10, 0.16), 0 1px 3px rgba(20, 14, 10, 0.12);
-  --running: #c96442;            /* also the weekly-limit meter's Claude row */
+  --running: #c96442;            /* also (toned down) the weekly-limit meter's Claude row */
   --waiting: #c27c0e;
   --failed: #d93f3f;
   --review: #2e8b57;
@@ -249,9 +249,10 @@ body {
   padding: 4px 13px 5px;
 }
 
-/* Claude's row in the orange of "Running", with white text where the fill runs under it. */
+/* Claude's row in the orange of "Running", toned down a little, with white text where the fill
+   runs under it. */
 .gauge.claude {
-  --fill: var(--running);
+  --fill: color-mix(in srgb, var(--running), #be6446);
   --ink: #fff;
 }
 
