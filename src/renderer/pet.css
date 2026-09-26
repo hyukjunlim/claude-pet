@@ -5,12 +5,12 @@
   --muted: #6f6a64;
   --border: rgba(31, 30, 29, 0.10);
   --shadow: 0 6px 18px rgba(20, 14, 10, 0.16), 0 1px 3px rgba(20, 14, 10, 0.12);
-  --running: #c96442;
+  --claude: #be6446;             /* Claude's orange, toned down: "Running" and the meter's Claude row */
+  --running: var(--claude);
   --waiting: #c27c0e;
   --failed: #d93f3f;
   --review: #2e8b57;
   --badge: #c96442;
-  --claude: #d97757;             /* Claude's orange, for its row of the weekly-limit meter */
   --pill-width: 242px;           /* every bubble, the weekly-limit meter too */
 }
 
@@ -21,7 +21,6 @@
     --muted: #b2aaa1;
     --border: rgba(255, 255, 255, 0.10);
     --shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
-    --running: #e08a68;
     --waiting: #f0b24a;
     --failed: #f16d6d;
     --review: #5cc28b;
