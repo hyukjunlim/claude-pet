@@ -44,6 +44,7 @@ test('AskUserQuestion puts the pet in waiting until answered', () => {
   let s = run([prompt(0), ask]);
   assert.equal(deriveStatus(s, {}, T0 + 60_000).status, 'waiting');
   assert.equal(deriveStatus(s, {}, T0 + 60_000).detail, 'Which runtime?');
+  assert.equal(deriveStatus(s, { dismissedAt: T0 + 30_000 }, T0 + 60_000).status, 'running');   // the × on it
   s = run([prompt(0), ask, toolResult(90, 'q1')]);
   assert.equal(deriveStatus(s, {}, T0 + 91_000).status, 'running');
 });
@@ -59,6 +60,43 @@ test('the desktop summary for this turn can mark it as blocked on the user', () 
   const s = run([prompt(0), reply(5, 'a-last'), stopSummary(6)]);
   const summary = { status_category: 'blocked', needs_action: 'Pick one of the 4 options', summarizes_uuid: 'a-last' };
   assert.deepEqual(deriveStatus(s, { summary }, T0 + 10_000), { status: 'waiting', detail: 'Pick one of the 4 options', since: T0 + 6000 });
+});
+
+test('a turn that ended waiting on you stays that way until you reply or dismiss it', () => {
+  const s = run([prompt(0), reply(5, 'a-last'), stopSummary(6)]);
+  const summary = { status_category: 'need_input', status_detail: 'Asked which port to use', summarizes_uuid: 'a-last' };
+  assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');   // looked at
+  assert.equal(deriveStatus(s, { summary }, T0 + 24 * 60 * 60 * 1000).status, 'waiting');                // a day later
+  assert.equal(deriveStatus(s, { summary, dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
+  const answered = run([prompt(0), reply(5, 'a-last'), stopSummary(6), prompt(20, 'port 8080')]);
+  assert.equal(deriveStatus(answered, { summary }, T0 + 25_000).status, 'running');
+});
+
+test("a reply split into thinking and text entries is still the turn's last reply", () => {
+  const block = (s, uuid, type) => ({
+    type: 'assistant', uuid, timestamp: at(s),
+    message: { id: 'msg_1', role: 'assistant', stop_reason: 'end_turn', content: [type === 'text' ? { type, text: 'Which port?' } : { type, thinking: '' }] },
+  });
+  const s = run([prompt(0), block(4, 'a-think', 'thinking'), block(5, 'a-text', 'text'), stopSummary(6)]);
+  const summary = { status_category: 'blocked', needs_action: 'Pick a port', summarizes_uuid: 'a-text' };
+  assert.deepEqual(deriveStatus(s, { summary }, T0 + 10_000), { status: 'waiting', detail: 'Pick a port', since: T0 + 6000 });
+  assert.equal(s.turnStartedAt, T0);
+});
+
+test('a reply that calls a tool after a block marked as the end keeps the turn running', () => {
+  const block = (s, uuid, content) => ({
+    type: 'assistant', uuid, timestamp: at(s), message: { id: 'msg_2', role: 'assistant', stop_reason: 'refusal', content: [content] },
+  });
+  const s = run([prompt(0), block(4, 'a1', { type: 'thinking', thinking: '' }), block(5, 'a2', { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'make' } })]);
+  assert.deepEqual(deriveStatus(s, {}, T0 + 10_000), { status: 'running', detail: 'make', since: T0 });
+});
+
+test("a tool's output that mentions an interruption doesn't end the turn", () => {
+  const read = toolUse(1, 't1', 'Read', { file_path: 'notes.md' });
+  const s = run([prompt(0), read, toolResult(2, 't1', 'Match /\\[Request interrupted by user/ to see a stop.')]);
+  assert.equal(deriveStatus(s, {}, T0 + 3000).status, 'running');
+  const stopped = run([prompt(0), read, toolResult(2, 't1', '[Request interrupted by user for tool use]')]);
+  assert.equal(deriveStatus(stopped, {}, T0 + 3000).status, 'idle');
 });
 
 test('a summary from an older turn is ignored', () => {

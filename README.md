@@ -27,7 +27,7 @@ the same option from the command line. `Ctrl+Alt+P` shows or hides the pet. Righ
 
 | Pet animation | Bubble        | Meaning |
 | ------------- | ------------- | ------- |
-| waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, or ended its turn waiting on a decision from you |
+| waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker; it stays until you reply) |
 | failed        | **Error**     | The turn ended with an API error |
 | review        | **Ready**     | A turn finished and you haven't opened that session since |
 | running       | **Running**   | Claude is working |
@@ -72,13 +72,18 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
 
 - **Session index:** `%APPDATA%\Claude\claude-code-sessions\<account>\<org>\local_*.json`. The
   desktop app writes one file per Code session, with its title, when you last looked at it, and an
-  end-of-turn summary (`postTurnSummary.status_category` such as `completed` or `blocked`).
+  end-of-turn summary (`postTurnSummary.status_category` such as `completed`, or `blocked` and
+  `need_input` when Claude ended the turn waiting on you).
 - **Transcripts:** `~/.claude/projects/<project>/<cliSessionId>.jsonl`. For local sessions
   these are live.
 - **SSH sessions:** the desktop app copies the server's transcript to `ssh-<id>/`, but only when a
   turn ends or you open the session. While a turn runs, the pet goes by the app's log
   (`%LOCALAPPDATA%\Claude\logs\main.log`), which gets a line when a prompt is sent and when a turn
   ends. It also uses the session index, which the app saves now and then during a turn.
+- **Questions and permission prompts:** the app's log also gets a line when Claude stops to ask
+  you something or to ask permission for a tool, and another when you answer. That's how the pet
+  shows "Needs you" right away for SSH sessions and for permission prompts. Until the transcript
+  has the question, the bubble says "Has a question for you" rather than the question itself.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
   that clock is off from the copies and corrects for it, so "Ready" still clears once you've
   looked at a session.
@@ -95,11 +100,8 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 [test/sessions.test.js](test/sessions.test.js).
 
 **Limitations:**
-- **Permission prompts aren't visible.** A tool waiting for your approval looks like "Running".
-  Questions (`AskUserQuestion`) and plan approvals *are* detected.
-- **SSH turns.** A question Claude asks mid-turn in an SSH session shows as "Running" until the
-  turn ends. If the app has to start the session's CLI first, the bubble appears when the first
-  reply arrives.
+- **SSH turns.** If the app has to start the session's CLI first, the bubble appears when the
+  first reply arrives.
 - **Undocumented files.** The session index, the log and the transcript format belong to the
   Claude app and Claude Code, and can change in an update. If the pet stops reacting after an update,
   `node src/sessions.js` shows what it can still read.

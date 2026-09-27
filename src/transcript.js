@@ -5,7 +5,8 @@
 //
 // Statuses, highest priority first (same order ChatGPT's pet uses):
 //   waiting  - Claude is blocked on you (a question, a plan to approve, or the
-//              desktop app's end-of-turn summary says it needs a decision)
+//              desktop app's end-of-turn summary says it needs a decision; sessions.js
+//              adds permission prompts, from the app's log)
 //   failed   - the turn ended with an API error
 //   review   - the turn finished and you haven't looked at it yet
 //   running  - a turn is in progress
@@ -14,6 +15,7 @@
 const path = require('node:path');
 
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+const NEEDS_YOU = new Set(['blocked', 'need_input']);   // end-of-turn summaries the app marks yellow
 const END_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'refusal']);
 const STALE_RUNNING_MS = 45 * 60 * 1000;
 const UNREAD_WINDOW_MS = 12 * 60 * 60 * 1000;
@@ -30,6 +32,7 @@ function createTurnState() {
     lastEventAt: 0,
     pendingTools: new Map(),
     turnAssistantUuids: [],
+    lastReplyId: null,           // the API message id of the newest assistant entry
     error: null,
     retrying: false,
     interrupted: false,
@@ -108,6 +111,14 @@ function describeTool(name, input) {
   }
 }
 
+// What Claude is waiting on when the app asks you about tool `name`: a question, a plan, or
+// permission to use any other tool.
+function describeAsk(name) {
+  if (WAITING_TOOLS.has(name)) return describeTool(name, {});
+  const tool = typeof name === 'string' && name.startsWith('mcp__') ? describeTool(name, {}) : name;
+  return oneLine(`Asking to use ${tool || 'a tool'}`, 60);
+}
+
 function startTurn(state, at) {
   if (!state.turnActive) {
     state.turnStartedAt = at;
@@ -166,7 +177,8 @@ function applyUser(state, entry, at) {
     for (const c of content) {
       if (c?.type !== 'tool_result') continue;
       state.pendingTools.delete(c.tool_use_id);
-      if (/\[Request interrupted by user/.test(textOf(c.content))) interrupted = true;
+      // Only at the start: a tool's output can contain these words (say, a file that mentions them).
+      if (/^\s*\[Request interrupted by user/.test(textOf(c.content))) interrupted = true;
     }
     if (interrupted) {
       endTurn(state, at, { interrupted: true });
@@ -191,13 +203,20 @@ function applyUser(state, entry, at) {
 function applyAssistant(state, entry, at) {
   const msg = entry.message || {};
   if (at) state.lastEventAt = Math.max(state.lastEventAt, at);
+  // Each block of a reply (thinking, text, tool calls) is an entry of its own, and every one of
+  // them carries the reply's stop_reason, so an earlier block of this reply may have ended the
+  // turn too soon. Then the turn goes on, and ends again below if this block ends it too.
+  if (!state.turnActive) {
+    if (msg.id && msg.id === state.lastReplyId) state.turnActive = true;
+    else startTurn(state, at);
+  }
+  state.lastReplyId = msg.id || null;
   if (entry.uuid) {
     state.turnAssistantUuids.push(entry.uuid);
     if (state.turnAssistantUuids.length > MAX_TURN_UUIDS) state.turnAssistantUuids.shift();
     state.seenAssistants.add(entry.uuid);
     if (state.seenAssistants.size > MAX_SEEN_ASSISTANTS) state.seenAssistants.delete(state.seenAssistants.values().next().value);
   }
-  if (!state.turnActive) startTurn(state, at);
   state.retrying = false;
 
   if (entry.isApiErrorMessage) {
@@ -235,7 +254,7 @@ function applySystem(state, entry, at) {
 function deriveStatus(state, meta = {}, now = Date.now()) {
   const pending = [...state.pendingTools.values()];
   const asking = pending.find((t) => WAITING_TOOLS.has(t.name));
-  if (asking) {
+  if (asking && !(meta.dismissedAt >= asking.at)) {   // dismissed, it shows as the running turn it is
     return { status: 'waiting', detail: asking.detail, since: asking.at };
   }
 
@@ -247,23 +266,28 @@ function deriveStatus(state, meta = {}, now = Date.now()) {
   }
 
   const ended = state.turnEndedAt;
-  if (!ended || state.interrupted || now - ended > UNREAD_WINDOW_MS) {
-    return { status: 'idle', detail: '', since: ended };
+  if (!ended || state.interrupted) return { status: 'idle', detail: '', since: ended };
+
+  const summary = meta.summary;
+  const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;
+  const detail = current ? oneLine(current.needs_action || current.status_detail || '', 120) : '';
+  // A turn that ended waiting on you stays that way until you reply, even once you've looked at
+  // it, as the desktop app keeps its yellow marker. The × still dismisses it.
+  if (current && NEEDS_YOU.has(current.status_category) && !state.error && ended > (meta.dismissedAt || 0)) {
+    return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
   }
+
+  if (now - ended > UNREAD_WINDOW_MS) return { status: 'idle', detail: '', since: ended };
   const seenAt = Math.max(meta.lastFocusedAt || 0, meta.dismissedAt || 0);
   if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
 
   if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
 
-  const summary = meta.summary;
-  const summaryIsCurrent = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid);
-  if (summaryIsCurrent) {
-    const detail = oneLine(summary.needs_action || summary.status_detail || '', 120);
-    if (summary.status_category === 'blocked') return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
-    if (summary.status_category === 'failed' || summary.status_category === 'error') {
+  if (current) {
+    if (current.status_category === 'failed' || current.status_category === 'error') {
       return { status: 'failed', detail: detail || 'Something went wrong', since: ended };
     }
-    return { status: 'review', detail: oneLine(summary.status_detail || 'Finished', 120), since: ended };
+    return { status: 'review', detail: oneLine(current.status_detail || 'Finished', 120), since: ended };
   }
   return { status: 'review', detail: 'Finished', since: ended };
 }
@@ -282,6 +306,7 @@ module.exports = {
   compareSessions,
   createTurnState,
   deriveStatus,
+  describeAsk,
   describeTool,
   oneLine,
 };

@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { applyEntry, createTurnState } = require('../src/transcript');
 const {
-  SessionTracker, desktopStatus, estimateSkew, parseDesktopSession, parseLogLine, parseSshConnections, projectName,
+  AppLogFollower, SessionTracker, desktopStatus, estimateSkew, parseDesktopSession, parseLogLine, parseSshConnections, projectName,
 } = require('../src/sessions');
 
 const T0 = Date.parse('2026-09-24T14:00:00.000Z');
@@ -138,6 +138,68 @@ test('the app log lines the pet understands', () => {
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [Stop hook] Query completed for session ${id}`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] Session ${id} query iterator completed`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${id}`), null);
+  const req = '0f1e2d3c-4b5a-4968-8776-655443322110';
+  assert.deepEqual(parseLogLine(`2026-09-24 23:47:41 [info] Emitted tool permission request ${req} for AskUserQuestion in session ${id}`),
+    { kind: 'ask', sessionId: id, requestId: req, tool: 'AskUserQuestion', at: local(41) });
+  assert.deepEqual(parseLogLine(`2026-09-24 23:47:45 [info] Received permission response for ${req}: once (tool: AskUserQuestion)`),
+    { kind: 'answer', sessionId: null, requestId: req, at: local(45) });
+  assert.equal(parseLogLine('2026-09-24 23:47:50 [info] Starting app {').kind, 'restart');
+});
+
+test('the log keeps each question until you answer it, the turn ends or the app restarts', () => {
+  const log = new AppLogFollower('main.log');
+  const id = 'local_4f2c9a10-1d3e-4b5a-9c7d-2e8f6a1b3c4d';
+  const line = (s, text) => log.handleLine(`2026-09-24 23:47:${String(s).padStart(2, '0')} [info] ${text}`);
+  const local = (s) => new Date(2026, 8, 24, 23, 47, s).getTime();
+  line(10, `Sending message to session ${id}`);
+  assert.deepEqual(log.turnOf(id), { running: true, at: local(10), asking: null });
+  line(20, `Emitted tool permission request r1 for Bash in session ${id}`);
+  line(21, `Emitted tool permission request r2 for AskUserQuestion in session ${id}`);
+  assert.deepEqual(log.turnOf(id), { running: true, at: local(10), asking: { tool: 'Bash', at: local(20) } });
+  line(25, 'Received permission response for r1: once (tool: Bash)');
+  assert.deepEqual(log.turnOf(id).asking, { tool: 'AskUserQuestion', at: local(21) });
+  line(30, `[Stop hook] Query completed for session ${id}`);
+  assert.deepEqual(log.turnOf(id), { running: false, at: local(30), asking: null });
+  // Read from the middle of a turn: the question alone says a turn is running.
+  line(40, 'Emitted tool permission request r3 for ExitPlanMode in session local_other');
+  assert.deepEqual(log.turnOf('local_other'), { running: true, at: local(40), asking: { tool: 'ExitPlanMode', at: local(40) } });
+  line(50, 'Starting app {');
+  assert.equal(log.turnOf('local_other'), null);
+});
+
+test('a question in the log shows "Needs you" before the SSH copy has it', () => {
+  const copy = copyOf([prompt(remote(0)), reply(remote(30), 'a1')]);
+  const r = sshSession({ latestUserFrameAt: remote(0), lastAssistantUuid: 'a1', postTurnSummaryFor: 'a1', lastFocusedAt: T0 + 60_000 });
+  const asking = (tool, s) => ({ running: true, at: T0 + 600_000, asking: { tool, at: T0 + s * 1000 } });
+  assert.deepEqual(desktopStatus(r, copy, { now: T0 + 700_000, skew: SKEW, logTurn: asking('AskUserQuestion', 650) }),
+    { status: 'waiting', detail: 'Has a question for you', since: T0 + 650_000 });
+  assert.equal(desktopStatus(r, copy, { now: T0 + 700_000, skew: SKEW, logTurn: asking('ExitPlanMode', 650) }).detail, 'Plan ready for your review');
+  // Also for as long as it takes you to answer.
+  assert.equal(desktopStatus(r, copy, { now: T0 + 5 * 60 * 60 * 1000, skew: SKEW, logTurn: asking('AskUserQuestion', 650) }).status, 'waiting');
+  // A copy from after the question already ended that turn.
+  const later = copyOf([prompt(remote(600)), reply(remote(660), 'a2')]);
+  assert.notEqual(desktopStatus(r, later, { now: T0 + 700_000, skew: SKEW, logTurn: asking('AskUserQuestion', 650) }).status, 'waiting');
+});
+
+test('a permission prompt shows "Needs you" instead of "Running"', () => {
+  const r = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo' });
+  const copy = copyOf([prompt(T0), toolUse(T0 + 5000, 'a1')]);
+  assert.equal(desktopStatus(r, copy, { now: T0 + 10_000 }).status, 'running');
+  const logTurn = { running: true, at: T0, asking: { tool: 'Bash', at: T0 + 6000 } };
+  assert.deepEqual(desktopStatus(r, copy, { now: T0 + 10_000, logTurn }), { status: 'waiting', detail: 'Asking to use Bash', since: T0 + 6000 });
+  assert.equal(desktopStatus(r, copy, { now: T0 + 10_000, logTurn, dismissedAt: T0 + 8000 }).status, 'running');   // the × on it
+  const mcp = { ...logTurn, asking: { tool: 'mcp__files__read_file', at: T0 + 6000 } };
+  assert.equal(desktopStatus(r, copy, { now: T0 + 10_000, logTurn: mcp }).detail, 'Asking to use read file');
+});
+
+test('the question from the transcript wins, since it has the words', () => {
+  const r = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo' });
+  const copy = copyOf([prompt(T0), {
+    type: 'assistant', uuid: 'a1', timestamp: iso(T0 + 5000),
+    message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: { questions: [{ question: 'Which port?' }] } }] },
+  }]);
+  const logTurn = { running: true, at: T0, asking: { tool: 'AskUserQuestion', at: T0 + 6000 } };
+  assert.deepEqual(desktopStatus(r, copy, { now: T0 + 10_000, logTurn }), { status: 'waiting', detail: 'Which port?', since: T0 + 5000 });
 });
 
 test('the server clock is accounted for when deciding whether you saw the result', () => {

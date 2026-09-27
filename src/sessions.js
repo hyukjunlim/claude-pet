@@ -18,7 +18,9 @@ const fsp = fs.promises;
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
-const { STALE_RUNNING_MS, applyEntry, compareSessions, createTurnState, deriveStatus } = require('./transcript');
+const {
+  STALE_RUNNING_MS, applyEntry, compareSessions, createTurnState, deriveStatus, describeAsk,
+} = require('./transcript');
 const { parseClaudeUsage } = require('./usage');
 
 const HOST_ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
@@ -168,17 +170,46 @@ class TranscriptFollower extends FileFollower {
   }
 }
 
-// Follows the desktop app's log, which records every prompt it sends to a session and every
-// turn that ends, as they happen. For SSH sessions that's the only live signal.
+// Follows the desktop app's log, which records every prompt it sends to a session, every turn
+// that ends and every time Claude stops to ask you something, as they happen. For SSH sessions
+// that's the only live signal.
 class AppLogFollower extends FileFollower {
   constructor(file) {
     super(file, LOG_TAIL_BYTES);
     this.turns = new Map();   // hostSessionId -> { running, at }, from the newest line about it
+    this.asks = new Map();    // requestId -> { sessionId, tool, at }, until you answer
   }
 
   handleLine(line) {
     const e = parseLogLine(line);
-    if (e) this.turns.set(e.sessionId, { running: e.kind === 'start', at: e.at });
+    if (!e) return;
+    switch (e.kind) {
+      case 'ask':
+        this.asks.set(e.requestId, { sessionId: e.sessionId, tool: e.tool, at: e.at });
+        return;
+      case 'answer':
+        this.asks.delete(e.requestId);
+        return;
+      case 'restart':
+        this.asks.clear();   // the questions went with the sessions' CLIs
+        return;
+      default:
+        this.turns.set(e.sessionId, { running: e.kind === 'start', at: e.at });
+        // A new prompt or the end of the turn settles whatever Claude was asking.
+        for (const [id, ask] of this.asks) if (ask.sessionId === e.sessionId) this.asks.delete(id);
+    }
+  }
+
+  // What the log says about a session: { running, at, asking }, where `asking` is the oldest
+  // question still waiting for your answer ({ tool, at }) or null. Null if the log hasn't
+  // mentioned the session.
+  turnOf(sessionId) {
+    let asking = null;
+    for (const ask of this.asks.values()) {
+      if (ask.sessionId === sessionId && (!asking || ask.at < asking.at)) asking = { tool: ask.tool, at: ask.at };
+    }
+    const turn = this.turns.get(sessionId) ?? (asking && { running: true, at: asking.at });
+    return turn ? { ...turn, asking } : null;
   }
 }
 
@@ -186,14 +217,19 @@ const LOG_LINE_RE = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(?:[.,](\d{1,3})
 const LOG_EVENTS = [
   // A prompt handed to the session's CLI. The app logs the "Mapping" line for every prompt it
   // passes on (including ones it doesn't log as "Sending message", such as queued prompts).
-  [/^Sending message to session (local_[\w-]+)/, 'start'],
-  [/^Mapping internal session (local_[\w-]+) to CLI session/, 'start'],
+  [/^Sending message to session (?<session>local_[\w-]+)/, 'start'],
+  [/^Mapping internal session (?<session>local_[\w-]+) to CLI session/, 'start'],
   // The first reply after the app (re)started a session's CLI for a prompt. ("Starting local
   // session" itself also appears for pre-warmed sessions and rewinds, which don't run a turn.)
-  [/^\[CCD start-timing\] (local_[\w-]+)\b(?:.*?\btotal_to_assistant=(\d+)ms)?/, 'start'],
-  [/^\[CCD CycleHealth\] (?:un)?healthy cycle for (local_[\w-]+)/, 'end'],
-  [/^\[Stop hook\] Query completed for session (local_[\w-]+)/, 'end'],
-  [/^Session (local_[\w-]+) query iterator completed/, 'end'],
+  [/^\[CCD start-timing\] (?<session>local_[\w-]+)\b(?:.*?\btotal_to_assistant=(?<ms>\d+)ms)?/, 'start'],
+  [/^\[CCD CycleHealth\] (?:un)?healthy cycle for (?<session>local_[\w-]+)/, 'end'],
+  [/^\[Stop hook\] Query completed for session (?<session>local_[\w-]+)/, 'end'],
+  [/^Session (?<session>local_[\w-]+) query iterator completed/, 'end'],
+  // Claude stops to ask you something (AskUserQuestion, ExitPlanMode) or for permission to use a
+  // tool, and later you answer. The answer names only the request.
+  [/^Emitted tool permission request (?<request>[\w-]+) for (?<tool>\S+) in session (?<session>local_[\w-]+)/, 'ask'],
+  [/^Received permission response for (?<request>[\w-]+)/, 'answer'],
+  [/^Starting app\b/, 'restart'],
 ];
 
 // "2026-09-24 23:47:34 [info] Sending message to session local_…" (local time)
@@ -202,10 +238,13 @@ function parseLogLine(line) {
   if (!m) return null;
   for (const [re, kind] of LOG_EVENTS) {
     const e = re.exec(m[8]);
-    if (e) {
-      const at = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6], +(m[7] || 0)).getTime();
-      return { kind, sessionId: e[1], at: at - (Number(e[2]) || 0) };
-    }
+    if (!e) continue;
+    const g = e.groups ?? {};
+    const at = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6], +(m[7] || 0)).getTime();
+    const event = { kind, sessionId: g.session ?? null, at: at - (Number(g.ms) || 0) };
+    if (g.request) event.requestId = g.request;
+    if (g.tool) event.tool = g.tool;
+    return event;
   }
   return null;
 }
@@ -523,7 +562,7 @@ class SessionTracker extends EventEmitter {
         now,
         skew,
         dismissedAt: this.dismissed.get(r.hostSessionId),
-        logTurn: this.appLog?.turns.get(r.hostSessionId) ?? null,
+        logTurn: this.appLog?.turnOf(r.hostSessionId) ?? null,
       });
       if (!derived) continue;
       out.push({
@@ -583,7 +622,18 @@ class SessionTracker extends EventEmitter {
 // have none). Transcripts of SSH and WSL sessions are stamped by the remote machine's clock,
 // which is `skew` ms ahead of ours, so the times are compared on that clock. `logTurn` is
 // what the desktop app's log last said about the session.
-function desktopStatus(r, state, { now = Date.now(), skew = 0, dismissedAt, logTurn = null } = {}) {
+function desktopStatus(r, state, opts = {}) {
+  const derived = transcriptStatus(r, state, opts);
+  const asking = opts.logTurn?.asking;
+  if (!asking || derived?.status === 'waiting') return derived;   // the transcript has the question itself
+  // Claude asked something the SSH copy doesn't have yet, or wants permission for a tool (which
+  // the transcript shows as just running it).
+  if (state && state.turnEndedAt - (opts.skew || 0) > asking.at + LOG_SLACK_MS) return derived;   // that turn is over
+  if (opts.dismissedAt >= asking.at) return derived;
+  return { status: 'waiting', detail: describeAsk(asking.tool), since: asking.at };
+}
+
+function transcriptStatus(r, state, { now = Date.now(), skew = 0, dismissedAt, logTurn = null } = {}) {
   const hidden = r.mirrored ? turnNotInCopy(r, state, skew, logTurn) : null;
   if (hidden) {
     if (now - Math.max(hidden.since, r.lastActivityAt) > STALE_RUNNING_MS) {
@@ -718,6 +768,7 @@ function projectName(cwd) {
 
 module.exports = {
   SessionTracker,
+  AppLogFollower,
   FileFollower,
   TranscriptFollower,
   defaultPaths,

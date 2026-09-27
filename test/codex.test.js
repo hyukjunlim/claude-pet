@@ -70,6 +70,7 @@ test('stopped turns go quiet, errors fail, and approvals wait for you', () => {
   assert.deepEqual(rolloutStatus(failed, { now: T0 + 5000 }), { status: 'failed', detail: 'stream disconnected', since: T0 + 4000 });
   const ask = rollout([meta(cli), started(1), { timestamp: at(2), type: 'event_msg', payload: { type: 'exec_approval_request', command: ['bash', '-lc', 'rm -rf build'] } }]);
   assert.deepEqual(rolloutStatus(ask, { now: T0 + 3000 }), { status: 'waiting', detail: 'Approve: rm -rf build', since: T0 + 2000 });
+  assert.equal(rolloutStatus(ask, { now: T0 + 3000, dismissedAt: T0 + 2500 }).status, 'running');   // the × on it
 });
 
 test('a turn is running even when the rollout is read from after its start', () => {

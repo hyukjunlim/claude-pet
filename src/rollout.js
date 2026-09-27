@@ -161,7 +161,9 @@ function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 
   const clock = now + skew;
   const seen = dismissedAt ? dismissedAt + skew : 0;
   const local = (d) => (d.since ? { ...d, since: d.since - skew } : d);
-  if (state.question) return local({ status: 'waiting', detail: state.question.detail, since: state.question.at });
+  if (state.question && !(seen >= state.question.at)) {   // dismissed, it shows as the running turn it is
+    return local({ status: 'waiting', detail: state.question.detail, since: state.question.at });
+  }
   if (state.turnActive) {
     if (clock - state.lastEventAt > STALE_RUNNING_MS) return local({ status: 'idle', detail: '', since: state.lastEventAt });
     return local({ status: 'running', detail: state.step || 'Thinking', since: state.turnStartedAt });
