@@ -1,12 +1,17 @@
 'use strict';
 
 // Sprite-atlas animation engine for Codex-format pets (8 columns x 9 or 11 rows of 192x208 cells).
-// Frame timings and sequencing follow ChatGPT's pet: a state's animation plays three times,
-// then the pet settles into a slowed-down idle loop so it stays calm while you work.
+// Frame timings follow ChatGPT's pet. A state's animation (running, review, waiting, failed)
+// plays twice and then stays on its last frame, so the pet is still while you work; with
+// nothing going on, it loops a slowed-down idle. Reactions to you (hover, clicks) play twice and
+// a little slower, so they're easy to catch.
 
 const ATLAS_COLUMNS = 8;
 const CELL_W = 192;
 const CELL_H = 208;
+const STATE_LOOPS = 2;
+const REACTION_LOOPS = 2;
+const REACTION_PACE = 1.25;   // how much longer each frame of a reaction shows
 
 function frames(row, count, ms, lastMs) {
   return Array.from({ length: count }, (_, col) => ({ row, col, ms: col === count - 1 ? lastMs : ms }));
@@ -34,23 +39,13 @@ const ANIMATIONS = {
   review: frames(8, 6, 150, 280),
 };
 
-// 16 clockwise look directions in rows 9-10; 0 degrees = straight up.
-function lookFrameFor(dx, dy) {
-  const angle = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
-  const index = Math.round(angle / 22.5) % 16;
-  return { row: 9 + Math.floor(index / 8), col: index % 8, ms: 0 };
-}
-
 class SpritePlayer {
   constructor(el) {
     this.el = el;
     this.rows = 11;
-    this.version = 2;
     this.base = 'idle';
     this.transient = null;     // one-shot or held state layered over the base state
     this.held = false;         // transient stays until release() (dragging, being thrown)
-    this.settled = true;       // true once we're in the calm idle loop (safe to look around)
-    this.looking = false;
     this.timer = null;
     this.frame = IDLE_FRAMES[0];
     this.alpha = null;         // { data, width } of the atlas, for pixel-accurate hit testing
@@ -58,15 +53,22 @@ class SpritePlayer {
     this.onMeasured = null;
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     this.reducedMotion.addEventListener('change', () => this.restart());
+    this.alwaysAnimate = true;   // the tray menu's "Animate even with Windows animation effects off"
   }
 
-  get supportsLook() {
-    return this.version >= 2 && this.rows >= 11;
+  // Still frames only: Windows' Animation effects are off, and you've unticked that menu item.
+  get still() {
+    return this.reducedMotion.matches && !this.alwaysAnimate;
   }
 
-  setSheet({ url, rows, version, pixelArt }) {
+  setAlwaysAnimate(on) {
+    if (Boolean(on) === this.alwaysAnimate) return;
+    this.alwaysAnimate = Boolean(on);
+    this.restart();
+  }
+
+  setSheet({ url, rows, pixelArt }) {
     this.rows = rows;
-    this.version = version;
     this.el.style.backgroundImage = `url("${url}")`;
     this.el.style.backgroundSize = `${ATLAS_COLUMNS * 100}% ${rows * 100}%`;
     this.el.classList.toggle('pixel', Boolean(pixelArt));
@@ -99,14 +101,15 @@ class SpritePlayer {
 
   // Replay the current base state (used as a periodic gentle reminder).
   replayBase() {
-    if (!this.transient && !this.looking) this.play(this.base);
+    if (!this.transient) this.play(this.base);
   }
 
-  playOnce(state, loops = 1) {
+  playOnce(state, loops = REACTION_LOOPS) {
     if (!ANIMATIONS[state] || this.held) return;
     this.transient = state;
     this.play(state, {
       loops,
+      pace: REACTION_PACE,
       onDone: () => {
         this.transient = null;
         this.play(this.base);
@@ -137,14 +140,14 @@ class SpritePlayer {
     this.play(this.base);
   }
 
-  play(state, { loops = 3, onDone = null, hold = false } = {}) {
+  play(state, { loops = STATE_LOOPS, pace = 1, onDone = null, hold = false } = {}) {
     clearTimeout(this.timer);
     this.timer = null;
-    this.looking = false;
-    const base = ANIMATIONS[state] || IDLE_FRAMES;
+    const frames = ANIMATIONS[state] || IDLE_FRAMES;
+    const base = pace === 1 ? frames : frames.map((f) => ({ ...f, ms: f.ms * pace }));
     let seq;
-    let loopStart;
-    if (this.reducedMotion.matches) {
+    let loopStart;   // where the sequence starts over; null stops it on its last frame
+    if (this.still) {
       seq = [base[0]];
       loopStart = null;
     } else if (hold) {
@@ -154,12 +157,10 @@ class SpritePlayer {
       seq = SETTLED_IDLE;
       loopStart = 0;
     } else {
-      const repeated = [];
-      for (let i = 0; i < loops; i += 1) repeated.push(...base);
-      seq = onDone ? repeated : [...repeated, ...SETTLED_IDLE];
-      loopStart = onDone ? null : repeated.length;
+      seq = [];
+      for (let i = 0; i < loops; i += 1) seq.push(...base);
+      loopStart = null;
     }
-    this.settled = !hold && state === 'idle';
     let i = 0;
     this.show(seq[0]);
     if (seq.length === 1 && !onDone) return;
@@ -174,36 +175,6 @@ class SpritePlayer {
           }
           i = loopStart;
         }
-        if (loopStart != null && i >= loopStart && !hold) this.settled = true;
-        this.show(seq[i]);
-        tick();
-      }, seq[i].ms);
-    };
-    tick();
-  }
-
-  // Show a look-direction frame while calm; returns false if busy animating.
-  look(dx, dy) {
-    if (!this.supportsLook || !this.settled || this.transient || this.reducedMotion.matches) return false;
-    if (!this.looking) {
-      clearTimeout(this.timer);
-      this.timer = null;
-      this.looking = true;
-    }
-    this.show(lookFrameFor(dx, dy));
-    return true;
-  }
-
-  unlook() {
-    if (!this.looking) return;
-    this.looking = false;
-    // Resume the calm loop without replaying the state's attention animation.
-    const seq = SETTLED_IDLE;
-    let i = 0;
-    this.show(seq[0]);
-    const tick = () => {
-      this.timer = setTimeout(() => {
-        i = (i + 1) % seq.length;
         this.show(seq[i]);
         tick();
       }, seq[i].ms);

@@ -217,6 +217,21 @@ test('a turn with no news for a long time is not reported as running', () => {
   assert.equal(desktopStatus(r, null, { now: T0 + 2 * 60 * 60 * 1000, skew: SKEW }), null);
 });
 
+test("a finished turn waits a moment for the app's summary, which may say it needs you", () => {
+  const copy = copyOf([prompt(T0), reply(T0 + 5000, 'a1')]);
+  const r = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo', classifierSummaryEnabled: true });
+  assert.deepEqual(desktopStatus(r, copy, { now: T0 + 7000 }), { status: 'running', detail: 'Wrapping up', since: T0 });
+  assert.equal(desktopStatus(r, copy, { now: T0 + 16_000 }).status, 'review');   // no summary in time
+  const blocked = parseDesktopSession({
+    sessionId: 'local_x', cwd: 'C:\\repo', classifierSummaryEnabled: true, postTurnSummaryFor: 'a1',
+    postTurnSummary: { status_category: 'blocked', needs_action: 'Pick a port', summarizes_uuid: 'a1' },
+  });
+  assert.deepEqual(desktopStatus(blocked, copy, { now: T0 + 8000 }), { status: 'waiting', detail: 'Pick a port', since: T0 + 5000 });
+  // Sessions that get no summaries don't wait.
+  const plain = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo' });
+  assert.equal(desktopStatus(plain, copy, { now: T0 + 7000 }).status, 'review');
+});
+
 test('local sessions ignore the copy checks', () => {
   const r = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo', latestUserFrameAt: T0, lastAssistantUuid: 'zzz' });
   const st = desktopStatus(r, copyOf([prompt(T0), reply(T0 + 5000, 'a1')]), { now: T0 + 10_000 });

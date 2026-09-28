@@ -9,6 +9,7 @@ const DEFAULTS = {
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
   showActivity: true,
+  alwaysAnimate: true,     // animate even when Windows' Animation effects are off
   showUsage: true,         // the weekly-limit meter next to the pet
   claudeWeeklyResetAt: null,   // one of the times Claude's weekly limit resets (ms); it's the same every week
   showCodex: true,         // also show Codex threads, when Codex is installed

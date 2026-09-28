@@ -61,8 +61,6 @@ let layout = 'above';           // pills above or below the pet
 let pointerInteractive = false;
 let drag = null;
 let momentumTimer = null;
-let cursorTimer = null;
-let lastCursor = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
 let sessions = [];              // Claude and Codex together, most urgent first
 let claudeSessions = [];
@@ -285,9 +283,12 @@ function sendPet() {
     displayName: currentPet.displayName,
     url: sheetUrl(currentPet),
     rows: currentPet.rows,
-    version: currentPet.version,
     pixelArt: currentPet.pixelArt,
   });
+}
+
+function sendMotion() {
+  if (win && !win.isDestroyed()) win.webContents.send('pet:motion', { alwaysAnimate: settings.get('alwaysAnimate') === true });
 }
 
 function selectPet(key) {
@@ -553,6 +554,7 @@ function registerIpc() {
   ipcMain.on('pet:ready', (e) => {
     if (!fromPet(e)) return;
     sendPet();
+    sendMotion();
     sendLayout();
     sendSessions();
     sendUsage(true);
@@ -614,18 +616,6 @@ function registerIpc() {
 
 function isPoint(p) {
   return p && Number.isFinite(p.screenX) && Number.isFinite(p.screenY);
-}
-
-// Eyes follow the cursor (look-direction rows of v2 pets).
-function startCursorTracking() {
-  cursorTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !win.isVisible() || drag || momentumTimer) return;
-    const p = screen.getCursorScreenPoint();
-    if (lastCursor && p.x === lastCursor.x && p.y === lastCursor.y) return;
-    lastCursor = p;
-    const { width, height } = petSize();
-    win.webContents.send('pet:cursor', { dx: p.x - (petPos.x + width / 2), dy: p.y - (petPos.y + height / 2) });
-  }, 50);
 }
 
 // ---------------------------------------------------------------- tray
@@ -719,6 +709,15 @@ function buildMenu() {
     ],
   });
   items.push({
+    label: 'Animate even with Windows animation effects off',
+    type: 'checkbox',
+    checked: settings.get('alwaysAnimate') === true,
+    click: (mi) => {
+      settings.set({ alwaysAnimate: mi.checked });
+      sendMotion();
+    },
+  });
+  items.push({
     label: 'Size',
     submenu: SCALES.map((s) => ({
       label: s.label,
@@ -805,7 +804,6 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createTray();
     createWindow();
-    startCursorTracking();
 
     tracker = DEMO
       ? new DemoTracker()
@@ -851,7 +849,6 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', () => {
-    clearInterval(cursorTimer);
     clearInterval(usageTimer);
     stopMomentum();
     tracker?.stop();

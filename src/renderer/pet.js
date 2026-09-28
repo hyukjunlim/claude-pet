@@ -19,7 +19,6 @@
   let sessions = [];
   let showActivity = true;
   let usage = [];              // weekly limits: [{ app, name, percent, elapsed, resetsIn }]
-  let lookTimer = null;
   let remindTimer = null;
   let drag = null;
   let awaitingLanding = false;
@@ -35,6 +34,7 @@
     player.setSheet(pet);
     petEl.setAttribute('aria-label', `${pet.displayName}, your Claude pet`);
   });
+  api.onMotion(({ alwaysAnimate }) => player.setAlwaysAnimate(alwaysAnimate));
 
   let lastLayout = null;
   window.addEventListener('resize', () => lastLayout && applyLayout(lastLayout));
@@ -360,23 +360,7 @@
     api.contextMenu(e.screenX, e.screenY);
   });
 
-  api.onWake(() => player.playOnce('waving', 2));
-
-  // ---------------------------------------------------------- eyes follow the cursor
-
-  api.onCursor(({ dx, dy }) => {
-    if (drag) return;
-    const dist = Math.hypot(dx, dy);
-    const near = 208 * scale * 0.35;
-    if (dist < near || dist > 1200) {
-      player.unlook();
-      return;
-    }
-    if (player.look(dx, dy)) {
-      clearTimeout(lookTimer);
-      lookTimer = setTimeout(() => player.unlook(), 1600);
-    }
-  });
+  api.onWake(() => player.playOnce('waving', 3));   // a longer hello than a click's
 
   api.ready();
 })();

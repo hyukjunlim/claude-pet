@@ -63,8 +63,11 @@ Other things it does:
 - **Hover:** the pet jumps.
 - **Drag:** it runs in the direction you move it.
 - **Throw:** it slides and bounces off the screen edges.
-- **Eyes:** they follow your cursor.
-- **Reduced motion:** the pet uses still frames when the Windows *Animation effects* setting is off.
+- **Stays still while you work:** a status's animation plays twice and then stops on its
+  last frame. With nothing going on, the pet idles slowly.
+- **Reduced motion:** the pet animates even when the Windows *Animation effects* setting is off.
+  Untick *Animate even with Windows animation effects off* in the tray menu to get still frames
+  then instead.
 
 ## How it knows what Claude is doing
 
@@ -93,6 +96,9 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
 - **Timing:** the pet reacts as soon as Windows reports that one of these files changed, and
   re-checks on a timer as a backup. What's left is Claude's own timing. It saves the session
   index 1–3 s after a change, and writes a turn's summary a few seconds after the turn ends.
+  That summary says whether Claude ended the turn waiting on you, so the pet waits for it (up to
+  10 s; it usually takes 3–4 s), much as the app does before it notifies you. Meanwhile the
+  bubble says "Running · Wrapping up", then goes straight to "Needs you" or "Ready".
 
 The logic that turns transcript entries into a status is in [src/transcript.js](src/transcript.js),
 and [test/transcript.test.js](test/transcript.test.js) covers it. How the index, the log and SSH
@@ -181,7 +187,8 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
   cells. Older v1 sheets (1536×1872, 9 rows, no look directions) also work.
 - **Rows 0–8** are the animations, with these frame counts: `idle` 6, `running-right` 8,
   `running-left` 8, `waving` 4, `jumping` 5, `failed` 8, `waiting` 6, `running` 6, `review` 6.
-- **Rows 9–10** hold 16 clockwise look directions. The first one looks straight up.
+- **Rows 9–10** hold 16 clockwise look directions, the first looking straight up. ChatGPT's pet
+  uses them to follow the cursor; Claude Pet doesn't.
 - **Pixel art:** add `"pixelArt": true` to keep it crisp at every size (this is a Claude Pet
   extension to the format).
 - **Tray icon (optional):** put a `tray.png` (16 px) next to the sprite sheet, optionally with
@@ -221,9 +228,11 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
   asks for real clicks. Claude Pet goes one step further and tests the actual pixels, so the
   transparent area around the pet passes clicks through too.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
-  plays three times, then settles into an idle loop running at one-sixth speed.
-- **Look directions.** `atan2(dx, -dy)` is split into sixteen 22.5° sectors, which select a
-  cell in rows 9–10.
+  plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
+  instead plays it twice and stops on its last frame. Its reactions to you (the jump on hover, the wave on
+  a click) play twice, each frame held 25% longer, so they're easy to see.
+- **Look directions.** While calm, the eyes follow the cursor: `atan2(dx, -dy)` is split into
+  sixteen 22.5° sectors, which select a cell in rows 9–10. Claude Pet leaves this out.
 - **Throw physics.** 16 ms ticks, friction 0.88 per tick, bounce 0.7, and a stop below 65 px/s
   or after 900 ms. Claude Pet uses the same numbers.
 

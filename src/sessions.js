@@ -38,6 +38,9 @@ const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 const RELEASED_SUFFIX = '.desktop-released.json';
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const LOG_SLACK_MS = 3000;   // log times are whole seconds, and the clock skew is an estimate
+// The longest to wait for a turn's summary. The app waits 5 s before it notifies you, but they
+// often take 3–4 s, and the wait ends as soon as one comes.
+const SUMMARY_WAIT_MS = 10_000;
 const KICK_DELAY_MS = 100;          // lets a burst of file changes settle into one update
 const PROJECT_KICK_MIN_MS = 2000;   // scanning every project folder is the costly part
 
@@ -643,11 +646,18 @@ function transcriptStatus(r, state, { now = Date.now(), skew = 0, dismissedAt, l
     return { status: 'running', detail: where ? `Working on ${where}` : 'Working', since: hidden.since };
   }
   if (!state) return null;
-  const derived = deriveStatus(state, {
+  let derived = deriveStatus(state, {
     lastFocusedAt: r.lastFocusedAt && r.lastFocusedAt + skew,
     dismissedAt: dismissedAt && dismissedAt + skew,
     summary: r.summary,
   }, now + skew);
+  // The summary that says whether Claude ended the turn waiting on you comes a few seconds after
+  // the turn. Like the app, wait for it a moment in sessions that get one, rather than show
+  // "Ready" and then "Needs you".
+  if (derived.status === 'review' && r.summarized && !state.turnAssistantUuids.includes(r.summary?.summarizes_uuid)
+    && now + skew - state.turnEndedAt < SUMMARY_WAIT_MS) {
+    derived = { status: 'running', detail: 'Wrapping up', since: state.turnStartedAt };
+  }
   // If we started reading mid-turn, the desktop index knows when you sent the prompt.
   if (derived.status === 'running' && r.latestUserFrameAt > state.turnEndedAt) {
     derived.since = Math.min(derived.since || Infinity, r.latestUserFrameAt);
@@ -726,6 +736,8 @@ function parseDesktopSession(j) {
     latestUserFrameAt: Number(j.latestUserFrameAt) || 0,
     lastAssistantUuid: str(j.lastAssistantUuid),
     summaryFor: str(j.postTurnSummaryFor) || str(j.postTurnSummary?.summarizes_uuid),
+    // Whether each turn gets a summary. The app drops the last one when a turn starts.
+    summarized: j.classifierSummaryEnabled === true || Boolean(summary),
     cwd: str(j.cwd),
     remote: ssh ? ssh.sshHost : null,
     // SSH and WSL sessions run elsewhere; their transcript here is a copy.
