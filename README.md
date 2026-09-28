@@ -63,8 +63,8 @@ Other things it does:
 - **Hover:** the pet jumps.
 - **Drag:** it runs in the direction you move it.
 - **Throw:** it slides and bounces off the screen edges.
-- **Stays still while you work:** a status's animation plays twice and then stops on its
-  last frame. With nothing going on, the pet idles slowly.
+- **Stays still while you work:** a status's animation plays twice and then comes to rest on
+  its first frame. With nothing going on, the pet idles slowly.
 - **Reduced motion:** the pet animates even when the Windows *Animation effects* setting is off.
   Untick *Animate even with Windows animation effects off* in the tray menu to get still frames
   then instead.
@@ -229,8 +229,8 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
   transparent area around the pet passes clicks through too.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
   plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
-  instead plays it twice and stops on its last frame. Its reactions to you (the jump on hover, the wave on
-  a click) play twice, each frame held 25% longer, so they're easy to see.
+  instead plays it twice and rests on its first frame. Its reactions to you (the jump on hover,
+  the wave on a click) play twice, each frame held 25% longer, so they're easy to see.
 - **Look directions.** While calm, the eyes follow the cursor: `atan2(dx, -dy)` is split into
   sixteen 22.5° sectors, which select a cell in rows 9–10. Claude Pet leaves this out.
 - **Throw physics.** 16 ms ticks, friction 0.88 per tick, bounce 0.7, and a stop below 65 px/s

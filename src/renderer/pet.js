@@ -14,12 +14,10 @@
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
   const ATTENTION = new Set(['waiting', 'failed', 'review']);
   const SHADOW_ROOM = 16;          // px kept around the bubbles so their shadows aren't cut off
-  const REMIND_MS = 45_000;
 
   let sessions = [];
   let showActivity = true;
   let usage = [];              // weekly limits: [{ app, name, percent, elapsed, resetsIn }]
-  let remindTimer = null;
   let drag = null;
   let awaitingLanding = false;
   let isInteractive = false;
@@ -90,9 +88,7 @@
     showActivity = payload.showActivity !== false;
     reactToChanges();
     render();
-    const top = sessions[0]?.status || 'idle';
-    player.setBase(top);
-    scheduleReminder(top);
+    player.setBase(sessions[0]?.status || 'idle');
   });
 
   api.onUsage((items) => {
@@ -110,14 +106,6 @@
     }
     previous = next;
     if (finished && sessions[0]?.status === 'review') player.playOnce('jumping');
-  }
-
-  function scheduleReminder(top) {
-    clearInterval(remindTimer);
-    remindTimer = null;
-    if (top === 'waiting' || top === 'failed') {
-      remindTimer = setInterval(() => player.replayBase(), REMIND_MS);
-    }
   }
 
   let renderedIds = new Set();

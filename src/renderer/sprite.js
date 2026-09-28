@@ -2,7 +2,7 @@
 
 // Sprite-atlas animation engine for Codex-format pets (8 columns x 9 or 11 rows of 192x208 cells).
 // Frame timings follow ChatGPT's pet. A state's animation (running, review, waiting, failed)
-// plays twice and then stays on its last frame, so the pet is still while you work; with
+// plays twice and then comes to rest on its first frame, so the pet is still while you work; with
 // nothing going on, it loops a slowed-down idle. Reactions to you (hover, clicks) play twice and
 // a little slower, so they're easy to catch.
 
@@ -99,11 +99,6 @@ class SpritePlayer {
     if (!this.transient) this.play(state);
   }
 
-  // Replay the current base state (used as a periodic gentle reminder).
-  replayBase() {
-    if (!this.transient) this.play(this.base);
-  }
-
   playOnce(state, loops = REACTION_LOOPS) {
     if (!ANIMATIONS[state] || this.held) return;
     this.transient = state;
@@ -146,7 +141,7 @@ class SpritePlayer {
     const frames = ANIMATIONS[state] || IDLE_FRAMES;
     const base = pace === 1 ? frames : frames.map((f) => ({ ...f, ms: f.ms * pace }));
     let seq;
-    let loopStart;   // where the sequence starts over; null stops it on its last frame
+    let loopStart;   // where the sequence starts over; null stops it at its end
     if (this.still) {
       seq = [base[0]];
       loopStart = null;
@@ -159,6 +154,7 @@ class SpritePlayer {
     } else {
       seq = [];
       for (let i = 0; i < loops; i += 1) seq.push(...base);
+      if (!onDone) seq.push(base[0]);   // a state comes to rest on its first frame
       loopStart = null;
     }
     let i = 0;
