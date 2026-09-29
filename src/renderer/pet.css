@@ -4,7 +4,7 @@
   --text: #1f1e1d;
   --muted: #6f6a64;
   --border: rgba(31, 30, 29, 0.10);
-  --shadow: 0 6px 18px rgba(20, 14, 10, 0.16), 0 1px 3px rgba(20, 14, 10, 0.12);
+  --shadow: drop-shadow(0 6px 9px rgba(20, 14, 10, 0.16)) drop-shadow(0 1px 1.5px rgba(20, 14, 10, 0.12));
   --running: #c96442;            /* also (toned down) the weekly-limit meter's Claude row */
   --waiting: #c27c0e;
   --failed: #d93f3f;
@@ -19,7 +19,7 @@
     --text: #f3efe9;
     --muted: #b2aaa1;
     --border: rgba(255, 255, 255, 0.10);
-    --shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45)) drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
     --running: #e08a68;
     --waiting: #f0b24a;
     --failed: #f16d6d;
@@ -98,6 +98,7 @@ body {
   align-items: flex-start;       /* pet.js positions each bubble over the pet */
   gap: 6px;
   pointer-events: none;
+  filter: var(--shadow);         /* one shadow under the whole stack, so none falls on a bubble */
 }
 
 #stage.above #tray {
@@ -132,7 +133,6 @@ body {
   border-radius: 18px;
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow);
   cursor: pointer;
 }
 
@@ -235,7 +235,6 @@ body {
   border-radius: 14px;
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -274,13 +273,14 @@ body {
   background: var(--fill);
 }
 
-/* How far into the week it is: a line across the row. */
+/* How far into the week it is: a line across the row. pet.js sets --now-width to about 2px in
+   whole screen pixels, so the line is the same width wherever it falls. */
 .gauge .now {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 2px;
-  margin-left: -1px;
-  background: color-mix(in srgb, var(--text) 55%, transparent);
+  width: var(--now-width, 2px);
+  margin-left: calc(var(--now-width, 2px) / -2);
+  background: color-mix(in srgb, var(--text) 55%, var(--surface));   /* solid, so it looks the same over a fill */
 }
 
 .gauge .name,

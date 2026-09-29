@@ -194,6 +194,15 @@
   meterEl.className = 'meter';
   meterEl.setAttribute('role', 'listitem');
 
+  // The week line is 2px, rounded to whole screen pixels. At 175% scaling 2px is 3.5 pixels, and
+  // each row's line would come out 3 or 4 wide depending on where it falls.
+  function sizeWeekLine() {
+    const dpr = window.devicePixelRatio || 1;
+    document.documentElement.style.setProperty('--now-width', `${Math.max(1, Math.round(2 * dpr)) / dpr}px`);
+    matchMedia(`(resolution: ${dpr}dppx)`).addEventListener('change', sizeWeekLine, { once: true });
+  }
+  sizeWeekLine();
+
   function renderMeter() {
     meterEl.replaceChildren(...usage.map(gauge));
     const said = usage.map((u) => [`${u.name} ${u.percent}% used`, u.elapsed != null && `${u.elapsed}% into the week`]
