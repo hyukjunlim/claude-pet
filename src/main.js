@@ -43,6 +43,7 @@ const MIN_THROW_SPEED = 450;
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const FOREGROUND_HANDOFF_MS = 1500;
 
 protocol.registerSchemesAsPrivileged([
@@ -347,6 +348,19 @@ function codexInstalled() {
   return fs.existsSync(codexPaths().home);
 }
 
+// The Claude desktop app's own folder. Someone who uses only Codex, or only the claude CLI,
+// has none, and gets no menu items for the app.
+function claudeInstalled() {
+  return fs.existsSync(path.join(app.getPath('appData'), 'Claude'));
+}
+
+// What clicking the pet opens: Claude, like ChatGPT's pet opens its app, or Codex for someone
+// who has only Codex.
+function mainAppLink() {
+  if (claudeInstalled()) return APP_LINK.claude;
+  return codexInstalled() ? APP_LINK.codex : null;
+}
+
 function startCodex() {
   if (codex || DEMO || !settings.get('showCodex') || !codexInstalled()) return;
   codex = new CodexTracker({
@@ -450,8 +464,8 @@ function sessionUrl(s) {
 }
 
 // Launching any claude:// link makes the running app restore and focus its main window;
-// claude://hotkey does nothing else (codex:// links work the same way for Codex). On Windows
-// an app may only bring another app forward
+// claude://hotkey does nothing else (codex:// links work the same way for Codex, and
+// codex://launch does nothing else). On Windows an app may only bring another app forward
 // if it's the one in front, and the pet window never takes focus. So a click first focuses
 // a tiny invisible helper window, then launches the link, and hides the helper once Claude
 // has taken over. (Toggling the pet window's own focusability doesn't work: Electron then
@@ -481,7 +495,7 @@ function focusHandoffWindow() {
   handoffWin.focus();
 }
 
-function openApp(url = 'claude://hotkey') {
+function openApp(url) {
   if (process.platform === 'win32') {
     clearTimeout(handoffTimer);
     focusHandoffWindow();
@@ -593,7 +607,9 @@ function registerIpc() {
       if (!openSession(id)) wake();     // terminal sessions have nothing to open
       return;
     }
-    openApp();                          // clicking the pet opens Claude, like ChatGPT's pet
+    const url = mainAppLink();          // clicking the pet opens Claude, like ChatGPT's pet
+    if (url) openApp(url);
+    else wake();
   });
   ipcMain.on('pet:dismiss', (e, id) => {
     if (!fromPet(e) || typeof id !== 'string') return;
@@ -671,7 +687,7 @@ function buildMenu() {
       sendUsage();
     },
   });
-  items.push(claudeResetMenu());
+  if (claudeInstalled()) items.push(claudeResetMenu());
   if (codexInstalled() && !DEMO) {
     items.push({
       label: 'Show Codex threads',
@@ -742,7 +758,8 @@ function buildMenu() {
     click: (mi) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: mi.checked }),
   });
   items.push({ type: 'separator' });
-  items.push({ label: 'Open Claude', click: () => openApp() });
+  if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
+  if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
   items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
   return Menu.buildFromTemplate(items);
 }
@@ -793,6 +810,11 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     settings = new Settings(path.join(app.getPath('userData'), 'settings.json'));
+    // A new install starts at login; the tray menu (or --no-start-at-login) turns that off.
+    if (settings.firstRun && !DEMO) {
+      app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: true });
+      settings.save();
+    }
     applyLoginFlag(process.argv);
     protocol.handle('pet', handleProtocol);
     loadPets();
@@ -838,7 +860,7 @@ if (!app.requestSingleInstanceLock()) {
     if (DEBUG_OPEN_AFTER_MS) {
       setTimeout(() => {
         log('debug: simulating a pet click (openApp)');
-        openApp();
+        openApp(mainAppLink() || APP_LINK.claude);
       }, DEBUG_OPEN_AFTER_MS);
     }
     screen.on('display-metrics-changed', onDisplaysChanged);

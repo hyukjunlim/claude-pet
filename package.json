@@ -1,7 +1,7 @@
 {
   "name": "claude-pet",
   "version": "0.1.0",
-  "description": "A floating desktop pet that shows what your Claude desktop Code sessions are doing.",
+  "description": "A floating desktop pet that shows what your Claude desktop Code sessions and Codex threads are doing.",
   "main": "src/main.js",
   "private": true,
   "license": "MIT",

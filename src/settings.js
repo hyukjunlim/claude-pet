@@ -22,6 +22,7 @@ const DEFAULTS = {
 class Settings {
   constructor(file) {
     this.file = file;
+    this.firstRun = !fs.existsSync(file);   // nothing saved yet: a new install
     this.data = { ...DEFAULTS };
     try {
       Object.assign(this.data, JSON.parse(fs.readFileSync(file, 'utf8')));

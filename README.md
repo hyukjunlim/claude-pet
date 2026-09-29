@@ -12,11 +12,12 @@ pets work here too.
 There's no installer yet; the pet runs from a copy of this repo. It's built and tested on
 Windows.
 
-- **The Claude desktop app**, with Code sessions. That's what the pet watches.
+- **The Claude desktop app** (with Code sessions), **Codex** ([Codex](#codex)), or both. That's
+  what the pet watches. With only one of them, the tray menu leaves out the other's items, and
+  clicking the pet opens the one you have.
 - **Git** and **Node.js 22.12 or newer** (the current LTS is fine). `npm install` downloads
   Electron itself.
-- **Optional:** Codex, for its threads to show up too ([Codex](#codex)), and Python, only to
-  rebuild the built-in pets.
+- **Optional:** Python, only to rebuild the built-in pets.
 
 ```bash
 git clone https://github.com/hyukjunlim/claude-pet.git
@@ -37,9 +38,10 @@ npm run shortcut   # creates "Claude Pet.lnk" in this folder (Windows)
 node src/sessions.js   # print what the pet currently sees, then exit
 ```
 
-To start it without a console window, double-click **Claude Pet.lnk** in this folder, or turn on
-*Start at login* in the tray menu. The flags `--start-at-login` and `--no-start-at-login` set
-the same option from the command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
+From its first run on, the pet starts at login; untick *Start at login* in the tray menu to stop
+that. To start it yourself without a console window, double-click **Claude Pet.lnk** in this
+folder. The flags `--start-at-login` and `--no-start-at-login` set the same option from the
+command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
 (or click the tray icon) for the menu.
 
 ## What the pet tells you
@@ -62,7 +64,8 @@ long it has been in that state, e.g. "Claude · tokenizer · 5m". The project is
 left out for sessions started without a folder. Every bubble is the same width (`--pill-width` in
 [src/renderer/pet.css](src/renderer/pet.css)), and a long title ends in "…".
 
-- **Click the pet** to bring the Claude window to the front, the way ChatGPT's pet opens its app.
+- **Click the pet** to bring the Claude window to the front, the way ChatGPT's pet opens its app
+  (or the Codex window, if you don't have Claude).
 - **Click a bubble** to open that exact session in Claude, SSH sessions included.
 
 How the clicks open Claude:
@@ -74,7 +77,8 @@ How the clicks open Claude:
   server-side flag and silently does nothing on some accounts.
 - **Opening the window** uses `claude://hotkey`, which does nothing except make the running app
   restore and focus its window. The pet's own window never takes focus, so on Windows it briefly
-  focuses itself right after your click. That lets Windows hand focus on to Claude.
+  focuses itself right after your click. That lets Windows hand focus on to Claude. For Codex,
+  `codex://launch` does the same.
 
 Other things it does:
 - **Bubbles stay on the pet's monitor.** Near an edge the pet can go right up to it, while
@@ -150,7 +154,8 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 If Codex is installed, its threads get bubbles next to Claude's, marked "Codex" and the thread's
 project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
 *Show Codex threads* turns them off. Clicking one opens that thread in Codex
-(`codex://threads/<id>?hostId=<host>`).
+(`codex://threads/<id>?hostId=<host>`), and tray menu → *Open Codex* opens the app. Codex works
+without Claude too: then clicking the pet opens Codex, and the menu has no Claude items.
 
 - **Ready:** a thread that finished while you weren't looking at it. This is Codex's own unread
   list (`~/.codex/.codex-global-state.json`), so it covers threads on every host, and the
