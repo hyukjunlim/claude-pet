@@ -10,8 +10,7 @@
     "demo": "electron . --demo",
     "test": "node --test \"test/**/*.test.js\"",
     "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-shortcut.ps1",
-    "sprite:clay": "python tools/make_clay.py",
-    "sprite:ember": "python tools/make_ember.py"
+    "sprite:clay": "python tools/make_clay.py"
   },
   "devDependencies": {
     "electron": "^44.4.5"

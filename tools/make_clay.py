@@ -1,7 +1,7 @@
-"""Generate "Clay", a refined terracotta pet for Claude Pet, as a Codex-compatible v2 atlas.
+"""Generate "Clay", a terracotta pet for Claude Pet, as a Codex-compatible v2 atlas.
 
-Same chunky pixel-art style as Ember (48x52 logical pixels per cell, scaled 4x into
-192x208 cells), with refinements: selective two-tone outlines, smoother shading with
+Chunky pixel art (48x52 logical pixels per cell, scaled 4x into 192x208 cells), with
+selective two-tone outlines, smoother shading with
 bounce light, eyebrows and more mouth shapes, a run cycle with squash and stretch,
 a spark antenna that trails behind, and props for the states (a laptop while working,
 a paper while reviewing, a question bubble while waiting, smoke when something fails).

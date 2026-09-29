@@ -17,7 +17,7 @@ Windows.
   clicking the pet opens the one you have.
 - **Git** and **Node.js 22.12 or newer** (the current LTS is fine). `npm install` downloads
   Electron itself.
-- **Optional:** Python, only to rebuild the built-in pets.
+- **Optional:** Python, only to rebuild the built-in pet.
 
 ```bash
 git clone https://github.com/hyukjunlim/claude-pet.git
@@ -237,24 +237,18 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
 
 Pets are loaded from these folders:
 
-1. `pets/` in this project, for the two built-in pets. Switch between them in the tray menu →
-   Pet.
+1. `pets/` in this project, for the built-in pet, Clay.
 2. `~/.claude-pet/pets/` for your own pets. Tray menu → Pet → *Open my pets folder* opens it.
 3. `~/.codex/pets/`, where pets you hatch in ChatGPT/Codex with the `hatch-pet` skill show up
    automatically.
 
-The two built-in pets are drawn in code and need only Python to rebuild:
+Switch between them in the tray menu → Pet.
 
-| Pet | Generator | Rebuild with |
-| --- | --------- | ------------ |
-| **Clay** (default) | [tools/make_clay.py](tools/make_clay.py) | `npm run sprite:clay` |
-| **Ember** (the original) | [tools/make_ember.py](tools/make_ember.py) | `npm run sprite:ember` |
-
-- **Clay** is the refined version of Ember. It has two-tone outlines, bounce-light shading,
-  eyebrows, raised arms that read as arms, and a trailing spark antenna. It also has a prop for
-  each state: a laptop while working, a paper while reviewing, a "?" bubble while waiting, and
-  smoke and a tear when something fails.
-- **Ember** is kept exactly as it was.
+**Clay** is drawn in code by [tools/make_clay.py](tools/make_clay.py) and needs only Python to
+rebuild (`npm run sprite:clay`). It has two-tone outlines, bounce-light shading, eyebrows, raised
+arms that read as arms, and a trailing spark antenna. It also has a prop for each state: a laptop
+while working, a paper while reviewing, a "?" bubble while waiting, and smoke and a tear when
+something fails.
 
 ## How ChatGPT's pet works (and what this copies)
 
@@ -291,6 +285,5 @@ src/transcript.js   Transcript entries → running / waiting / review / failed
 src/usage.js        Weekly limits: Claude's usage samples, Codex's rate limits
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
-tools/make_clay.py  Generates Clay, the default pet
-tools/make_ember.py Generates Ember, the original pet
+tools/make_clay.py  Generates Clay, the built-in pet
 ```
