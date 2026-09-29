@@ -16,6 +16,7 @@ const DEFAULTS = {
   codexOverSsh: true,      // and follow the ones running on Codex's SSH hosts
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
+  seen: {},                // sessions you saw in the app with its window in front, and when
 };
 
 class Settings {

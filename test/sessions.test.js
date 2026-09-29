@@ -178,8 +178,12 @@ test('the log says which session is selected in the app', () => {
   line('null');
   line('local_b');
   assert.equal(log.selected, 'local_b');
+  // Switching away means it was on screen until then.
+  assert.equal(log.leftAt('local_a'), new Date(2026, 8, 24, 23, 47, 0).getTime());
+  assert.equal(log.leftAt('local_b'), 0);
   log.handleLine('2026-09-24 23:48:00 [info] Starting app {');
   assert.equal(log.selected, null);
+  assert.equal(log.leftAt('local_b'), 0);   // the app closing isn't you looking
 });
 
 test('a turn that ends in the selected session is Ready only until the app comes to the front', () => {
@@ -215,6 +219,18 @@ test('the front-window helper runs only while a turn in the selected session may
   tracker.watchFront(false);
   assert.equal(helpers[0].running, false);
   assert.equal(tracker.appInFront, null);
+  // What it saw is kept (and saved: 'seen' tells main.js), for the next start.
+  let saved = 0;
+  tracker.on('seen', () => { saved += 1; });
+  tracker.appLog = { selected: 'local_x', turnOf: () => null };
+  tracker.appInFront = true;
+  tracker.recompute();
+  tracker.recompute();
+  assert.equal(saved, 1);
+  assert.ok(tracker.seenSnapshot().local_x > 0);
+  assert.equal(new SessionTracker({ seen: tracker.seenSnapshot() }).frontSeen.get('local_x'), tracker.frontSeen.get('local_x'));
+  tracker.appInFront = null;
+  tracker.appLog = null;
   // A helper that dies (PowerShell blocked, say) isn't restarted right away.
   tracker.watchFront(true);
   helpers[1].emit('exit');
@@ -294,13 +310,15 @@ test('local sessions ignore the copy checks', () => {
   assert.equal(st.status, 'review');
 });
 
-test('clock skew is estimated from the most recent copies', () => {
+test("clock skew is estimated from the last day's copies", () => {
   assert.equal(estimateSkew([]), 0);
+  const hour = 3600_000;
   const samples = [
-    { mtimeMs: 1000_000, lastStampAt: 1000_000 + SKEW - 900 },       // copied just after the turn ended
-    { mtimeMs: 2000_000, lastStampAt: 1500_000 + SKEW },             // copied when opened, much later
-    { mtimeMs: 3000_000, lastStampAt: 3000_000 + SKEW - 400 },
-    { mtimeMs: 10, lastStampAt: 10 + SKEW + 60_000 },                // too old to count
+    { mtimeMs: T0, lastStampAt: T0 + SKEW - 400 },                                  // copied just after a turn ended
+    { mtimeMs: T0 + 5 * hour, lastStampAt: T0 + SKEW - 900 },                        // copied later, when you opened it
+    // A burst of old sessions you opened, copied over again: none of them hides the good one.
+    ...[1, 2, 3].map((i) => ({ mtimeMs: T0 + 6 * hour + i, lastStampAt: T0 - 48 * hour + SKEW })),
+    { mtimeMs: T0 - 30 * hour, lastStampAt: T0 - 30 * hour + SKEW + 60_000 },        // over a day old: may predate a clock change
   ];
   assert.equal(estimateSkew(samples), SKEW - 400);
   assert.equal(estimateSkew([{ mtimeMs: T0, lastStampAt: T0 - 90_000 }]), -90_000);   // a server that runs behind

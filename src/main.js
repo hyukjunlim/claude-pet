@@ -807,11 +807,14 @@ if (!app.requestSingleInstanceLock()) {
 
     tracker = DEMO
       ? new DemoTracker()
-      : new SessionTracker({ ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {} });
+      : new SessionTracker({
+        ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {}, seen: settings.get('seen') || {},
+      });
     tracker.on('change', (list) => {
       claudeSessions = list;
       mergeSessions();
     });
+    tracker.on('seen', () => settings.set({ seen: tracker.seenSnapshot() }));
     tracker.on('usage', setUsage);
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
     tracker.start();

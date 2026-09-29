@@ -46,7 +46,7 @@ the same option from the command line. `Ctrl+Alt+P` shows or hides the pet. Righ
 
 | Pet animation | Bubble        | Meaning |
 | ------------- | ------------- | ------- |
-| waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker; it stays until you reply) |
+| waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker) and you haven't looked at it since |
 | failed        | **Error**     | The turn ended with an API error |
 | review        | **Ready**     | A turn finished and you haven't opened that session since |
 | running       | **Running**   | Claude is working |
@@ -112,9 +112,11 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
 - **The session you have open:** the index notes when you switch to a session, not when you look
   at the one already open. So when a turn ends in the session selected in the app (the log says
   which), the pet checks whether the Claude window is in front. If it is, you've seen it and
-  there's no "Ready"; if not, "Ready" stays until the Claude window comes to the front. A small
+  there's no bubble; if not, "Ready" (or "Needs you") stays until the Claude window comes to the
+  front, or you switch away from that session in the app (it was on screen until then). A small
   PowerShell helper reports the front window, event-driven, only while that's in question
-  ([src/foreground.js](src/foreground.js); Windows only).
+  ([src/foreground.js](src/foreground.js); Windows only). What it saw is saved, so a restart of
+  the pet doesn't bring those bubbles back.
 - **Terminal sessions:** `claude` sessions run in a terminal are picked up from recently written
   transcripts. They're listed as "(terminal)" and can't be opened with a click. Sessions you
   deleted in the app are skipped.

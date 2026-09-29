@@ -62,14 +62,15 @@ test('the desktop summary for this turn can mark it as blocked on the user', () 
   assert.deepEqual(deriveStatus(s, { summary }, T0 + 10_000), { status: 'waiting', detail: 'Pick one of the 4 options', since: T0 + 6000 });
 });
 
-test('a turn that ended waiting on you stays that way until you reply or dismiss it', () => {
+test('a turn that ended waiting on you needs you until you have seen it', () => {
   const s = run([prompt(0), reply(5, 'a-last'), stopSummary(6)]);
   const summary = { status_category: 'need_input', status_detail: 'Asked which port to use', summarizes_uuid: 'a-last' };
-  assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');   // looked at
-  assert.equal(deriveStatus(s, { summary }, T0 + 24 * 60 * 60 * 1000).status, 'waiting');                // a day later
+  assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 - 1000 }, T0 + 10_000).status, 'waiting');
+  assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');   // looked at
   assert.equal(deriveStatus(s, { summary, dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
-  const answered = run([prompt(0), reply(5, 'a-last'), stopSummary(6), prompt(20, 'port 8080')]);
-  assert.equal(deriveStatus(answered, { summary }, T0 + 25_000).status, 'running');
+  // A question Claude is still waiting on (the question tool) doesn't clear by looking.
+  const asking = run([prompt(0), toolUse(3, 'q1', 'AskUserQuestion', { questions: [{ question: 'Which port?' }] })]);
+  assert.equal(deriveStatus(asking, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');
 });
 
 test("a reply split into thinking and text entries is still the turn's last reply", () => {

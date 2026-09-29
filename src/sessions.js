@@ -34,7 +34,7 @@ const DESKTOP_RECENT_MS = 7 * 24 * 60 * 60 * 1000;
 const CLI_RECENT_MS = 30 * 60 * 1000;
 const CLI_REVIEW_MS = 10 * 60 * 1000;
 const MAX_PROJECT_DIRS = 400;
-const CLOCK_SAMPLES = 3;
+const CLOCK_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 const RELEASED_SUFFIX = '.desktop-released.json';
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
@@ -43,6 +43,7 @@ const LOG_SLACK_MS = 3000;   // log times are whole seconds, and the clock skew 
 // often take 3–4 s, and the wait ends as soon as one comes.
 const SUMMARY_WAIT_MS = 10_000;
 const FRONT_RETRY_MS = 60_000;   // after the front-window helper failed, try again this much later
+const SEEN_SAVE_MS = 60_000;     // save "seen with the app in front" at most this often per session
 const KICK_DELAY_MS = 100;          // lets a burst of file changes settle into one update
 const PROJECT_KICK_MIN_MS = 2000;   // scanning every project folder is the costly part
 
@@ -184,6 +185,12 @@ class AppLogFollower extends FileFollower {
     this.turns = new Map();   // hostSessionId -> { running, at }, from the newest line about it
     this.asks = new Map();    // requestId -> { sessionId, tool, at }, until you answer
     this.selected = null;     // the session selected in the app, if any
+    this.left = new Map();    // hostSessionId -> when you last switched away from it in the app
+  }
+
+  // You were in the app with the session on screen until you switched away from it.
+  leftAt(sessionId) {
+    return this.left.get(sessionId) || 0;
   }
 
   handleLine(line) {
@@ -201,6 +208,7 @@ class AppLogFollower extends FileFollower {
         this.selected = null;
         return;
       case 'focus':
+        if (this.selected && e.sessionId !== this.selected) this.left.set(this.selected, e.at);
         this.selected = e.sessionId;
         return;
       default:
@@ -264,7 +272,7 @@ function parseLogLine(line) {
 class SessionTracker extends EventEmitter {
   constructor({
     sessionsRoot, projectsRoot, appLog = null, sshConnections = null, planUsage = null, pollMs = 1000, now = Date.now, dismissed = {},
-    foreground = process.platform === 'win32' ? () => new ForegroundWatcher() : null,
+    seen = {}, foreground = process.platform === 'win32' ? () => new ForegroundWatcher() : null,
   } = {}) {
     super();
     this.sessionsRoot = sessionsRoot;
@@ -273,7 +281,8 @@ class SessionTracker extends EventEmitter {
     this.foregroundFactory = foreground;
     this.frontWatcher = null;
     this.appInFront = null;            // null: not watching (or not known yet)
-    this.frontSeen = new Map();        // hostSessionId -> last time it was selected with the app in front
+    // hostSessionId -> last time it was selected with the app in front (saved across restarts)
+    this.frontSeen = new Map(Object.entries(seen).filter(([, t]) => Number.isFinite(t)));
     this.frontFailedAt = 0;
     this.projectsRoot = projectsRoot;
     this.appLog = appLog ? new AppLogFollower(appLog) : null;
@@ -416,6 +425,11 @@ class SessionTracker extends EventEmitter {
   dismissedSnapshot() {
     const cutoff = this.now() - 24 * 60 * 60 * 1000;
     return Object.fromEntries([...this.dismissed].filter(([, t]) => t > cutoff));
+  }
+
+  seenSnapshot() {
+    const cutoff = this.now() - 24 * 60 * 60 * 1000;
+    return Object.fromEntries([...this.frontSeen].filter(([, t]) => t > cutoff));
   }
 
   // `only` is the set of files reported changed; null (the timer) checks every file.
@@ -602,7 +616,11 @@ class SessionTracker extends EventEmitter {
     const out = [];
     const skews = new Map();
     const selected = this.appLog?.selected ?? null;
-    if (selected && this.appInFront) this.frontSeen.set(selected, now);
+    if (selected && this.appInFront) {
+      const before = this.frontSeen.get(selected) || 0;
+      this.frontSeen.set(selected, now);
+      if (now - before > SEEN_SAVE_MS) this.emit('seen');   // main.js saves seenSnapshot()
+    }
     let frontNeeded = false;
     for (const r of this.desktop.values()) {
       const follower = this.followers.get(this.transcriptFor.get(r.cliSessionId));
@@ -613,7 +631,7 @@ class SessionTracker extends EventEmitter {
       }
       const state = follower?.state ?? null;
       const dismissedAt = this.dismissed.get(r.hostSessionId);
-      const seenAt = this.frontSeen.get(r.hostSessionId);
+      const seenAt = Math.max(this.frontSeen.get(r.hostSessionId) || 0, this.appLog?.leftAt(r.hostSessionId) || 0);
       // Selected in the app, with a turn over since you last looked: is the app in front?
       const inQuestion = r.hostSessionId === selected && Boolean(state && !state.turnActive && state.turnEndedAt)
         && state.turnEndedAt - skew > Math.max(r.lastFocusedAt || 0, dismissedAt || 0, seenAt || 0)
@@ -758,14 +776,15 @@ function indexIsAhead(r, state) {
 }
 
 // Each copy is written just after the remote CLI's newest entry, so (newest timestamp - local
-// mtime) can only underestimate the skew. After a turn ends it's close, so the recent copies
-// give a tight bound.
+// mtime) can only underestimate the skew; after a turn ends it's close. But the app also copies
+// a session over again when you open it, which underestimates by however long it sat, so the
+// bound comes from every copy of the last day rather than the latest few. (Older copies may
+// predate a change of the server's clock.)
 function estimateSkew(samples) {
-  const recent = samples
-    .filter((s) => s.lastStampAt > 0 && s.mtimeMs > 0)
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, CLOCK_SAMPLES);
-  if (!recent.length) return 0;
+  const valid = samples.filter((s) => s.lastStampAt > 0 && s.mtimeMs > 0);
+  if (!valid.length) return 0;
+  const newest = Math.max(...valid.map((s) => s.mtimeMs));
+  const recent = valid.filter((s) => newest - s.mtimeMs <= CLOCK_WINDOW_MS);
   const skew = Math.max(...recent.map((s) => s.lastStampAt - s.mtimeMs));
   return Math.abs(skew) < MAX_CLOCK_SKEW_MS ? Math.round(skew) : 0;
 }
