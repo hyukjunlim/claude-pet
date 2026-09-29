@@ -281,6 +281,10 @@ test('terminal sessions skip SSH copies, deleted sessions and earlier IDs of des
     await tracker.scanDesktopIndex();
     await tracker.scanProjects();
     assert.deepEqual([...tracker.cliSessions.keys()], [ids.live]);
+    // The SSH copies aren't even looked through, but a desktop session still finds its copy.
+    assert.deepEqual(tracker.projectDirs.map((d) => path.basename(d)), ['C--repo']);
+    const copy = await tracker.findTranscript({ cliSessionId: ids.copy, mirrored: true });
+    assert.equal(copy, path.join(projects, `ssh-${ids.copy}`, `${ids.copy}.jsonl`));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

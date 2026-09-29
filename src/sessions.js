@@ -346,6 +346,7 @@ class SessionTracker extends EventEmitter {
     if (parts.length !== 2 || !TRANSCRIPT_RE.test(parts[1])) return;   // not a session transcript
     const file = path.join(this.projectsRoot, name);
     if (this.followers.has(file)) this.kick({ file });
+    else if (parts[0].startsWith('ssh-')) this.kick({ index: true });   // an SSH copy: findTranscript knows where
     else this.kick({ projects: true });   // a transcript we don't follow yet
   }
 
@@ -482,11 +483,14 @@ class SessionTracker extends EventEmitter {
     this.emit('usage', { claude: usage });
   }
 
+  // The project folders, newest first, and the terminal sessions in them. The desktop app's
+  // copies of SSH sessions (ssh-<id>/, one folder per session, often most of them) are left out:
+  // findTranscript goes straight to the one it needs, and terminal sessions are never there.
   async scanProjects() {
     const entries = await readdirSafe(this.projectsRoot, { withFileTypes: true });
     const dirs = [];
     for (const e of entries) {
-      if (!e.isDirectory()) continue;
+      if (!e.isDirectory() || e.name.startsWith('ssh-')) continue;
       const full = path.join(this.projectsRoot, e.name);
       const st = await statSafe(full);
       if (st) dirs.push({ full, mtimeMs: st.mtimeMs });
@@ -498,7 +502,6 @@ class SessionTracker extends EventEmitter {
     const cutoff = this.now() - CLI_RECENT_MS;
     const live = new Map();
     for (const dir of this.projectDirs) {
-      if (path.basename(dir).startsWith('ssh-')) continue;   // the desktop app's copies of SSH sessions
       for (const name of await readdirSafe(dir)) {
         const m = TRANSCRIPT_RE.exec(name);
         if (!m || this.desktopOwned.has(m[1])) continue;
