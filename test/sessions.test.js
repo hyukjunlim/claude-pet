@@ -137,7 +137,10 @@ test('the app log lines the pet understands', () => {
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD CycleHealth] unhealthy cycle for ${id} (3s, hadFirstResponse=true, reason=api_error)`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [Stop hook] Query completed for session ${id}`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] Session ${id} query iterator completed`).kind, 'end');
-  assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${id}`), null);
+  assert.deepEqual(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${id}`),
+    { kind: 'focus', sessionId: id, at: local(40) });
+  assert.equal(parseLogLine('2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=null').sessionId, null);
+  assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.replaceEnabledMcpTools: sessionId=${id}, toolCount=3`), null);
   const req = '0f1e2d3c-4b5a-4968-8776-655443322110';
   assert.deepEqual(parseLogLine(`2026-09-24 23:47:41 [info] Emitted tool permission request ${req} for AskUserQuestion in session ${id}`),
     { kind: 'ask', sessionId: id, requestId: req, tool: 'AskUserQuestion', at: local(41) });
@@ -165,6 +168,59 @@ test('the log keeps each question until you answer it, the turn ends or the app 
   assert.deepEqual(log.turnOf('local_other'), { running: true, at: local(40), asking: { tool: 'ExitPlanMode', at: local(40) } });
   line(50, 'Starting app {');
   assert.equal(log.turnOf('local_other'), null);
+});
+
+test('the log says which session is selected in the app', () => {
+  const log = new AppLogFollower('main.log');
+  const line = (text) => log.handleLine(`2026-09-24 23:47:00 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${text}`);
+  line('local_a');
+  assert.equal(log.selected, 'local_a');
+  line('null');
+  line('local_b');
+  assert.equal(log.selected, 'local_b');
+  log.handleLine('2026-09-24 23:48:00 [info] Starting app {');
+  assert.equal(log.selected, null);
+});
+
+test('a turn that ends in the selected session is Ready only until the app comes to the front', () => {
+  const copy = copyOf([prompt(T0), reply(T0 + 5000, 'a1')]);   // ended at T0 + 5 s
+  const r = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo', lastFocusedAt: T0 - 60_000 });   // selected before
+  assert.equal(desktopStatus(r, copy, { now: T0 + 20_000 }).status, 'review');
+  // The app was (or came) to the front with it selected after the turn ended: seen.
+  assert.equal(desktopStatus(r, copy, { now: T0 + 20_000, seenAt: T0 + 6000 }).status, 'idle');
+  assert.equal(desktopStatus(r, copy, { now: T0 + 20_000, seenAt: T0 + 1000 }).status, 'review');
+  // While the pet finds out, the bubble waits a moment rather than flash "Ready".
+  assert.deepEqual(desktopStatus(r, copy, { now: T0 + 7000, frontPending: true }), { status: 'running', detail: 'Wrapping up', since: T0 });
+});
+
+test('the front-window helper runs only while a turn in the selected session may be unseen', async () => {
+  const { EventEmitter } = require('node:events');
+  const helpers = [];
+  const foreground = () => {
+    const w = new EventEmitter();
+    w.start = () => { w.running = true; };
+    w.stop = () => { w.running = false; };
+    helpers.push(w);
+    return w;
+  };
+  const tracker = new SessionTracker({ foreground });
+  tracker.running = true;
+  tracker.watchFront(true);
+  assert.equal(helpers.length, 1);
+  assert.equal(helpers[0].running, true);
+  tracker.watchFront(true);
+  assert.equal(helpers.length, 1);   // one at a time
+  helpers[0].emit('front', true);
+  assert.equal(tracker.appInFront, true);
+  tracker.watchFront(false);
+  assert.equal(helpers[0].running, false);
+  assert.equal(tracker.appInFront, null);
+  // A helper that dies (PowerShell blocked, say) isn't restarted right away.
+  tracker.watchFront(true);
+  helpers[1].emit('exit');
+  tracker.watchFront(true);
+  assert.equal(helpers.length, 2);
+  tracker.running = false;
 });
 
 test('a question in the log shows "Needs you" before the SSH copy has it', () => {

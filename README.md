@@ -90,6 +90,12 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
   that clock is off from the copies and corrects for it, so "Ready" still clears once you've
   looked at a session.
+- **The session you have open:** the index notes when you switch to a session, not when you look
+  at the one already open. So when a turn ends in the session selected in the app (the log says
+  which), the pet checks whether the Claude window is in front. If it is, you've seen it and
+  there's no "Ready"; if not, "Ready" stays until the Claude window comes to the front. A small
+  PowerShell helper reports the front window, event-driven, only while that's in question
+  ([src/foreground.js](src/foreground.js); Windows only).
 - **Terminal sessions:** `claude` sessions run in a terminal are picked up from recently written
   transcripts. They're listed as "(terminal)" and can't be opened with a click. Sessions you
   deleted in the app are skipped.
@@ -251,6 +257,7 @@ src/main.js         Electron main process: window, click-through, drag/throw, tr
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
 src/renderer/       Pet page: sprite engine, activity bubbles
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
+src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
 src/codex.js        Codex threads: the unread list, the thread list, local histories
 src/codex-remote.js Follows Codex histories on SSH hosts (SSH + a small Python watcher)
 src/rollout.js      Codex rollout entries → running / waiting / review / failed

@@ -19,9 +19,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const {
-  STALE_RUNNING_MS, applyEntry, compareSessions, createTurnState, deriveStatus, describeAsk,
+  STALE_RUNNING_MS, UNREAD_WINDOW_MS, applyEntry, compareSessions, createTurnState, deriveStatus, describeAsk,
 } = require('./transcript');
 const { parseClaudeUsage } = require('./usage');
+const { ForegroundWatcher } = require('./foreground');
 
 const HOST_ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
 const TRANSCRIPT_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
@@ -41,6 +42,7 @@ const LOG_SLACK_MS = 3000;   // log times are whole seconds, and the clock skew 
 // The longest to wait for a turn's summary. The app waits 5 s before it notifies you, but they
 // often take 3–4 s, and the wait ends as soon as one comes.
 const SUMMARY_WAIT_MS = 10_000;
+const FRONT_RETRY_MS = 60_000;   // after the front-window helper failed, try again this much later
 const KICK_DELAY_MS = 100;          // lets a burst of file changes settle into one update
 const PROJECT_KICK_MIN_MS = 2000;   // scanning every project folder is the costly part
 
@@ -181,6 +183,7 @@ class AppLogFollower extends FileFollower {
     super(file, LOG_TAIL_BYTES);
     this.turns = new Map();   // hostSessionId -> { running, at }, from the newest line about it
     this.asks = new Map();    // requestId -> { sessionId, tool, at }, until you answer
+    this.selected = null;     // the session selected in the app, if any
   }
 
   handleLine(line) {
@@ -195,6 +198,10 @@ class AppLogFollower extends FileFollower {
         return;
       case 'restart':
         this.asks.clear();   // the questions went with the sessions' CLIs
+        this.selected = null;
+        return;
+      case 'focus':
+        this.selected = e.sessionId;
         return;
       default:
         this.turns.set(e.sessionId, { running: e.kind === 'start', at: e.at });
@@ -233,6 +240,8 @@ const LOG_EVENTS = [
   [/^Emitted tool permission request (?<request>[\w-]+) for (?<tool>\S+) in session (?<session>local_[\w-]+)/, 'ask'],
   [/^Received permission response for (?<request>[\w-]+)/, 'answer'],
   [/^Starting app\b/, 'restart'],
+  // The session you select in the app ("null" in between two, or when none is).
+  [/^\[CCD\] LocalSessions\.setFocusedSession: sessionId=(?:(?<session>local_[\w-]+)|null)\b/, 'focus'],
 ];
 
 // "2026-09-24 23:47:34 [info] Sending message to session local_…" (local time)
@@ -255,9 +264,17 @@ function parseLogLine(line) {
 class SessionTracker extends EventEmitter {
   constructor({
     sessionsRoot, projectsRoot, appLog = null, sshConnections = null, planUsage = null, pollMs = 1000, now = Date.now, dismissed = {},
+    foreground = process.platform === 'win32' ? () => new ForegroundWatcher() : null,
   } = {}) {
     super();
     this.sessionsRoot = sessionsRoot;
+    // Whether the app's window is in front, while a turn you may not have seen has ended in the
+    // session selected there (see watchFront).
+    this.foregroundFactory = foreground;
+    this.frontWatcher = null;
+    this.appInFront = null;            // null: not watching (or not known yet)
+    this.frontSeen = new Map();        // hostSessionId -> last time it was selected with the app in front
+    this.frontFailedAt = 0;
     this.projectsRoot = projectsRoot;
     this.appLog = appLog ? new AppLogFollower(appLog) : null;
     this.sshConnectionsFile = sshConnections;
@@ -310,6 +327,34 @@ class SessionTracker extends EventEmitter {
     this.kickTimer = null;
     for (const w of this.watchers) w.close();
     this.watchers = [];
+    this.watchFront(false);
+  }
+
+  // A turn that ends in the session selected in the app is "Ready" only if the app's window
+  // isn't in front, and until it comes to the front: the app can't tell the pet you looked at a
+  // session that was already open. While that's in question, a helper reports the front window.
+  watchFront(needed) {
+    if (needed && !this.frontWatcher && this.foregroundFactory && this.now() - this.frontFailedAt > FRONT_RETRY_MS) {
+      const w = this.foregroundFactory();
+      this.frontWatcher = w;
+      w.on('front', (inFront) => {
+        if (this.frontWatcher !== w) return;
+        this.appInFront = inFront;
+        this.kick();
+      });
+      w.on('exit', () => {
+        if (this.frontWatcher !== w) return;   // we stopped it
+        this.frontWatcher = null;
+        this.appInFront = null;
+        this.frontFailedAt = this.now();
+      });
+      w.start();
+    } else if (!needed && this.frontWatcher) {
+      const w = this.frontWatcher;
+      this.frontWatcher = null;
+      this.appInFront = null;
+      w.stop();
+    }
   }
 
   // React to changes as soon as the OS reports them. The polling timer stays as a fallback,
@@ -556,6 +601,9 @@ class SessionTracker extends EventEmitter {
     const now = this.now();
     const out = [];
     const skews = new Map();
+    const selected = this.appLog?.selected ?? null;
+    if (selected && this.appInFront) this.frontSeen.set(selected, now);
+    let frontNeeded = false;
     for (const r of this.desktop.values()) {
       const follower = this.followers.get(this.transcriptFor.get(r.cliSessionId));
       let skew = 0;
@@ -563,11 +611,21 @@ class SessionTracker extends EventEmitter {
         if (!skews.has(r.machineKey)) skews.set(r.machineKey, this.clockSkew(r.machineKey));
         skew = skews.get(r.machineKey);
       }
+      const state = follower?.state ?? null;
+      const dismissedAt = this.dismissed.get(r.hostSessionId);
+      const seenAt = this.frontSeen.get(r.hostSessionId);
+      // Selected in the app, with a turn over since you last looked: is the app in front?
+      const inQuestion = r.hostSessionId === selected && Boolean(state && !state.turnActive && state.turnEndedAt)
+        && state.turnEndedAt - skew > Math.max(r.lastFocusedAt || 0, dismissedAt || 0, seenAt || 0)
+        && now - (state.turnEndedAt - skew) < UNREAD_WINDOW_MS;
+      if (inQuestion) frontNeeded = true;
       const name = this.connectionNames.get(r.machineKey);
-      const derived = desktopStatus(name ? { ...r, machine: name } : r, follower?.state ?? null, {
+      const derived = desktopStatus(name ? { ...r, machine: name } : r, state, {
         now,
         skew,
-        dismissedAt: this.dismissed.get(r.hostSessionId),
+        dismissedAt,
+        seenAt,
+        frontPending: inQuestion && this.appInFront === null && Boolean(this.frontWatcher),
         logTurn: this.appLog?.turnOf(r.hostSessionId) ?? null,
       });
       if (!derived) continue;
@@ -609,6 +667,7 @@ class SessionTracker extends EventEmitter {
       this.lastEmitted = key;
       this.emit('change', active);
     }
+    if (this.running) this.watchFront(frontNeeded);
   }
 
   // How far ahead of ours the clock is on the machine behind `machineKey`, measured from the
@@ -639,7 +698,11 @@ function desktopStatus(r, state, opts = {}) {
   return { status: 'waiting', detail: describeAsk(asking.tool), since: asking.at };
 }
 
-function transcriptStatus(r, state, { now = Date.now(), skew = 0, dismissedAt, logTurn = null } = {}) {
+// `seenAt`: the last time the session was selected in the app with its window in front. And
+// `frontPending`: whether the pet is still finding out if the window is in front.
+function transcriptStatus(r, state, {
+  now = Date.now(), skew = 0, dismissedAt, seenAt = 0, frontPending = false, logTurn = null,
+} = {}) {
   const hidden = r.mirrored ? turnNotInCopy(r, state, skew, logTurn) : null;
   if (hidden) {
     if (now - Math.max(hidden.since, r.lastActivityAt) > STALE_RUNNING_MS) {
@@ -649,16 +712,17 @@ function transcriptStatus(r, state, { now = Date.now(), skew = 0, dismissedAt, l
     return { status: 'running', detail: where ? `Working on ${where}` : 'Working', since: hidden.since };
   }
   if (!state) return null;
+  const looked = Math.max(r.lastFocusedAt || 0, seenAt || 0);
   let derived = deriveStatus(state, {
-    lastFocusedAt: r.lastFocusedAt && r.lastFocusedAt + skew,
+    lastFocusedAt: looked && looked + skew,
     dismissedAt: dismissedAt && dismissedAt + skew,
     summary: r.summary,
   }, now + skew);
   // The summary that says whether Claude ended the turn waiting on you comes a few seconds after
   // the turn. Like the app, wait for it a moment in sessions that get one, rather than show
-  // "Ready" and then "Needs you".
-  if (derived.status === 'review' && r.summarized && !state.turnAssistantUuids.includes(r.summary?.summarizes_uuid)
-    && now + skew - state.turnEndedAt < SUMMARY_WAIT_MS) {
+  // "Ready" and then "Needs you". Likewise while finding out whether the app is in front.
+  const summaryDue = r.summarized && !state.turnAssistantUuids.includes(r.summary?.summarizes_uuid);
+  if (derived.status === 'review' && (summaryDue || frontPending) && now + skew - state.turnEndedAt < SUMMARY_WAIT_MS) {
     derived = { status: 'running', detail: 'Wrapping up', since: state.turnStartedAt };
   }
   // If we started reading mid-turn, the desktop index knows when you sent the prompt.
