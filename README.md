@@ -108,6 +108,12 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 **Limitations:**
 - **SSH turns.** If the app has to start the session's CLI first, the bubble appears when the
   first reply arrives.
+- **Mark as read / unread isn't followed.** "Ready" goes by when you last opened the session. The
+  sidebar's unread dots, including the ones you set by hand, live only in the localStorage of the
+  app's window (item `epitaxy-unread-v1`, with `unreadIds` and `explicitUnreadIds`, in a LevelDB
+  database under `%APPDATA%\Claude\Local Storage\leveldb`). The app's browser engine writes that
+  to disk in rate-limited batches, only about once a minute while claude.ai is busy, so following
+  it would lag your marks by up to a minute.
 - **Undocumented files.** The session index, the log and the transcript format belong to the
   Claude app and Claude Code, and can change in an update. If the pet stops reacting after an update,
   `node src/sessions.js` shows what it can still read.
