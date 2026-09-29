@@ -135,8 +135,10 @@ project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
   works on, the pet keeps one SSH connection open, using your `~/.ssh/config`, and runs a
   small read-only Python watcher there. The watcher sends the new lines of rollouts written in
   the last hour, plus the host's clock so the times line up, and once, when it starts, the
-  newest reply's rate limits (for the [weekly limits](#weekly-limits)). It exits as soon as the pet quits,
-  even if the pet crashes. Tray menu → *Follow Codex on SSH hosts* turns this off. The host
+  newest reply's rate limits (for the [weekly limits](#weekly-limits)). It checks every second,
+  but only the rollouts it follows and the folders of the last two days; it looks through all of
+  them every 30 s, so a resumed old thread can take that long to show. It exits as soon as the
+  pet quits, even if the pet crashes. Tray menu → *Follow Codex on SSH hosts* turns this off. The host
   needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.

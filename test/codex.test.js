@@ -382,6 +382,44 @@ test('the watcher script streams a rollout and the lines added to it', { skip: !
   }
 });
 
+test('the watcher script finds a new thread in the folder of the day at once, without walking the rest', { skip: !python && 'Python 3 is not installed' }, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
+  const child = spawn(python, ['-u', '-c', LOADER], { env: { ...process.env, CODEX_HOME: home }, windowsHide: true });
+  try {
+    const messages = [];
+    let buffer = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+        messages.push(JSON.parse(buffer.slice(0, nl)));
+        buffer = buffer.slice(nl + 1);
+      }
+    });
+    child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
+    for (let i = 0; i < 100 && !messages.some((m) => typeof m.now === 'number'); i++) await new Promise((r) => setTimeout(r, 50));
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date();
+    const write = (dir, name) => {
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, name);
+      fs.writeFileSync(file, `${JSON.stringify(meta())}\n`);
+      return file;
+    };
+    const today = write(path.join(home, 'sessions', `${d.getFullYear()}`, pad(d.getMonth() + 1), pad(d.getDate())), `rollout-new-${THREAD}.jsonl`);
+    const resumed = write(path.join(home, 'sessions', '2025', '01', '02'), `rollout-old-${THREAD}.jsonl`);
+    const opened = (file) => messages.some((m) => m.open != null && path.resolve(m.path) === path.resolve(file));
+    for (let i = 0; i < 60 && !opened(today); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(opened(today), 'a thread started today shows up within a second or so');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.ok(!opened(resumed), 'an old folder waits for the next full walk');
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 test('the watcher script sends the newest rate limits, even from a rollout too old to follow', { skip: !python && 'Python 3 is not installed' }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
   const day = path.join(home, 'sessions', '2026', '09', '24');

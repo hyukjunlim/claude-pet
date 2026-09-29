@@ -27,6 +27,8 @@ threading.Thread(target=exit_with_the_pet, daemon=True).start()
 
 ROOT = os.path.join(os.environ.get('CODEX_HOME') or os.path.expanduser('~/.codex'), 'sessions')
 RECENT = 3600            # follow rollouts written in the last hour
+WALK = 30                # look through every rollout this often (for a resumed old thread);
+                         # in between, only the followed ones and the folders of the last two days
 TAIL = 256 * 1024        # how much of a rollout to send when we start following it
 CHUNK = 4 * 1024 * 1024  # read at most this much of one rollout per round
 files = {}               # path -> [id, offset, partial line (None: skip up to the next newline)]
@@ -46,16 +48,37 @@ def lines_of(entry, data):
     entry[2] = parts.pop()
     return parts
 
-def newest_limits():
-    rollouts = []
+def is_rollout(name):
+    return name.startswith('rollout-') and name.endswith('.jsonl')
+
+def every_rollout():
     for folder, _dirs, names in os.walk(ROOT):
         for name in names:
-            if name.startswith('rollout-') and name.endswith('.jsonl'):
-                path = os.path.join(folder, name)
-                try:
-                    rollouts.append((os.stat(path).st_mtime, path))
-                except OSError:
-                    pass
+            if is_rollout(name):
+                yield os.path.join(folder, name)
+
+# Codex files a thread under sessions/YYYY/MM/DD/ for the day it started, on the host's clock.
+def recent_rollouts(now):
+    days = set()
+    for t in (now, now - 86400):
+        for tm in (time.localtime(t), time.gmtime(t)):
+            days.add(os.path.join(ROOT, time.strftime('%Y', tm), time.strftime('%m', tm), time.strftime('%d', tm)))
+    for folder in days:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if is_rollout(name):
+                yield os.path.join(folder, name)
+
+def newest_limits():
+    rollouts = []
+    for path in every_rollout():
+        try:
+            rollouts.append((os.stat(path).st_mtime, path))
+        except OSError:
+            pass
     rollouts.sort(reverse=True)
     for _mtime, path in rollouts[:3]:
         try:
@@ -73,6 +96,7 @@ def newest_limits():
     return None
 
 limits = newest_limits()
+last_walk = 0
 
 while True:
     now = time.time()
@@ -82,40 +106,45 @@ while True:
     if limits:                   # after the clock, so the pet can place it in time
         send({'limits': limits})
         limits = None
+    if now - last_walk >= WALK:
+        candidates = every_rollout()
+        last_walk = now
+    else:
+        candidates = list(files) + list(recent_rollouts(now))
+    checked = set()
     seen = set()
-    for folder, _dirs, names in os.walk(ROOT):
-        for name in names:
-            if not (name.startswith('rollout-') and name.endswith('.jsonl')):
-                continue
-            path = os.path.join(folder, name)
-            try:
-                st = os.stat(path)
-            except OSError:
-                continue
-            if now - st.st_mtime > RECENT:
-                continue
-            seen.add(path)
-            entry = files.get(path)
-            if entry is None or st.st_size < entry[1]:
-                if entry is not None:
-                    send({'close': entry[0]})
-                last_id += 1
-                entry = files[path] = [last_id, 0, b'']
-                send({'open': last_id, 'path': path})
-                if st.st_size > TAIL:
-                    with open(path, 'rb') as f:
-                        head = f.readline(8 * 1024 * 1024)
-                    if head.endswith(b'\n'):
-                        send({'n': last_id, 'l': head[:-1].decode('utf-8', 'replace')})
-                    entry[1], entry[2] = st.st_size - TAIL, None
-            if st.st_size > entry[1]:
+    for path in candidates:
+        if path in checked:
+            continue
+        checked.add(path)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if now - st.st_mtime > RECENT:
+            continue
+        seen.add(path)
+        entry = files.get(path)
+        if entry is None or st.st_size < entry[1]:
+            if entry is not None:
+                send({'close': entry[0]})
+            last_id += 1
+            entry = files[path] = [last_id, 0, b'']
+            send({'open': last_id, 'path': path})
+            if st.st_size > TAIL:
                 with open(path, 'rb') as f:
-                    f.seek(entry[1])
-                    data = f.read(min(CHUNK, st.st_size - entry[1]))
-                entry[1] += len(data)
-                for line in lines_of(entry, data):
-                    if line.strip():
-                        send({'n': entry[0], 'l': line.decode('utf-8', 'replace')})
+                    head = f.readline(8 * 1024 * 1024)
+                if head.endswith(b'\n'):
+                    send({'n': last_id, 'l': head[:-1].decode('utf-8', 'replace')})
+                entry[1], entry[2] = st.st_size - TAIL, None
+        if st.st_size > entry[1]:
+            with open(path, 'rb') as f:
+                f.seek(entry[1])
+                data = f.read(min(CHUNK, st.st_size - entry[1]))
+            entry[1] += len(data)
+            for line in lines_of(entry, data):
+                if line.strip():
+                    send({'n': entry[0], 'l': line.decode('utf-8', 'replace')})
     for path in [p for p in files if p not in seen]:
         send({'close': files.pop(path)[0]})
     sys.stdout.flush()
