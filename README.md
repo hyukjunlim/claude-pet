@@ -7,10 +7,29 @@ pets work here too.
 
 ![Clay, the default pet](tools/clay-preview.png)
 
+## Install
+
+There's no installer yet; the pet runs from a copy of this repo. It's built and tested on
+Windows.
+
+- **The Claude desktop app**, with Code sessions. That's what the pet watches.
+- **Git** and **Node.js 22.12 or newer** (the current LTS is fine). `npm install` downloads
+  Electron itself.
+- **Optional:** Codex, for its threads to show up too ([Codex](#codex)), and Python, only to
+  rebuild the built-in pets.
+
+```bash
+git clone https://github.com/hyukjunlim/claude-pet.git
+cd claude-pet
+npm install
+npm start
+```
+
+To update, run `git pull`, then `npm install` again.
+
 ## Run it
 
 ```bash
-npm install
 npm start          # the pet appears in the bottom-right corner, plus a tray icon
 npm run demo       # cycles through every status with fake sessions
 npm test           # unit tests for the status logic
