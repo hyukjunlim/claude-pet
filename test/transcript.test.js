@@ -230,6 +230,28 @@ test("a monitor's progress notice does not end it, but its last one does", () =>
   assert.equal(deriveStatus(s, {}, T0 + 95_000).status, 'review');
 });
 
+test('stopping a task with TaskStop ends it, though that writes no notice', () => {
+  const stop = (s, id, taskId) => [
+    toolUse(s, id, 'TaskStop', { task_id: taskId }),
+    toolResult(s + 1, id, '{"message":"Successfully stopped task"}', { message: 'Successfully stopped task', task_id: taskId, task_type: 'local_bash' }),
+  ];
+  const s = run([prompt(0), ...bashTask(1, 't1', 'b1', 'Watch the build'), ...bashTask(3, 't2', 'b2', 'Train the model'),
+    ...stop(5, 's1', 'b1'), reply(8), stopSummary(9)]);
+  assert.equal(deriveStatus(s, {}, T0 + 60_000).detail, 'In the background: Train the model');
+  for (const e of [prompt(60), ...stop(61, 's2', 'b2'), reply(64, 'a-two'), stopSummary(65)]) applyEntry(s, e);
+  assert.equal(deriveStatus(s, {}, T0 + 70_000).status, 'review');
+});
+
+test('one notice can end several tasks, as when the app reopens a session', () => {
+  const s = run([prompt(0), ...bashTask(1, 't1', 'b1'), ...bashTask(3, 't2', 'b2'), ...bashTask(5, 't3', 'b3', 'Train the model'),
+    reply(8), stopSummary(9)]);
+  assert.equal(deriveStatus(s, {}, T0 + 30_000).detail, '3 background tasks');
+  const reopened = '<task-notification>\n<task-id>b1</task-id>\n<task-id>b2</task-id>\n<task-id>__orphan_summary__:shell</task-id>\n'
+    + '<status>stopped</status>\n<summary>2 background shell command tasks didn\'t finish before the previous session ended.</summary>\n</task-notification>';
+  for (const e of [prompt(60, reopened), reply(64, 'a-two'), stopSummary(65)]) applyEntry(s, e);
+  assert.equal(deriveStatus(s, {}, T0 + 70_000).detail, 'In the background: Train the model');
+});
+
 test('a background task that never reports back stops counting after a few hours', () => {
   const s = run(inBackground);
   assert.equal(deriveStatus(s, {}, T0 + 3 * 60 * 60 * 1000).status, 'running');

@@ -160,6 +160,13 @@ function launchedTask(result, call) {
   return null;
 }
 
+// The id of the task a TaskStop call stopped, or null. Stopping one writes no notice, only this
+// result.
+function stoppedTask(result, call) {
+  if (call?.name !== 'TaskStop' || !result || typeof result !== 'object') return null;
+  return result.task_id ? String(result.task_id) : null;
+}
+
 function startBackgroundTask(state, id, task) {
   state.backgroundTasks.delete(id);
   state.backgroundTasks.set(id, task);
@@ -168,13 +175,14 @@ function startBackgroundTask(state, id, task) {
 
 // A finished task reports back in a <task-notification> that reaches the transcript as the next
 // prompt, or, if a turn is running, as a queued_command attachment. (A monitor's progress notices
-// carry no <status>: the task goes on.)
+// carry no <status>: the task goes on.) One notice can name several tasks: when a session is
+// reopened, the app writes a single "stopped" notice for all that didn't finish before it closed.
 function endBackgroundTasks(state, text) {
   if (!state.backgroundTasks.size || !text.includes('<task-notification>')) return;
   for (const [, notice] of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
-    const id = /<task-id>([\w-]+)<\/task-id>/.exec(notice)?.[1];
     const status = /<status>(\w+)<\/status>/.exec(notice)?.[1];
-    if (id && TASK_ENDED.has(status)) state.backgroundTasks.delete(id);
+    if (!TASK_ENDED.has(status)) continue;
+    for (const [, id] of notice.matchAll(/<task-id>([\w-]+)<\/task-id>/g)) state.backgroundTasks.delete(id);
   }
 }
 
@@ -225,8 +233,11 @@ function applyUser(state, entry, at) {
     for (const c of content) {
       if (c?.type !== 'tool_result') continue;
       const call = state.pendingTools.get(c.tool_use_id);
-      const task = launchedTask(single ? entry.toolUseResult : null, call);
+      const result = single ? entry.toolUseResult : null;
+      const task = launchedTask(result, call);
       if (task) startBackgroundTask(state, task, { detail: call?.detail || 'a task', at });
+      const stopped = stoppedTask(result, call);
+      if (stopped) state.backgroundTasks.delete(stopped);
       state.pendingTools.delete(c.tool_use_id);
       // Only at the start: a tool's output can contain these words (say, a file that mentions them).
       if (/^\s*\[Request interrupted by user/.test(textOf(c.content))) interrupted = true;

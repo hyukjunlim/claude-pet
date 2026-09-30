@@ -124,7 +124,9 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
 - **Background tasks:** when Claude sends a command, an agent or a monitor to the background, its
   turn ends at once and the task's notice starts the next one when it finishes. To keep the bubble
   from going Ready, gone, Running again, the pet follows each task from the transcript entry that
-  launched it to the notice that ends it, and stays "Running" until they're all done. A question,
+  launched it to the notice that ends it, and stays "Running" until they're all done. Stopping a
+  task yourself writes no notice, so a stop counts as its end, and so does the one notice the app
+  writes for every task that was still going when a session was closed and reopened. A question,
   an error or a turn that needs you still shows over it. A monitor that watches for the whole
   session isn't counted, since it never finishes. A task that never reports back (its session was
   closed) stops counting after 4 hours, and a dev server left running in the background keeps the
