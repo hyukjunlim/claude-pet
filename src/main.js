@@ -225,9 +225,10 @@ function createWindow() {
   applyPointerPolicy();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  const created = win;
   win.webContents.on('render-process-gone', (_e, details) => {
     log('renderer exited:', details.reason);
-    if (details.reason !== 'clean-exit') setTimeout(() => win?.reload(), 1000);
+    if (details.reason !== 'clean-exit') setTimeout(() => replaceWindow(created), 1000);
   });
   win.once('ready-to-show', () => {
     if (settings.get('visible')) {
@@ -236,6 +237,17 @@ function createWindow() {
     }
   });
   win.loadURL('pet://app/ui/index.html');
+}
+
+// A crashed page gets a new window rather than a reload. Once its page has reloaded, a window
+// no longer gets the mouse moves Electron passes through while it's click-through, so the pet
+// looked fine but could no longer be hovered, clicked or dragged.
+function replaceWindow(old) {
+  if (old !== win || old.isDestroyed()) return;
+  drag = null;
+  pointerInteractive = false;
+  createWindow();
+  old.destroy();
 }
 
 function applyPointerPolicy() {
