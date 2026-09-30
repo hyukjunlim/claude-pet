@@ -41,6 +41,7 @@ const BOUNCE = 0.7;
 const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
+const POINTER_POLL_MS = 50;     // how often the cursor is checked, for click-through
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
@@ -62,6 +63,8 @@ let currentPet = null;
 let petPos = null;              // top-left of the pet sprite, screen DIPs
 let layout = 'above';           // pills above or below the pet
 let pointerInteractive = false;
+let pointerKey = '';            // where the cursor was last seen in the window ('' outside it)
+let pointerTimer = null;
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
@@ -268,9 +271,8 @@ function createWindow() {
   win.loadURL('pet://app/ui/index.html');
 }
 
-// A crashed page gets a new window rather than a reload. Once its page has reloaded, a window
-// no longer gets the mouse moves Electron passes through while it's click-through, so the pet
-// looked fine but could no longer be hovered, clicked or dragged.
+// A crashed page gets a new window rather than a reload, so the new page starts out as the main
+// process then assumes: letting clicks through, with no drag under way.
 function replaceWindow(old) {
   if (old !== win || old.isDestroyed()) return;
   drag = null;
@@ -282,7 +284,26 @@ function replaceWindow(old) {
 function applyPointerPolicy() {
   if (!win || win.isDestroyed()) return;
   if (pointerInteractive || drag) win.setIgnoreMouseEvents(false);
-  else win.setIgnoreMouseEvents(true, { forward: true });
+  else win.setIgnoreMouseEvents(true);
+}
+
+// While the window lets clicks through it gets no mouse events, so the cursor is watched from
+// here and the page says whether it's over the pet or a bubble. Electron can forward mouse moves
+// to the page instead (setIgnoreMouseEvents' forward option), but on Windows those come through
+// a mouse hook and a child window of the page's, and they can stop coming: after the page had
+// reloaded they stopped for good, and the pet could no longer be hovered, clicked or dragged.
+function watchPointer() {
+  if (!win || win.isDestroyed() || !win.isVisible() || drag) return;
+  const cursor = screen.getCursorScreenPoint();
+  const b = win.getBounds();
+  const x = cursor.x - b.x;
+  const y = cursor.y - b.y;
+  const inside = x >= 0 && y >= 0 && x < b.width && y < b.height;
+  const key = inside ? `${x},${y}` : '';
+  if (key === pointerKey) return;
+  pointerKey = key;
+  // Once clicks reach the page it follows the cursor itself, but it can miss it leaving.
+  if (inside !== pointerInteractive) win.webContents.send('pet:pointer', inside ? { x, y } : null);
 }
 
 function setVisible(visible) {
@@ -613,6 +634,7 @@ function registerIpc() {
     sendLayout();
     sendSessions();
     sendUsage(true);
+    pointerKey = '';                    // and where the cursor is, on the next check
   });
   ipcMain.on('pet:interactive', (e, value) => {
     if (!fromPet(e)) return;
@@ -867,6 +889,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createTray();
     createWindow();
+    pointerTimer = setInterval(watchPointer, POINTER_POLL_MS);
 
     tracker = DEMO
       ? new DemoTracker()
@@ -921,6 +944,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     clearInterval(usageTimer);
+    clearInterval(pointerTimer);
     stopMomentum();
     tracker?.stop();
     codex?.stop();

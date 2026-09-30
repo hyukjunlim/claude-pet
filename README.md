@@ -276,7 +276,9 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 - **Clicks pass through.** The window runs `setIgnoreMouseEvents(true,{forward:true})` so it
   still receives mouse movement. The page tests whether the cursor is over the pet and only then
   asks for real clicks. Claude Pet goes one step further and tests the actual pixels, so the
-  transparent area around the pet passes clicks through too.
+  transparent area around the pet passes clicks through too. And it doesn't use the forwarded
+  mouse moves: on Windows they can stop coming, so the main process checks where the cursor is
+  every 50 ms instead.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
   plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
   instead plays it twice and rests on its first frame. Its reactions to you (the jump on hover,

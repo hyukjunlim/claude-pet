@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('pet', {
   onUsage: listen('pet:usage'),
   onWake: listen('pet:wake'),
   onLanded: listen('pet:landed'),
+  onPointer: listen('pet:pointer'),
   ready: () => ipcRenderer.send('pet:ready'),
   setInteractive: (value) => ipcRenderer.send('pet:interactive', value === true),
   dragStart: (screenX, screenY) => ipcRenderer.send('pet:drag-start', { screenX, screenY }),

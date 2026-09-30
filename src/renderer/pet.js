@@ -277,6 +277,11 @@
   document.documentElement.addEventListener('mouseleave', () => {
     if (!drag) setInteractive(false);
   });
+  // While clicks pass through, the page gets no mouse events; the main process says where the
+  // cursor is instead (null once it has left the window).
+  api.onPointer((p) => {
+    if (!drag) setInteractive(p ? hitTest(p.x, p.y) : false);
+  });
 
   // ---------------------------------------------------------- hover, drag, throw, click
 
