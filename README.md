@@ -270,7 +270,9 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 
 - **A separate overlay window.** It's frameless, transparent, always on top, off the taskbar,
   shadowless and never takes focus: `frame:false, transparent:true, alwaysOnTop,
-  skipTaskbar, focusable:false`, then `setAlwaysOnTop(true,'floating')`.
+  skipTaskbar, focusable:false`, then `setAlwaysOnTop(true,'floating')`. On Windows Claude Pet
+  uses `'pop-up-menu'` instead: there `'floating'` also puts the window just behind the taskbar,
+  and when the taskbar isn't on top at that moment, the pet isn't either.
 - **Clicks pass through.** The window runs `setIgnoreMouseEvents(true,{forward:true})` so it
   still receives mouse movement. The page tests whether the cursor is over the pet and only then
   asks for real clicks. Claude Pet goes one step further and tests the actual pixels, so the

@@ -244,7 +244,11 @@ function createWindow() {
       spellcheck: false,
     },
   });
-  win.setAlwaysOnTop(true, 'floating');
+  // On Windows, Electron puts a 'floating' window just behind the taskbar, so when the taskbar
+  // wasn't always on top at that moment (as it isn't at times when it hides itself), the pet
+  // wasn't either, and other windows went over it. There the other levels are all simply
+  // always on top.
+  win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setMenuBarVisibility(false);
   applyPointerPolicy();
