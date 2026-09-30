@@ -9,7 +9,9 @@
 //              adds permission prompts, from the app's log)
 //   failed   - the turn ended with an API error
 //   review   - the turn finished and you haven't looked at it yet
-//   running  - a turn is in progress
+//   running  - a turn is in progress, or one it started in the background (a command, an agent,
+//              a monitor) hasn't finished: its ending notice starts the next turn, and
+//              "Ready" in between would just flicker
 //   idle     - nothing to report
 
 const path = require('node:path');
@@ -17,10 +19,15 @@ const path = require('node:path');
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 const NEEDS_YOU = new Set(['blocked', 'need_input']);   // end-of-turn summaries the app marks yellow
 const END_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'refusal']);
+const TASK_ENDED = new Set(['completed', 'failed', 'killed', 'stopped']);   // <status> of a task's last notice
 const STALE_RUNNING_MS = 45 * 60 * 1000;
+// A background task that never reported back (its session was closed, say) stops counting after
+// this long. Nearly all finish well within it; the rare longer one falls back to "Ready".
+const STALE_BACKGROUND_MS = 4 * 60 * 60 * 1000;
 const UNREAD_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MAX_TURN_UUIDS = 64;
 const MAX_SEEN_ASSISTANTS = 2000;
+const MAX_BACKGROUND_TASKS = 64;
 
 const STATUS_PRIORITY = { waiting: 0, failed: 1, review: 2, running: 3, idle: 4 };
 
@@ -36,6 +43,7 @@ function createTurnState() {
     error: null,
     retrying: false,
     interrupted: false,
+    backgroundTasks: new Map(),  // task id -> { detail, at }: sent to the background, no ending notice yet
     title: null,
     cwd: null,
     // Used to tell whether an SSH session's copied transcript has caught up with the desktop index.
@@ -93,6 +101,8 @@ function describeTool(name, input) {
     case 'Agent':
     case 'Task':
       return oneLine(i.description ? `Agent: ${i.description}` : 'Running an agent', 60);
+    case 'Monitor':
+      return oneLine(i.description ? `Watching ${i.description}` : 'Watching a command', 60);
     case 'AskUserQuestion': {
       const q = Array.isArray(i.questions) ? i.questions[0]?.question : null;
       return oneLine(q || 'Has a question for you');
@@ -138,6 +148,36 @@ function endTurn(state, at, { interrupted = false } = {}) {
   state.interrupted = interrupted;
 }
 
+// The id of the task a tool result says went to the background, or null: a command (also one
+// that ran past its timeout), an agent or a workflow, or a Monitor (unless it watches for the
+// whole session, which would never finish). `result` is the entry's structured toolUseResult;
+// `call` is the pending tool call it answers.
+function launchedTask(result, call) {
+  if (!result || typeof result !== 'object') return null;
+  if (result.backgroundTaskId) return String(result.backgroundTaskId);
+  if (result.status === 'async_launched') return String(result.agentId || result.taskId || '') || null;
+  if (call?.name === 'Monitor' && result.taskId && !result.persistent) return String(result.taskId);
+  return null;
+}
+
+function startBackgroundTask(state, id, task) {
+  state.backgroundTasks.delete(id);
+  state.backgroundTasks.set(id, task);
+  if (state.backgroundTasks.size > MAX_BACKGROUND_TASKS) state.backgroundTasks.delete(state.backgroundTasks.keys().next().value);
+}
+
+// A finished task reports back in a <task-notification> that reaches the transcript as the next
+// prompt, or, if a turn is running, as a queued_command attachment. (A monitor's progress notices
+// carry no <status>: the task goes on.)
+function endBackgroundTasks(state, text) {
+  if (!state.backgroundTasks.size || !text.includes('<task-notification>')) return;
+  for (const [, notice] of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const id = /<task-id>([\w-]+)<\/task-id>/.exec(notice)?.[1];
+    const status = /<status>(\w+)<\/status>/.exec(notice)?.[1];
+    if (id && TASK_ENDED.has(status)) state.backgroundTasks.delete(id);
+  }
+}
+
 function applyEntry(state, entry) {
   if (!entry || typeof entry !== 'object') return;
   const at = timeOf(entry);
@@ -158,6 +198,11 @@ function applyEntry(state, entry) {
     case 'assistant':
       applyAssistant(state, entry, at);
       return;
+    case 'attachment':
+      if (entry.attachment?.type === 'queued_command' && typeof entry.attachment.prompt === 'string') {
+        endBackgroundTasks(state, entry.attachment.prompt);
+      }
+      return;
     case 'system':
       applySystem(state, entry, at);
       return;
@@ -168,14 +213,20 @@ function applyEntry(state, entry) {
 
 function applyUser(state, entry, at) {
   if (at > state.lastUserAt) state.lastUserAt = at;
-  if (entry.isMeta || entry.isCompactSummary || entry.isVisibleInTranscriptOnly) return;
   const content = entry.message?.content;
+  if (typeof content === 'string') endBackgroundTasks(state, content);
+  if (entry.isMeta || entry.isCompactSummary || entry.isVisibleInTranscriptOnly) return;
   if (at) state.lastEventAt = Math.max(state.lastEventAt, at);
 
   if (Array.isArray(content) && content.some((c) => c?.type === 'tool_result')) {
     let interrupted = false;
+    // One entry holds one result, so its structured toolUseResult says what the call did.
+    const single = content.filter((c) => c?.type === 'tool_result').length === 1;
     for (const c of content) {
       if (c?.type !== 'tool_result') continue;
+      const call = state.pendingTools.get(c.tool_use_id);
+      const task = launchedTask(single ? entry.toolUseResult : null, call);
+      if (task) startBackgroundTask(state, task, { detail: call?.detail || 'a task', at });
       state.pendingTools.delete(c.tool_use_id);
       // Only at the start: a tool's output can contain these words (say, a file that mentions them).
       if (/^\s*\[Request interrupted by user/.test(textOf(c.content))) interrupted = true;
@@ -252,6 +303,21 @@ function applySystem(state, entry, at) {
 
 // meta: { lastFocusedAt, dismissedAt, summary: postTurnSummary from the desktop session file }
 function deriveStatus(state, meta = {}, now = Date.now()) {
+  const derived = turnStatus(state, meta, now);
+  // Between the turn that starts a background task and the one its notice starts, Claude isn't
+  // working but the task is. That's still running, seen or not. A question, an error or a stale
+  // turn (its session is gone, and its tasks with it) still show as they are.
+  if (state.turnActive || (derived.status !== 'review' && derived.status !== 'idle')) return derived;
+  const tasks = [...state.backgroundTasks.values()].filter((t) => now - t.at < STALE_BACKGROUND_MS);
+  if (!tasks.length) return derived;
+  return {
+    status: 'running',
+    detail: tasks.length === 1 ? `In the background: ${tasks[0].detail}` : `${tasks.length} background tasks`,
+    since: Math.min(...tasks.map((t) => t.at)),
+  };
+}
+
+function turnStatus(state, meta, now) {
   const pending = [...state.pendingTools.values()];
   const asking = pending.find((t) => WAITING_TOOLS.has(t.name));
   if (asking && !(meta.dismissedAt >= asking.at)) {   // dismissed, it shows as the running turn it is

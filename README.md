@@ -51,7 +51,7 @@ command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
 | waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker) and you haven't looked at it since |
 | failed        | **Error**     | The turn ended with an API error |
 | review        | **Ready**     | A turn finished and you haven't opened that session since |
-| running       | **Running**   | Claude is working |
+| running       | **Running**   | Claude is working, or a command, agent or monitor it sent to the background is still going |
 | idle          | none          | Nothing to report |
 
 Every active session gets its own bubble, most urgent first, in the same order as ChatGPT's pet:
@@ -121,6 +121,14 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   PowerShell helper reports the front window, event-driven, only while that's in question
   ([src/foreground.js](src/foreground.js); Windows only). What it saw is saved, so a restart of
   the pet doesn't bring those bubbles back.
+- **Background tasks:** when Claude sends a command, an agent or a monitor to the background, its
+  turn ends at once and the task's notice starts the next one when it finishes. To keep the bubble
+  from going Ready, gone, Running again, the pet follows each task from the transcript entry that
+  launched it to the notice that ends it, and stays "Running" until they're all done. A question,
+  an error or a turn that needs you still shows over it. A monitor that watches for the whole
+  session isn't counted, since it never finishes. A task that never reports back (its session was
+  closed) stops counting after 4 hours, and a dev server left running in the background keeps the
+  bubble on "Running" for those 4 hours too.
 - **Terminal sessions:** `claude` sessions run in a terminal are picked up from recently written
   transcripts. They're listed as "(terminal)" and can't be opened with a click. Sessions you
   deleted in the app are skipped.

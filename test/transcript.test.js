@@ -18,8 +18,9 @@ const toolUse = (s, id, name, input = {}) => ({
   type: 'assistant', uuid: `a-${id}`, timestamp: at(s),
   message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name, input }] },
 });
-const toolResult = (s, id, content = 'ok') => ({
+const toolResult = (s, id, content = 'ok', toolUseResult = undefined) => ({
   type: 'user', timestamp: at(s), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] },
+  ...(toolUseResult && { toolUseResult }),
 });
 const reply = (s, uuid = 'a-final', extra = {}) => ({
   type: 'assistant', uuid, timestamp: at(s),
@@ -151,4 +152,102 @@ test('describeTool summarizes common tools', () => {
   assert.equal(describeTool('Bash', { command: 'npm test', description: 'Run tests' }), 'Run tests');
   assert.equal(describeTool('WebFetch', { url: 'https://docs.example.com/a' }), 'Reading docs.example.com');
   assert.equal(describeTool('mcp__github__create_issue', {}), 'create issue');
+});
+
+// ---------------------------------------------------------------- background tasks
+
+const bashTask = (s, id, taskId, description = 'Watch the build') => [
+  toolUse(s, id, 'Bash', { command: 'make', description, run_in_background: true }),
+  toolResult(s + 1, id, `Command running in background with ID: ${taskId}.`, { backgroundTaskId: taskId }),
+];
+const notice = (taskId, status = 'completed') => (
+  `<task-notification>\n<task-id>${taskId}</task-id>\n<status>${status}</status>\n<summary>done</summary>\n</task-notification>`
+);
+const noticePrompt = (s, taskId, status) => prompt(s, notice(taskId, status));
+const noticeAttachment = (s, taskId, status) => ({
+  type: 'attachment', timestamp: at(s), attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: notice(taskId, status) },
+});
+const inBackground = [prompt(0), ...bashTask(1, 't1', 'b1'), reply(4), stopSummary(5)];
+
+test('a turn that leaves a background task running stays running, seen or not', () => {
+  const s = run(inBackground);
+  for (const meta of [{}, { lastFocusedAt: T0 + 9000 }, { dismissedAt: T0 + 9000 }]) {
+    assert.deepEqual(deriveStatus(s, meta, T0 + 60_000), { status: 'running', detail: 'In the background: Watch the build', since: T0 + 2000 });
+  }
+});
+
+test('it goes back to Ready when the notice ends the task and the turn it starts is over', () => {
+  const s = run([...inBackground, noticePrompt(60, 'b1'), reply(65, 'a-report'), stopSummary(66)]);
+  assert.equal(deriveStatus(s, {}, T0 + 70_000).status, 'review');
+  assert.equal(deriveStatus(s, { lastFocusedAt: T0 + 69_000 }, T0 + 70_000).status, 'idle');
+});
+
+test('a task that ends while Claude is working is not waited for after the turn', () => {
+  const s = run([...inBackground, prompt(30, 'anything new?'), noticeAttachment(40, 'b1', 'failed'), reply(45, 'a-two'), stopSummary(46)]);
+  assert.equal(deriveStatus(s, {}, T0 + 50_000).status, 'review');
+});
+
+test('the turn its notice starts is running, then Ready, with no gap in between', () => {
+  const s = run([...inBackground, noticePrompt(60, 'b1')]);
+  assert.deepEqual(deriveStatus(s, {}, T0 + 61_000), { status: 'running', detail: 'Thinking', since: T0 + 60_000 });
+});
+
+test('it stays running until every background task is done', () => {
+  const s = run([prompt(0), ...bashTask(1, 't1', 'b1'), ...bashTask(3, 't2', 'b2'), reply(6), stopSummary(7)]);
+  assert.equal(deriveStatus(s, {}, T0 + 60_000).detail, '2 background tasks');
+  applyEntry(s, noticePrompt(60, 'b1'));
+  applyEntry(s, reply(62, 'a-one'));
+  applyEntry(s, stopSummary(63));
+  assert.equal(deriveStatus(s, {}, T0 + 65_000).detail, 'In the background: Watch the build');
+  applyEntry(s, noticePrompt(120, 'b2'));
+  applyEntry(s, reply(122, 'a-two'));
+  applyEntry(s, stopSummary(123));
+  assert.equal(deriveStatus(s, {}, T0 + 125_000).status, 'review');
+});
+
+test('agents, workflows and monitors count too, but a monitor for the whole session does not', () => {
+  const agent = run([prompt(0), toolUse(1, 'a1', 'Agent', { description: 'Review the diff' }),
+    toolResult(2, 'a1', 'Async agent launched', { status: 'async_launched', agentId: 'agent1', isAsync: true }), reply(4), stopSummary(5)]);
+  assert.equal(deriveStatus(agent, {}, T0 + 60_000).detail, 'In the background: Agent: Review the diff');
+  const workflow = run([prompt(0), toolUse(1, 'w1', 'Workflow'),
+    toolResult(2, 'w1', 'started', { status: 'async_launched', taskId: 'wf1', taskType: 'local_workflow' }), reply(4), stopSummary(5)]);
+  assert.equal(deriveStatus(workflow, {}, T0 + 60_000).status, 'running');
+  const monitor = (persistent) => run([prompt(0), toolUse(1, 'm1', 'Monitor', { description: 'the deploy' }),
+    toolResult(2, 'm1', 'Monitor started (task m1x)', { taskId: 'm1x', timeoutMs: 1_800_000, persistent }), reply(4), stopSummary(5)]);
+  assert.equal(deriveStatus(monitor(false), {}, T0 + 60_000).detail, 'In the background: Watching the deploy');
+  assert.equal(deriveStatus(monitor(true), {}, T0 + 60_000).status, 'review');
+});
+
+test("a monitor's progress notice does not end it, but its last one does", () => {
+  const s = run([prompt(0), toolUse(1, 'm1', 'Monitor'), toolResult(2, 'm1', 'Monitor started (task m1x)', { taskId: 'm1x', timeoutMs: 1000 }),
+    reply(4), stopSummary(5),
+    prompt(30, '<task-notification>\n<task-id>m1x</task-id>\n<summary>Monitor event: "the deploy"</summary>\n<event>step 2</event>\n</task-notification>'),
+    reply(32, 'a-event'), stopSummary(33)]);
+  assert.equal(deriveStatus(s, {}, T0 + 40_000).status, 'running');
+  applyEntry(s, noticePrompt(90, 'm1x', 'completed'));
+  applyEntry(s, reply(92, 'a-done'));
+  applyEntry(s, stopSummary(93));
+  assert.equal(deriveStatus(s, {}, T0 + 95_000).status, 'review');
+});
+
+test('a background task that never reports back stops counting after a few hours', () => {
+  const s = run(inBackground);
+  assert.equal(deriveStatus(s, {}, T0 + 3 * 60 * 60 * 1000).status, 'running');
+  assert.equal(deriveStatus(s, {}, T0 + 5 * 60 * 60 * 1000).status, 'review');
+});
+
+test('a question or an error still shows over a running background task', () => {
+  const asked = run([prompt(0), ...bashTask(1, 't1', 'b1'),
+    toolUse(4, 'q1', 'AskUserQuestion', { questions: [{ question: 'Which one?' }] })]);
+  assert.equal(deriveStatus(asked, {}, T0 + 60_000).status, 'waiting');
+  const failed = run([prompt(0), ...bashTask(1, 't1', 'b1'), reply(4, 'a-err', { isApiErrorMessage: true }), stopSummary(5)]);
+  assert.equal(deriveStatus(failed, {}, T0 + 60_000).status, 'failed');
+  const needsYou = run(inBackground);
+  const summary = { summarizes_uuid: 'a-final', status_category: 'need_input', needs_action: 'Pick one' };
+  assert.equal(deriveStatus(needsYou, { summary }, T0 + 60_000).status, 'waiting');
+});
+
+test('a hung turn is stale even with a background task behind it', () => {
+  const s = run([prompt(0), ...bashTask(1, 't1', 'b1'), toolUse(4, 't2', 'Read', { file_path: 'a.js' })]);
+  assert.equal(deriveStatus(s, {}, T0 + 2 * 60 * 60 * 1000).status, 'idle');
 });
