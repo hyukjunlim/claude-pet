@@ -44,6 +44,10 @@ folder. The flags `--start-at-login` and `--no-start-at-login` set the same opti
 command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
 (or click the tray icon) for the menu.
 
+The pet logs what goes wrong (a crash, a link that wouldn't open) to `claude-pet.log` in
+`%APPDATA%\claude-pet\logs` (`~/Library/Logs/claude-pet` on macOS). Past 1 MB it starts over and
+keeps the previous log as `claude-pet.old.log`.
+
 ## What the pet tells you
 
 | Pet animation | Bubble        | Meaning |

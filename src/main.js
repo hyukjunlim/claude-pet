@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { format } = require('node:util');
 const {
   app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, nativeImage, net, protocol, screen, shell,
 } = require('electron');
@@ -45,6 +46,7 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const FOREGROUND_HANDOFF_MS = 1500;
+const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as claude-pet.old.log
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'pet', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -69,9 +71,32 @@ let codexSessions = [];
 const usage = { claude: null, codex: null };   // each app's newest usage figures (see usage.js)
 let usageKey = '';
 let usageTimer = null;
+let logFile = null;
+let logBytes = 0;
 
+// The pet usually runs without a console, so lines also go to claude-pet.log in the app's logs
+// folder (%APPDATA%\claude-pet\logs on Windows).
 function log(...args) {
-  console.log(`[claude-pet ${new Date().toTimeString().slice(0, 8)}.${String(Date.now() % 1000).padStart(3, '0')}]`, ...args);
+  const now = new Date();
+  const pad = (n, width = 2) => String(n).padStart(width, '0');
+  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const line = `[claude-pet ${day} ${now.toTimeString().slice(0, 8)}.${pad(now.getMilliseconds(), 3)}] ${format(...args)}`;
+  console.log(line);
+  try {
+    if (!logFile) {
+      logFile = path.join(app.getPath('logs'), 'claude-pet.log');
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      logBytes = fs.statSync(logFile, { throwIfNoEntry: false })?.size || 0;
+    }
+    if (logBytes > LOG_MAX_BYTES) {
+      fs.renameSync(logFile, logFile.replace(/\.log$/, '.old.log'));
+      logBytes = 0;
+    }
+    fs.appendFileSync(logFile, `${line}\n`);
+    logBytes += Buffer.byteLength(line) + 1;
+  } catch {
+    // the console still has it
+  }
 }
 
 // ---------------------------------------------------------------- geometry
@@ -227,7 +252,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   const created = win;
   win.webContents.on('render-process-gone', (_e, details) => {
-    log('renderer exited:', details.reason);
+    log('renderer exited:', details.reason, `(exit code ${details.exitCode})`);
     if (details.reason !== 'clean-exit') setTimeout(() => replaceWindow(created), 1000);
   });
   win.once('ready-to-show', () => {
@@ -879,6 +904,11 @@ if (!app.requestSingleInstanceLock()) {
     screen.on('display-added', onDisplaysChanged);
     screen.on('display-removed', onDisplaysChanged);
     log(`watching ${os.homedir()} sessions${codex ? ' and Codex threads' : ''}; press ${shortcut} to show/hide`);
+  });
+
+  // The GPU and other helper processes (the page's own process is logged with its window).
+  app.on('child-process-gone', (_event, details) => {
+    log(`${details.type} process exited:`, details.reason, `(exit code ${details.exitCode})`);
   });
 
   app.on('window-all-closed', () => {
