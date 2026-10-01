@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { CodexTracker, parseConnections, parseUnread, threadUrl } = require('../src/codex');
+const { CodexTracker, parseAeons, parseConnections, parseUnread, threadUrl } = require('../src/codex');
 const { BOOTSTRAP, CodexRemote, LOADER, WATCHER } = require('../src/codex-remote');
 const { applyRolloutEntry, createRolloutState, rateLimitsOf, rolloutStatus } = require('../src/rollout');
 
@@ -165,6 +165,108 @@ test('the tracker combines running threads here with unread threads on other hos
 
     tracker.dismiss(ready.id);
     assert.deepEqual(tracker.sessions.map((s) => s.status), ['running']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+// ------------------------------------------------------------------ dot
+
+const DOT = '0199d0d0-0001-7000-8000-00000000d071';
+const DOT_TASK = '0199d0d0-0002-7000-8000-00000000d072';
+
+// The app's persisted state for one dot, with `unread` threads on the cloud host.
+function dotState(activity, unread = []) {
+  return {
+    'electron-persisted-atom-state': {
+      [`aeon-introduction-v1:${DOT}`]: 'dot',
+      [`aeon-last-activity-v1:${DOT}`]: activity,
+      'aeon-subtasks-by-account-v1': { me: { [JSON.stringify(['durable', DOT])]: [DOT_TASK] } },
+    },
+    'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`durable:${'c'.repeat(64)}`]: unread } } },
+  };
+}
+
+test("a dot's name, last activity and subtasks come from the app's persisted state", () => {
+  const { aeons, subtasks } = parseAeons(dotState(T0 + 396));
+  assert.deepEqual([...aeons], [[DOT, { name: 'dot', activity: T0 + 396, hostId: 'durable' }]]);
+  assert.deepEqual([...subtasks], [[DOT_TASK, DOT]]);
+  // A dot known only from its subtasks still gets a name, and its host is the one they name.
+  const bare = parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': { me: { [JSON.stringify(['elsewhere', DOT])]: [DOT_TASK] } } } });
+  assert.equal(bare.aeons.get(DOT).name, 'dot');
+  assert.equal(bare.aeons.get(DOT).hostId, 'elsewhere');
+  assert.equal(parseAeons(null).aeons.size, 0);
+  assert.equal(parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': 'nonsense' } }).subtasks.size, 0);
+});
+
+test("a dot works from the app's own stamp until the server's whole-second one, and its replies are ready", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  try {
+    const file = path.join(home, '.codex-global-state.json');
+    let clock = T0;
+    let version = 0;
+    const write = (j) => {
+      fs.writeFileSync(file, JSON.stringify(j));
+      fs.utimesSync(file, new Date(T0 + 1000 * ++version), new Date(T0 + 1000 * version));   // so it reads as changed
+    };
+    const advance = async (ms, j) => {
+      clock += ms;
+      if (j) write(j);
+      await tracker.tick();
+      return tracker.sessions;
+    };
+    write(dotState(T0 - 3_600_000));
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => clock });
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);
+
+    // You send a message: the app stamps it to the millisecond.
+    let [dot] = await advance(2000, dotState(T0 + 2396));
+    assert.equal(dot.status, 'running');
+    assert.equal(dot.title, 'dot');
+    assert.equal(dot.id, `codex:${DOT}`);
+    assert.equal(dot.url, `codex://threads/${DOT}?hostId=durable`);   // the dot's own conversation
+    assert.equal(dot.since, T0 + 2000);
+    // More events in the same turn keep it going, from the same start.
+    [dot] = await advance(3000, dotState(T0 + 5852));
+    assert.deepEqual([dot.status, dot.since], ['running', T0 + 2000]);
+    // The server confirms the reply with a whole second, and the app lists the thread as unread.
+    [dot] = await advance(6000, dotState(T0 + 11_000, [DOT]));
+    assert.deepEqual([dot.status, dot.title, dot.url], ['review', 'dot', `codex://threads/${DOT}?hostId=durable`]);
+    assert.equal(dot.since, T0 + 11_000);
+    // A new message while the old reply is still unread: working again.
+    [dot] = await advance(2000, dotState(T0 + 13_165, [DOT]));
+    assert.deepEqual([dot.status, dot.since], ['running', T0 + 13_000]);
+    // No stamp for a while: the turn is taken as over, and the unread reply shows again.
+    [dot] = await advance(60_000);
+    assert.equal(dot.status, 'review');
+
+    // What a dot started is the dot's: one bubble, named for it, that opens the finished thread.
+    const bubbles = await advance(2000, dotState(T0 + 80_000, [DOT_TASK]));
+    assert.equal(bubbles.length, 1);
+    assert.deepEqual([bubbles[0].status, bubbles[0].title, bubbles[0].id], ['review', 'dot', `codex:${DOT}`]);
+    assert.equal(bubbles[0].url, `codex://threads/${DOT_TASK}?hostId=durable`);
+    tracker.dismiss(`codex:${DOT}`);
+    assert.deepEqual(tracker.sessions, []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('a dot that is mid-turn when the pet starts is working, and one that stopped is not', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  try {
+    const file = path.join(home, '.codex-global-state.json');
+    const statusAt = async (activity) => {
+      fs.writeFileSync(file, JSON.stringify(dotState(activity)));
+      const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => T0 });
+      await tracker.tick();
+      return tracker.sessions;
+    };
+    const [dot] = await statusAt(T0 - 5000 + 123);
+    assert.deepEqual([dot.status, dot.since], ['running', T0 - 5000 + 123]);
+    assert.deepEqual(await statusAt(T0 - 120_000 + 123), []);   // its last stamp is long past
+    assert.deepEqual(await statusAt(T0 - 5000), []);            // the server's stamp: it finished
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }

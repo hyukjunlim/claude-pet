@@ -12,6 +12,7 @@
 //     this PC (the app's local host, and the Codex CLI).
 //   - The same rollouts on each SSH host, streamed by a small watcher (see codex-remote.js).
 //     Each reply in a rollout also records the account's rate limits, for the weekly-limit meter.
+//   - The same state file again for the app's "dots", which have no rollout (see parseAeons).
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -32,6 +33,9 @@ const PAST_LIMITS_FILES = 3;                     // older rollouts to look throu
 const APP_STATE_MIN_MS = 1000;                   // the app's state file is ~3 MB
 const CATALOG_MIN_MS = 5000;
 const KICK_DELAY_MS = 100;
+const DOT_NAME = 'dot';
+const DOT_HOST = 'durable';                      // the cloud host a dot's threads live on
+const DOT_WORKING_MS = 45 * 1000;                // a turn with no new stamp this long is taken as over
 
 function codexPaths() {
   const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -150,6 +154,45 @@ function parseConnections(j) {
   return out;
 }
 
+// The "dots" in the app (a messaging assistant, named dot) are threads on the cloud host with no
+// rollout to follow. The app's persisted state has, per dot thread:
+//   aeon-introduction-v1:<id>   its name
+//   aeon-last-activity-v1:<id>  when it last had a message, in ms. The app stamps its own events
+//                               to the millisecond; the server's stamp for a finished reply is
+//                               a whole second. So an odd millisecond means a turn is under way.
+//   aeon-subtasks-by-account-v1: { <account>: { '["<host>","<id>"]': [Codex threads it started] } }
+function parseAeons(j) {
+  const atoms = j?.['electron-persisted-atom-state'];
+  const aeons = new Map();      // dot threadId -> { name, activity, hostId }
+  const subtasks = new Map();   // subtask threadId -> its dot's threadId
+  if (!atoms || typeof atoms !== 'object') return { aeons, subtasks };
+  const aeon = (id) => {
+    if (!aeons.has(id)) aeons.set(id, { name: DOT_NAME, activity: 0, hostId: DOT_HOST });
+    return aeons.get(id);
+  };
+  for (const [key, value] of Object.entries(atoms)) {
+    const m = /^aeon-(introduction|last-activity)-v1:(.+)$/.exec(key);
+    if (m?.[1] === 'introduction' && typeof value === 'string' && value.trim()) aeon(m[2]).name = value.trim();
+    else if (m?.[1] === 'last-activity' && Number.isFinite(value) && value > 0) aeon(m[2]).activity = value;
+  }
+  for (const byParent of Object.values(atoms['aeon-subtasks-by-account-v1'] ?? {})) {
+    for (const [parent, ids] of Object.entries(byParent ?? {})) {
+      let key;
+      try {
+        key = JSON.parse(parent);
+      } catch {
+        continue;
+      }
+      const [hostId, parentId] = Array.isArray(key) ? key : [];
+      if (typeof parentId !== 'string' || !Array.isArray(ids)) continue;
+      if (typeof hostId === 'string' && hostId) aeon(parentId).hostId = hostId;
+      else aeon(parentId);
+      for (const id of ids) if (typeof id === 'string') subtasks.set(id, parentId);
+    }
+  }
+  return { aeons, subtasks };
+}
+
 function hostName(hostId, names) {
   if (!hostId || hostId === 'local') return null;
   return names.get(hostId) || hostId.replace(/^remote-ssh-discovered:/, '');
@@ -203,6 +246,8 @@ class CodexTracker extends EventEmitter {
     this.dismissed = new Map(Object.entries(dismissed).filter(([id]) => id.startsWith('codex:')));
     this.unread = new Map();          // threadId -> hostId, from the app's unread list
     this.unreadSince = new Map();     // threadId -> when it became unread while we watched
+    this.aeons = new Map();           // dot threadId -> { name, activity, working, since, activeAt }
+    this.subtasks = new Map();        // a dot's subtask threadId -> the dot's threadId
     this.connections = [];            // the SSH hosts the app works on
     this.hostNames = new Map();       // hostId -> the name you gave the host
     this.remotes = new Map();         // hostId -> CodexRemote
@@ -384,9 +429,29 @@ class CodexTracker extends EventEmitter {
     for (const id of unread.keys()) if (!firstRead && !this.unread.has(id)) this.unreadSince.set(id, now);
     for (const id of this.unreadSince.keys()) if (!unread.has(id)) this.unreadSince.delete(id);
     this.unread = unread;
+    this.followAeons(parseAeons(j), now, firstRead);
     this.connections = parseConnections(j);
     this.hostNames = new Map(this.connections.map((c) => [c.hostId, c.name]));
     this.syncRemotes();
+  }
+
+  // A dot is busy from a stamp with an odd millisecond until the server's whole-second stamp.
+  // We can only date a stamp we saw arrive; on the first read the stamp itself is all we have.
+  followAeons({ aeons, subtasks }, now, firstRead) {
+    const next = new Map();
+    for (const [id, a] of aeons) {
+      const prev = this.aeons.get(id);
+      if (prev && prev.activity === a.activity) {
+        next.set(id, { ...prev, name: a.name });
+        continue;
+      }
+      const working = a.activity % 1000 !== 0;
+      const activeAt = (prev || !firstRead) ? now : Math.min(a.activity, now);
+      const continued = working && prev?.working && now - prev.activeAt < DOT_WORKING_MS;
+      next.set(id, { ...a, working, activeAt, since: continued ? prev.since : activeAt });
+    }
+    this.aeons = next;
+    this.subtasks = subtasks;
   }
 
   // One watcher per SSH host the app works on, while the tracker runs.
@@ -488,18 +553,21 @@ class CodexTracker extends EventEmitter {
     const now = this.now();
     const byThread = new Map();
     const followed = new Set();
-    const session = (threadId, hostId, cwd, derived) => {
+    // A dot, and the threads it starts, show as one bubble named for the dot. Clicking opens
+    // `linkId`: the thread the app lists as unread, which can be one the dot started.
+    const session = (threadId, hostId, cwd, derived, linkId = threadId) => {
       const c = this.catalog.get(threadId);
       const host = c?.hostId || hostId;
+      const dot = this.aeons.get(threadId);
       return {
         id: `codex:${threadId}`,
         kind: 'codex',
         hostSessionId: null,
-        title: c?.title || this.threadNames.get(threadId) || folderName(c?.cwd || cwd) || 'Codex thread',
-        remote: hostName(host, this.hostNames),
+        title: dot?.name || c?.title || this.threadNames.get(threadId) || folderName(c?.cwd || cwd) || 'Codex thread',
+        remote: dot ? null : hostName(host, this.hostNames),
         project: projectName(c?.cwd || cwd),
         cwd: c?.cwd || cwd,
-        url: threadUrl(threadId, host),
+        url: threadUrl(linkId, host),
         ...derived,
       };
     };
@@ -517,13 +585,21 @@ class CodexTracker extends EventEmitter {
       for (const f of remote.files.values()) follow(f.state, hostId, remote.skew);
     }
     // Threads on other hosts that finished while you weren't looking.
-    for (const [threadId, hostId] of this.unread) {
+    for (const [unreadId, hostId] of this.unread) {
+      const threadId = this.subtasks.get(unreadId) ?? unreadId;
       if (followed.has(threadId)) continue;
       const host = this.catalog.get(threadId)?.hostId || hostId;
-      const since = Math.max(this.catalog.get(threadId)?.updatedAt || 0, this.unreadSince.get(threadId) || 0);
+      const dotAt = Math.min(this.aeons.get(threadId)?.activity || 0, now);   // when a dot last spoke
+      const since = Math.max(this.catalog.get(unreadId)?.updatedAt || 0, this.unreadSince.get(unreadId) || 0, dotAt);
       const dismissedAt = this.dismissed.get(`codex:${threadId}`) || 0;
       if ((dismissedAt && dismissedAt >= since) || (since && now - since > UNREAD_WINDOW_MS)) continue;
-      byThread.set(threadId, session(threadId, host, null, { status: 'review', detail: '', since }));
+      if (byThread.get(threadId)?.since >= since) continue;   // a dot with several finished threads
+      byThread.set(threadId, session(threadId, host, null, { status: 'review', detail: '', since }, unreadId));
+    }
+    // A dot with a turn under way is working, even if an earlier reply is still unread.
+    for (const [threadId, dot] of this.aeons) {
+      if (!dot.working || now - dot.activeAt >= DOT_WORKING_MS) continue;
+      byThread.set(threadId, session(threadId, dot.hostId, null, { status: 'running', detail: 'Working', since: dot.since }));
     }
 
     const out = [...byThread.values()].sort(compareSessions);
@@ -551,4 +627,4 @@ class CodexTracker extends EventEmitter {
   }
 }
 
-module.exports = { CodexTracker, codexPaths, parseConnections, parseUnread, readCatalog, threadUrl };
+module.exports = { CodexTracker, codexPaths, parseAeons, parseConnections, parseUnread, readCatalog, threadUrl };

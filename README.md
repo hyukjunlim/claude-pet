@@ -211,6 +211,13 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   them every 30 s, so a resumed old thread can take that long to show. It exits as soon as the
   pet quits, even if the pet crashes. Tray menu → *Follow Codex on SSH hosts* turns this off. The host
   needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
+- **dot:** the app's *dots* (the assistant you message, named dot) run in the cloud and leave no
+  history file to follow, so there's no step to show. The pet goes by what the app keeps in its
+  state file: a dot is *working* from a message the app stamps to the millisecond until the
+  server's whole-second stamp for the reply (or 45 seconds after the last stamp, if none comes),
+  and *Ready* while the app lists it as unread. The threads a dot starts show as the dot.
+  Clicking opens the dot's conversation, or the finished thread it started (`codex://threads/<id>`
+  on the dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
 - **Not shown:** ChatGPT chats, and Codex's own helper threads such as its auto-reviewer.
@@ -321,7 +328,7 @@ src/preload.js      Minimal API exposed to the page (context isolation, sandboxe
 src/renderer/       Pet page: sprite engine, activity bubbles
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
-src/codex.js        Codex threads: the unread list, the thread list, local histories
+src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (SSH + a small Python watcher)
 src/rollout.js      Codex rollout entries → running / waiting / review / failed
 src/transcript.js   Transcript entries → running / waiting / review / failed
