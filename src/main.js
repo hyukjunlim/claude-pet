@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, nativeImage, net, protocol, screen, shell,
+  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
 const { discoverPets, petRoots } = require('./pets');
@@ -15,6 +15,7 @@ const { CodexTracker, codexPaths } = require('./codex');
 const { compareSessions } = require('./transcript');
 const { nextLocalTime, usageView, withWeeklyResets } = require('./usage');
 const { DemoTracker } = require('./demo');
+const { checkForUpdate, startUpdate } = require('./updater');
 
 const DEMO = process.argv.includes('--demo');
 const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
@@ -76,6 +77,8 @@ let usageKey = '';
 let usageTimer = null;
 let logFile = null;
 let logBytes = 0;
+let update = null;              // what the last check found, when there's an update waiting
+let updateBusy = null;          // 'checking' while looking, 'asking' while a dialog is up
 
 // The pet usually runs without a console, so lines also go to claude-pet.log in the app's logs
 // folder (%APPDATA%\claude-pet\logs on Windows).
@@ -820,6 +823,13 @@ function buildMenu() {
     checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
     click: (mi) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: mi.checked }),
   });
+  if (!DEMO) {
+    items.push({
+      label: updateLabel(),
+      enabled: !updateBusy,
+      click: () => (update ? offerUpdate() : checkUpdates()),
+    });
+  }
   items.push({ type: 'separator' });
   if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
   if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
@@ -860,6 +870,93 @@ function truncate(s, n) {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
+// ---------------------------------------------------------------- updates (see updater.js)
+
+const updateResultFile = () => path.join(app.getPath('userData'), 'update-result.json');
+const updateBox = (options) => dialog.showMessageBox({ title: 'Claude Pet', buttons: ['OK'], ...options });
+
+function updateLabel() {
+  if (updateBusy === 'checking') return 'Checking for updates…';
+  return update ? 'Update available…' : 'Check for updates…';
+}
+
+async function checkUpdates() {
+  updateBusy = 'checking';
+  let found;
+  try {
+    found = await checkForUpdate(APP_ROOT);
+  } finally {
+    updateBusy = null;
+  }
+  update = found.status === 'available' ? found : null;
+  log(`update check: ${found.status}${found.message ? ` (${found.message})` : ''}`);
+  if (update) return offerUpdate();
+  if (found.status === 'current') {
+    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: `Version ${app.getVersion()} (${found.head.slice(0, 7)}).` });
+  }
+  return updateBox({ type: 'warning', message: "Couldn't check for updates.", detail: found.message });
+}
+
+async function offerUpdate() {
+  if (!update || updateBusy) return;
+  const { target, count, changes } = update;
+  updateBusy = 'asking';
+  let answer;
+  try {
+    answer = await updateBox({
+      type: 'question',
+      message: 'A new version of Claude Pet is available.',
+      detail: [
+        "What's new:",
+        ...changes.map((subject) => `• ${subject}`),
+        count > changes.length ? `…and ${count - changes.length} more` : null,
+        '',
+        'The pet closes while it updates, then starts again. Your settings and pets are kept.',
+      ].filter((line) => line !== null).join('\n'),
+      buttons: ['Update and restart', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+  } finally {
+    updateBusy = null;
+  }
+  if (answer.response !== 0) return;
+  try {
+    await startUpdate({
+      root: APP_ROOT,
+      target,
+      relaunch: { exe: process.execPath, args: [APP_ROOT] },
+      logFile,
+      resultFile: updateResultFile(),
+    });
+  } catch (err) {
+    log('could not start the update:', err.message);
+    return updateBox({ type: 'warning', message: "Couldn't start the update.", detail: err.message });
+  }
+  log(`updating to ${target.slice(0, 7)}`);
+  app.quit();
+}
+
+// The update ran while the pet was closed; this tells the user how it went.
+async function showUpdateResult() {
+  let result;
+  try {
+    result = JSON.parse(fs.readFileSync(updateResultFile(), 'utf8'));
+    fs.rmSync(updateResultFile(), { force: true });
+  } catch {
+    return;   // no update was run
+  }
+  if (result.ok) {
+    await updateBox({ type: 'info', message: 'Claude Pet was updated.', detail: `Now at ${String(result.to).slice(0, 7)}.` });
+  } else {
+    await updateBox({
+      type: 'warning',
+      message: "The update didn't work.",
+      detail: `${result.message}\n\nClaude Pet is still on the old version. The log has the details.`,
+    });
+  }
+}
+
 // ---------------------------------------------------------------- lifecycle
 
 if (!app.requestSingleInstanceLock()) {
@@ -890,6 +987,7 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     createWindow();
     pointerTimer = setInterval(watchPointer, POINTER_POLL_MS);
+    if (!DEMO) showUpdateResult();
 
     tracker = DEMO
       ? new DemoTracker()

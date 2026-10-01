@@ -26,7 +26,13 @@ npm install
 npm start
 ```
 
-To update, run `git pull`, then `npm install` again.
+To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
+
+> **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
+> do it by hand once: quit the pet from the tray menu, run `git pull` and then `npm install` in
+> its folder, and start it again (`npm start`, or double-click `Claude Pet.lnk`). Your settings
+> and pets are kept. If `git pull` complains about files you changed, undo those changes first.
+> After this, updates are one click.
 
 ## Run it
 
@@ -47,6 +53,24 @@ command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
 The pet logs what goes wrong (a crash, a link that wouldn't open) to `claude-pet.log` in
 `%APPDATA%\claude-pet\logs` (`~/Library/Logs/claude-pet` on macOS). Past 1 MB it starts over and
 keeps the previous log as `claude-pet.old.log`.
+
+## Updating
+
+Tray menu → **Check for updates…** looks at the latest `main` on GitHub. If there's something new,
+a dialog lists what changed; **Update and restart** closes the pet, updates the files, runs
+`npm install` if `package.json` or the lockfile changed, and starts the pet again. A dialog then
+says it worked, or why it didn't (the old version is kept, and the log has the details). It only
+checks when you ask.
+
+- **Your things are kept.** Settings, your pets and the log live outside this folder
+  (`%APPDATA%\claude-pet` and `~/.claude-pet/pets`), so an update never touches them. Keep a
+  customized pet in `~/.claude-pet/pets`, not in this folder's `pets/`.
+- **It needs git** (the pet is a clone of this repo) and Node on your PATH, which the install
+  already asked for. It says why when it can't update: the folder isn't a git clone, isn't on
+  `main`, has commits that aren't on GitHub's `main`, or has edited files that an update would
+  overwrite. A lockfile that npm rewrote doesn't count.
+- **Installed before this existed?** That version has no such menu item. Update it by hand once,
+  as described under [Install](#install).
 
 ## What the pet tells you
 
