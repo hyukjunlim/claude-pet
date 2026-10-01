@@ -199,24 +199,32 @@ test("a dot's name, last activity and subtasks come from the app's persisted sta
   assert.equal(parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': 'nonsense' } }).subtasks.size, 0);
 });
 
-test("a dot works from the app's own stamp until the server's whole-second one, and its replies are ready", async () => {
+// A tracker on a throwaway Codex folder with a clock of its own. `advance(ms, state)` moves the
+// clock, rewrites the app's state file with `state` (or what `state(clock)` returns) and gives
+// back the sessions the pet would show.
+function dotTracker(first) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const file = path.join(home, '.codex-global-state.json');
+  let clock = T0;
+  let version = 0;
+  const write = (j) => {
+    fs.writeFileSync(file, JSON.stringify(j));
+    fs.utimesSync(file, new Date(T0 + 1000 * ++version), new Date(T0 + 1000 * version));   // so it reads as changed
+  };
+  write(first);
+  const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => clock });
+  const advance = async (ms, state) => {
+    clock += ms;
+    if (state) write(typeof state === 'function' ? state(clock) : state);
+    await tracker.tick();
+    return tracker.sessions;
+  };
+  return { tracker, advance, done: () => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }) };
+}
+
+test("a dot works from the app's own stamp until the server's whole-second one, and its replies are ready", async () => {
+  const { tracker, advance, done } = dotTracker(dotState(T0 - 3_600_000));
   try {
-    const file = path.join(home, '.codex-global-state.json');
-    let clock = T0;
-    let version = 0;
-    const write = (j) => {
-      fs.writeFileSync(file, JSON.stringify(j));
-      fs.utimesSync(file, new Date(T0 + 1000 * ++version), new Date(T0 + 1000 * version));   // so it reads as changed
-    };
-    const advance = async (ms, j) => {
-      clock += ms;
-      if (j) write(j);
-      await tracker.tick();
-      return tracker.sessions;
-    };
-    write(dotState(T0 - 3_600_000));
-    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => clock });
     await tracker.tick();
     assert.deepEqual(tracker.sessions, []);
 
@@ -241,15 +249,48 @@ test("a dot works from the app's own stamp until the server's whole-second one, 
     [dot] = await advance(60_000);
     assert.equal(dot.status, 'review');
 
-    // What a dot started is the dot's: one bubble, named for it, that opens the finished thread.
-    const bubbles = await advance(2000, dotState(T0 + 80_000, [DOT_TASK]));
-    assert.equal(bubbles.length, 1);
-    assert.deepEqual([bubbles[0].status, bubbles[0].title, bubbles[0].id], ['review', 'dot', `codex:${DOT}`]);
-    assert.equal(bubbles[0].url, `codex://threads/${DOT_TASK}?hostId=durable`);
+    // A thread the dot started finishing is not news; only the dot's own replies are.
+    assert.deepEqual(await advance(2000, dotState(T0 + 80_000, [DOT_TASK])), []);
+  } finally {
+    done();
+  }
+});
+
+test('an unread dot is Ready only when a turn came before the flag', async () => {
+  const { tracker, advance, done } = dotTracker(dotState(T0 - 3_600_000));
+  // `stamp` is an offset from the new clock (0 is a server stamp, 396 the app's own); left out, the stamp stays.
+  let last = T0 - 3_600_000;
+  const read = (ms, { stamp, unread = [] } = {}) => advance(ms, (t) => dotState(last = stamp === undefined ? last : t + stamp, unread));
+  try {
+    await tracker.tick();
+    // A reply to you: your message's stamp, then the server's, and the flag.
+    await read(2000, { stamp: 396 });
+    let [dot] = await read(6000, { stamp: 0, unread: [DOT] });
+    assert.equal(dot.status, 'review');
+
+    // You read it. The app raises the flag again with nothing new in the chat: not Ready.
+    assert.deepEqual(await read(5000), []);
+    assert.deepEqual(await read(3000, { unread: [DOT] }), []);
+    assert.deepEqual(await read(3000), []);
+    // A server stamp on its own, minutes later, with the flag: not Ready either.
+    assert.deepEqual(await read(120_000, { stamp: 0, unread: [DOT] }), []);
+    assert.deepEqual(await read(2000), []);
+
+    // The flag can come a moment before the turn's stamp.
+    assert.deepEqual(await read(2000, { unread: [DOT] }), []);
+    [dot] = await read(1000, { stamp: 396, unread: [DOT] });
+    assert.equal(dot.status, 'running');
+    [dot] = await read(4000, { stamp: 0, unread: [DOT] });
+    assert.equal(dot.status, 'review');
+
+    // A follow-up message soon after a turn is part of it.
+    assert.deepEqual(await read(5000), []);
+    [dot] = await read(30_000, { stamp: 0, unread: [DOT] });
+    assert.equal(dot.status, 'review');
     tracker.dismiss(`codex:${DOT}`);
     assert.deepEqual(tracker.sessions, []);
   } finally {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    done();
   }
 });
 
@@ -257,8 +298,8 @@ test('a dot that is mid-turn when the pet starts is working, and one that stoppe
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
   try {
     const file = path.join(home, '.codex-global-state.json');
-    const statusAt = async (activity) => {
-      fs.writeFileSync(file, JSON.stringify(dotState(activity)));
+    const statusAt = async (activity, unread = []) => {
+      fs.writeFileSync(file, JSON.stringify(dotState(activity, unread)));
       const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => T0 });
       await tracker.tick();
       return tracker.sessions;
@@ -267,6 +308,8 @@ test('a dot that is mid-turn when the pet starts is working, and one that stoppe
     assert.deepEqual([dot.status, dot.since], ['running', T0 - 5000 + 123]);
     assert.deepEqual(await statusAt(T0 - 120_000 + 123), []);   // its last stamp is long past
     assert.deepEqual(await statusAt(T0 - 5000), []);            // the server's stamp: it finished
+    // Unread when the pet starts: there is nothing to judge it by, and a reply you missed is worth showing.
+    assert.deepEqual((await statusAt(T0 - 5000, [DOT])).map((s) => s.status), ['review']);
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }

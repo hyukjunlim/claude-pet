@@ -36,6 +36,8 @@ const KICK_DELAY_MS = 100;
 const DOT_NAME = 'dot';
 const DOT_HOST = 'durable';                      // the cloud host a dot's threads live on
 const DOT_WORKING_MS = 45 * 1000;                // a turn with no new stamp this long is taken as over
+const DOT_TURN_MS = 60 * 1000;                   // a stamp this soon after a turn's last belongs to it
+const DOT_READY_MS = 20 * 1000;                  // an unread flag this soon after a turn's stamp is its reply
 
 function codexPaths() {
   const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -428,8 +430,9 @@ class CodexTracker extends EventEmitter {
     // We only know when a thread became unread if we saw it happen.
     for (const id of unread.keys()) if (!firstRead && !this.unread.has(id)) this.unreadSince.set(id, now);
     for (const id of this.unreadSince.keys()) if (!unread.has(id)) this.unreadSince.delete(id);
+    const prevUnread = this.unread;
     this.unread = unread;
-    this.followAeons(parseAeons(j), now, firstRead);
+    this.followAeons(parseAeons(j), { unread, prevUnread, now, firstRead });
     this.connections = parseConnections(j);
     this.hostNames = new Map(this.connections.map((c) => [c.hostId, c.name]));
     this.syncRemotes();
@@ -437,18 +440,38 @@ class CodexTracker extends EventEmitter {
 
   // A dot is busy from a stamp with an odd millisecond until the server's whole-second stamp.
   // We can only date a stamp we saw arrive; on the first read the stamp itself is all we have.
-  followAeons({ aeons, subtasks }, now, firstRead) {
+  //
+  // The app also lists a dot as unread when the chat has nothing new: a whole-second stamp on its
+  // own, or the flag raised again right after you read it. A reply you were part of comes with
+  // the stamps of a turn (odd ones, then the server's, or one soon after). So the unread flag
+  // makes a dot Ready (`replied`) only if such a stamp arrived since you last read it.
+  followAeons({ aeons, subtasks }, { unread, prevUnread, now, firstRead }) {
     const next = new Map();
     for (const [id, a] of aeons) {
       const prev = this.aeons.get(id);
-      if (prev && prev.activity === a.activity) {
-        next.set(id, { ...prev, name: a.name });
-        continue;
+      let dot = prev
+        ? { ...prev, name: a.name, hostId: a.hostId }
+        : { ...a, working: false, activeAt: 0, since: 0, turnAt: 0, readAt: 0, replied: false };
+      let fresh = false;   // a stamp of a turn arrived in this read
+      if (!prev || prev.activity !== a.activity) {
+        const wasWorking = prev?.working && now - prev.activeAt < DOT_WORKING_MS;
+        const working = a.activity % 1000 !== 0;
+        const activeAt = (prev || !firstRead) ? now : Math.min(a.activity, now);
+        fresh = working || wasWorking || now - dot.turnAt < DOT_TURN_MS;
+        dot = { ...dot, activity: a.activity, working, activeAt, since: working && wasWorking ? prev.since : activeAt };
+        if (fresh) dot.turnAt = now;
       }
-      const working = a.activity % 1000 !== 0;
-      const activeAt = (prev || !firstRead) ? now : Math.min(a.activity, now);
-      const continued = working && prev?.working && now - prev.activeAt < DOT_WORKING_MS;
-      next.set(id, { ...a, working, activeAt, since: continued ? prev.since : activeAt });
+      if (!unread.has(id)) {
+        if (prevUnread.has(id)) dot.readAt = now;
+        dot.replied = false;
+      } else if (firstRead) {
+        dot.replied = true;   // nothing to go by, and a reply you haven't seen is worth showing
+      } else if (!prevUnread.has(id)) {
+        dot.replied = dot.turnAt > dot.readAt && now - dot.turnAt < DOT_READY_MS;
+      } else if (fresh && dot.turnAt > dot.readAt) {
+        dot.replied = true;   // the flag came first, the turn's stamp right after
+      }
+      next.set(id, dot);
     }
     this.aeons = next;
     this.subtasks = subtasks;
@@ -553,9 +576,8 @@ class CodexTracker extends EventEmitter {
     const now = this.now();
     const byThread = new Map();
     const followed = new Set();
-    // A dot, and the threads it starts, show as one bubble named for the dot. Clicking opens
-    // `linkId`: the thread the app lists as unread, which can be one the dot started.
-    const session = (threadId, hostId, cwd, derived, linkId = threadId) => {
+    // A dot's bubble is named for the dot.
+    const session = (threadId, hostId, cwd, derived) => {
       const c = this.catalog.get(threadId);
       const host = c?.hostId || hostId;
       const dot = this.aeons.get(threadId);
@@ -567,7 +589,7 @@ class CodexTracker extends EventEmitter {
         remote: dot ? null : hostName(host, this.hostNames),
         project: projectName(c?.cwd || cwd),
         cwd: c?.cwd || cwd,
-        url: threadUrl(linkId, host),
+        url: threadUrl(threadId, host),
         ...derived,
       };
     };
@@ -585,16 +607,15 @@ class CodexTracker extends EventEmitter {
       for (const f of remote.files.values()) follow(f.state, hostId, remote.skew);
     }
     // Threads on other hosts that finished while you weren't looking.
-    for (const [unreadId, hostId] of this.unread) {
-      const threadId = this.subtasks.get(unreadId) ?? unreadId;
-      if (followed.has(threadId)) continue;
+    for (const [threadId, hostId] of this.unread) {
+      if (followed.has(threadId) || this.subtasks.has(threadId)) continue;   // a dot's replies are news, what it started isn't
+      if (this.aeons.get(threadId)?.replied === false) continue;             // unread, but the chat has nothing new
       const host = this.catalog.get(threadId)?.hostId || hostId;
       const dotAt = Math.min(this.aeons.get(threadId)?.activity || 0, now);   // when a dot last spoke
-      const since = Math.max(this.catalog.get(unreadId)?.updatedAt || 0, this.unreadSince.get(unreadId) || 0, dotAt);
+      const since = Math.max(this.catalog.get(threadId)?.updatedAt || 0, this.unreadSince.get(threadId) || 0, dotAt);
       const dismissedAt = this.dismissed.get(`codex:${threadId}`) || 0;
       if ((dismissedAt && dismissedAt >= since) || (since && now - since > UNREAD_WINDOW_MS)) continue;
-      if (byThread.get(threadId)?.since >= since) continue;   // a dot with several finished threads
-      byThread.set(threadId, session(threadId, host, null, { status: 'review', detail: '', since }, unreadId));
+      byThread.set(threadId, session(threadId, host, null, { status: 'review', detail: '', since }));
     }
     // A dot with a turn under way is working, even if an earlier reply is still unread.
     for (const [threadId, dot] of this.aeons) {

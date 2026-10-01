@@ -215,9 +215,11 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   history file to follow, so there's no step to show. The pet goes by what the app keeps in its
   state file: a dot is *working* from a message the app stamps to the millisecond until the
   server's whole-second stamp for the reply (or 45 seconds after the last stamp, if none comes),
-  and *Ready* while the app lists it as unread. The threads a dot starts show as the dot.
-  Clicking opens the dot's conversation, or the finished thread it started (`codex://threads/<id>`
-  on the dot's host; `codex://dots` would only open the app's dots home).
+  and *Ready* while the app lists it as unread. The app also flags a dot as unread at times when
+  the chat has nothing new (a server stamp on its own, or the flag raised again right after you
+  read it), so only a flag that follows a turn's stamps since you last read counts. The threads a
+  dot starts don't make it Ready either; only its own replies do. Clicking opens the dot's conversation (`codex://threads/<id>` on the
+  dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
 - **Not shown:** ChatGPT chats, and Codex's own helper threads such as its auto-reviewer.
