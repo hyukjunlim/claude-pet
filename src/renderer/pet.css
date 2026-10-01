@@ -280,7 +280,7 @@ body {
   inset: 0 auto 0 0;
   width: var(--now-width, 2px);
   margin-left: calc(var(--now-width, 2px) / -2);
-  background: color-mix(in srgb, var(--text) 55%, var(--surface));   /* solid, so it looks the same over a fill */
+  background: var(--text);   /* the labels' color, and opaque so it looks the same over a fill */
 }
 
 .gauge .name,
