@@ -11,7 +11,8 @@
   const player = new window.SpritePlayer(spriteEl);
   player.onMeasured = (headroom) => stage.style.setProperty('--headroom', String(Math.min(0.5, headroom)));
 
-  const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
+  // PET-INPUT: distinguish an unanswered request from a turn that is still working.
+  const LABELS = { waiting: 'Awaiting input', failed: 'Error', review: 'Ready', running: 'Running' };
   const ATTENTION = new Set(['waiting', 'failed', 'review']);
   const SHADOW_ROOM = 16;          // px kept around the bubbles so their shadows aren't cut off
 
@@ -166,7 +167,8 @@
     text.append(line, detail);
     el.append(text);
 
-    if (s.status !== 'running') {
+    // PET-INPUT: keep a waiting request in the stack even after its thread is opened.
+    if (s.status === 'review' || s.status === 'failed') {
       const close = document.createElement('button');
       close.className = 'close';
       close.type = 'button';
@@ -204,29 +206,31 @@
   sizeWeekLine();
 
   function renderMeter() {
+    // PET-USAGE: a missing Claude sample is shown as No data beside Codex usage.
     meterEl.replaceChildren(...usage.map(gauge));
-    const said = usage.map((u) => [`${u.name} ${u.percent}% used`, u.elapsed != null && `${u.elapsed}% into the week`]
+    const said = usage.map((u) => [u.percent == null ? `${u.name} usage unavailable` : `${u.name} ${u.percent}% used`, u.elapsed != null && `${u.elapsed}% into the week`]
       .filter(Boolean).join(', '));
     meterEl.setAttribute('aria-label', `Weekly limits: ${said.join('; ')}`);
   }
 
   function gauge(u) {
     const el = document.createElement('div');
-    el.className = `gauge ${u.app}`;
+    el.className = `gauge ${u.app}${u.percent == null ? ' unavailable' : ''}`;
     const fill = span('fill', '');
-    fill.style.width = `${u.percent}%`;
+    fill.style.width = `${u.percent ?? 0}%`;
     el.append(fill);
     if (u.elapsed != null) {
       const now = span('now', '');
       now.style.left = `${u.elapsed}%`;
       el.append(now);
     }
-    el.append(span('name', u.name), span('pct', `${u.percent}%`));
+    const value = u.percent == null ? 'No data' : `${u.percent}%`;
+    el.append(span('name', u.name), span('pct', value));
     // Rows with a solid fill (Claude's) draw their text twice more, each copy cut at the fill's
     // edge: the usual color outside the fill, and the fill's own text color over it.
-    for (const [layer, clip] of [['base', `inset(0 0 0 ${u.percent}%)`], ['ink', `inset(0 ${100 - u.percent}% 0 0)`]]) {
+    for (const [layer, clip] of [['base', `inset(0 0 0 ${u.percent ?? 0}%)`], ['ink', `inset(0 ${100 - (u.percent ?? 0)}% 0 0)`]]) {
       const copy = span(layer, '');
-      copy.append(span('name', u.name), span('pct', `${u.percent}%`));
+      copy.append(span('name', u.name), span('pct', value));
       copy.style.clipPath = clip;
       el.append(copy);
     }
@@ -349,6 +353,12 @@
 
   petEl.addEventListener('pointerup', (e) => endDrag(e, false));
   petEl.addEventListener('pointercancel', (e) => endDrag(e, true));
+  petEl.addEventListener('wheel', (e) => {
+    // PET-SIZE: Ctrl+wheel changes the same saved preset as the tray menu.
+    if (!e.ctrlKey || !e.deltaY) return;
+    e.preventDefault();
+    api.resizeStep(e.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
 
   api.onLanded(() => {
     if (awaitingLanding) {

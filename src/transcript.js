@@ -331,7 +331,8 @@ function deriveStatus(state, meta = {}, now = Date.now()) {
 function turnStatus(state, meta, now) {
   const pending = [...state.pendingTools.values()];
   const asking = pending.find((t) => WAITING_TOOLS.has(t.name));
-  if (asking && !(meta.dismissedAt >= asking.at)) {   // dismissed, it shows as the running turn it is
+  // PET-INPUT: a question remains pending after the user opens its session.
+  if (asking) {
     return { status: 'waiting', detail: asking.detail, since: asking.at };
   }
 
@@ -343,20 +344,21 @@ function turnStatus(state, meta, now) {
   }
 
   const ended = state.turnEndedAt;
-  if (!ended || state.interrupted || now - ended > UNREAD_WINDOW_MS) return { status: 'idle', detail: '', since: ended };
-  // How the turn ended matters only until you've seen it.
+  if (!ended || state.interrupted) return { status: 'idle', detail: '', since: ended };
+  // PET-INPUT: a blocked summary needs an actual reply; viewing the session does not settle it.
+  const summary = meta.summary;
+  const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;
+  const detail = current ? oneLine(current.needs_action || current.status_detail || '', 120) : '';
+  if (current && NEEDS_YOU.has(current.status_category)) {
+    return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
+  }
+
+  // Other results matter only until you've seen them.
+  if (now - ended > UNREAD_WINDOW_MS) return { status: 'idle', detail: '', since: ended };
   const seenAt = Math.max(meta.lastFocusedAt || 0, meta.dismissedAt || 0);
   if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
 
   if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
-
-  const summary = meta.summary;
-  const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;
-  const detail = current ? oneLine(current.needs_action || current.status_detail || '', 120) : '';
-  // It ended waiting on your answer or decision (the app's yellow marker).
-  if (current && NEEDS_YOU.has(current.status_category)) {
-    return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
-  }
 
   if (current) {
     if (current.status_category === 'failed' || current.status_category === 'error') {

@@ -5,6 +5,8 @@ Claude desktop **Code** sessions are doing, and your **Codex** threads too. It w
 Pets feature in the ChatGPT/Codex desktop app and uses the same pet format, so ChatGPT/Codex
 pets work here too.
 
+This checkout's custom changes are grouped by local issue ID in [LOCAL_CHANGES.md](LOCAL_CHANGES.md).
+
 ![Clay, the default pet](tools/clay-preview.png)
 
 ## Install
@@ -31,7 +33,8 @@ To update, use **Check for updates…** in the tray menu ([Updating](#updating))
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
 > do it by hand once: quit the pet from the tray menu, run `git pull` and then `npm install` in
 > its folder, and start it again (`npm start`, or double-click `Claude Pet.lnk`). Your settings
-> and pets are kept. If `git pull` complains about files you changed, undo those changes first.
+> and pets are kept. If `git pull` complains about files you changed, stash or back up those
+> changes, pull, then reapply them.
 > After this, updates are one click.
 
 ## Run it
@@ -49,6 +52,10 @@ that. To start it yourself without a console window, double-click **Claude Pet.l
 folder. The flags `--start-at-login` and `--no-start-at-login` set the same option from the
 command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
 (or click the tray icon) for the menu.
+
+Drag the pet with the left mouse button to move it. Right-click it and choose **Size**, or hold
+**Ctrl** and scroll over the pet, to change its size. The menu's **Reset position** returns it to
+the bottom-right corner.
 
 The pet logs what goes wrong (a crash, a link that wouldn't open) to `claude-pet.log` in
 `%APPDATA%\claude-pet\logs` (`~/Library/Logs/claude-pet` on macOS). Past 1 MB it starts over and
@@ -72,20 +79,24 @@ checks when you ask.
 - **Installed before this existed?** That version has no such menu item. Update it by hand once,
   as described under [Install](#install).
 
+Local changes to tracked app files make the one-click updater stop before changing them. For a
+customized copy, save those changes, update manually, and reapply them as described above.
+
 ## What the pet tells you
 
 | Pet animation | Bubble        | Meaning |
 | ------------- | ------------- | ------- |
-| waiting       | **Needs you** | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker) and you haven't looked at it since |
+| waiting       | **Awaiting input** | Claude or Codex needs your answer, approval, or decision; opening the thread alone does not clear it |
 | failed        | **Error**     | The turn ended with an API error |
 | review        | **Ready**     | A turn finished and you haven't opened that session since |
 | running       | **Running**   | Claude is working, or a command, agent or monitor it sent to the background is still going |
 | idle          | none          | Nothing to report |
 
 Every active session gets its own bubble, most urgent first, in the same order as ChatGPT's pet:
-Needs you, then Error, then Ready, then Running. The pet's animation follows the top one. There's
+Awaiting input, then Error, then Ready, then Running. The pet's animation follows the top one. There's
 no limit: the stack grows as sessions come in, and scrolls (mouse wheel over a bubble) once it
-reaches the edge of the screen. The **×** on a bubble dismisses it.
+reaches the edge of the screen. The **×** on a Ready or Error bubble dismisses it; an
+Awaiting input bubble stays until the request is answered or its turn ends.
 
 A bubble shows the status and the session's title, and under them the app, the project and how
 long it has been in that state, e.g. "Claude · tokenizer · 5m". The project is the session's folder name; it's
@@ -136,15 +147,15 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   ends. It also uses the session index, which the app saves now and then during a turn.
 - **Questions and permission prompts:** the app's log also gets a line when Claude stops to ask
   you something or to ask permission for a tool, and another when you answer. That's how the pet
-  shows "Needs you" right away for SSH sessions and for permission prompts. Until the transcript
+  shows "Awaiting input" right away for SSH sessions and for permission prompts. Until the transcript
   has the question, the bubble says "Has a question for you" rather than the question itself.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
   that clock is off from the copies and corrects for it, so "Ready" still clears once you've
   looked at a session.
 - **The session you have open:** the index notes when you switch to a session, not when you look
   at the one already open. So when a turn ends in the session selected in the app (the log says
-  which), the pet checks whether the Claude window is in front. If it is, you've seen it and
-  there's no bubble; if not, "Ready" (or "Needs you") stays until the Claude window comes to the
+  which), the pet checks whether the Claude window is in front. If it is, you've seen a finished
+  turn and its Ready bubble goes away; if not, Ready stays until the Claude window comes to the
   front, or you switch away from that session in the app (it was on screen until then). A small
   PowerShell helper reports the front window, event-driven, only while that's in question
   ([src/foreground.js](src/foreground.js); Windows only). What it saw is saved, so a restart of
@@ -167,7 +178,7 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   index 1–3 s after a change, and writes a turn's summary a few seconds after the turn ends.
   That summary says whether Claude ended the turn waiting on you, so the pet waits for it (up to
   10 s; it usually takes 3–4 s), much as the app does before it notifies you. Meanwhile the
-  bubble says "Running · Wrapping up", then goes straight to "Needs you" or "Ready".
+  bubble says "Running · Wrapping up", then goes straight to "Awaiting input" or "Ready".
 
 The logic that turns transcript entries into a status is in [src/transcript.js](src/transcript.js),
 and [test/transcript.test.js](test/transcript.test.js) covers it. How the index, the log and SSH
@@ -198,9 +209,10 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 - **Ready:** a thread that finished while you weren't looking at it. This is Codex's own unread
   list (`~/.codex/.codex-global-state.json`), so it covers threads on every host, and the
   bubble goes away once you open the thread in Codex.
-- **Running, Needs you, Error:** read from each thread's history (its rollout file), the way
+- **Running, Awaiting input, Error:** read from each thread's history (its rollout file), the way
   Codex writes it. For threads on this PC (Codex's local host and the Codex CLI) that's
-  `~/.codex/sessions`.
+  `~/.codex/sessions`. A nonblocking question sent while Codex continues working stays Running;
+  Awaiting input is for a request that actually pauses the turn.
 - **SSH hosts:** a thread on an SSH host keeps its history on that host. For each host Codex
   works on, the pet keeps one SSH connection open, using your `~/.ssh/config`, and runs a
   small read-only Python watcher there. The watcher sends the new lines of rollouts written in
@@ -241,6 +253,12 @@ the two apps keep. It contacts no server itself (apart from the SSH hosts above)
   pet uses the newest reply it can see, on this PC or on an SSH host. After the reset time
   passes, the meter shows 0% until the next reply.
 
+If Codex usage is present but Claude usage is not, the meter shows **Claude · No data** above
+Codex. Claude's percentage needs the Claude desktop app's
+`%APPDATA%\Claude\plan-usage-history.json`, which the app creates after recording plan usage.
+Claude CLI transcripts alone do not contain that weekly percentage. The pet fills in the Claude
+row automatically when the file becomes available; there is no separate account connection.
+
 ## Pets
 
 A pet is a folder containing `pet.json` and a sprite sheet, the same format as ChatGPT/Codex pets:
@@ -275,7 +293,7 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
 
 Pets are loaded from these folders:
 
-1. `pets/` in this project, for the built-in pet, Clay.
+1. `pets/` in this project, for the built-in pets Clay and Tennis Ball.
 2. `~/.claude-pet/pets/` for your own pets. Tray menu → Pet → *Open my pets folder* opens it.
 3. `~/.codex/pets/`, where pets you hatch in ChatGPT/Codex with the `hatch-pet` skill show up
    automatically.
@@ -287,6 +305,10 @@ rebuild (`npm run sprite:clay`). It has two-tone outlines, bounce-light shading,
 arms that read as arms, and a trailing spark antenna. It also has a prop for each state: a laptop
 while working, a paper while reviewing, a "?" bubble while waiting, and smoke and a tear when
 something fails.
+
+**Tennis Ball** is a lime-green, smiling tennis ball with the same animation states. Its sheet,
+preview, and tray icons are generated by [tools/make_tennis.py](tools/make_tennis.py) with
+`npm run sprite:tennis`.
 
 ## How ChatGPT's pet works (and what this copies)
 

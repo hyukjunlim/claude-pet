@@ -1,0 +1,8 @@
+{
+  "id": "tennis",
+  "displayName": "Tennis Ball",
+  "description": "A cheerful tennis ball that bounces, works, waits, and celebrates with you.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.png",
+  "pixelArt": true
+}

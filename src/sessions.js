@@ -712,7 +712,7 @@ function desktopStatus(r, state, opts = {}) {
   // Claude asked something the SSH copy doesn't have yet, or wants permission for a tool (which
   // the transcript shows as just running it).
   if (state && state.turnEndedAt - (opts.skew || 0) > asking.at + LOG_SLACK_MS) return derived;   // that turn is over
-  if (opts.dismissedAt >= asking.at) return derived;
+  // PET-INPUT: opening the Claude window does not resolve its permission prompt.
   return { status: 'waiting', detail: describeAsk(asking.tool), since: asking.at };
 }
 

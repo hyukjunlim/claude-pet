@@ -29,10 +29,13 @@ const TRAY_HEIGHT = 280;        // room kept above (or below) the pet for bubble
 const TRAY_GAP = 6;
 const EDGE_MARGIN = 24;
 const BUBBLE_MARGIN = 12;       // bubbles keep this distance from the monitor's edge
+// PET-SIZE: larger presets for the custom tennis pet and Ctrl+wheel resizing.
 const SCALES = [
   { label: 'Small', value: 0.5 },
   { label: 'Medium', value: 0.75 },
   { label: 'Large', value: 1 },
+  { label: 'Extra large', value: 1.25 },
+  { label: 'Huge', value: 1.5 },
 ];
 // Throw physics, same constants as ChatGPT's pet.
 const MOMENTUM_TICK_MS = 16;
@@ -42,8 +45,8 @@ const BOUNCE = 0.7;
 const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
-const POINTER_POLL_MS = 50;     // how often the cursor is checked, for click-through
-const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
+const POINTER_POLL_MS = 16;     // PET-DRAG: reduce click-through hover latency before a drag starts
+const STATUS_LABEL = { waiting: 'Awaiting input', failed: 'Error', review: 'Ready', running: 'Running' };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
@@ -64,7 +67,6 @@ let currentPet = null;
 let petPos = null;              // top-left of the pet sprite, screen DIPs
 let layout = 'above';           // pills above or below the pet
 let pointerInteractive = false;
-let pointerKey = '';            // where the cursor was last seen in the window ('' outside it)
 let pointerTimer = null;
 let drag = null;
 let momentumTimer = null;
@@ -302,9 +304,8 @@ function watchPointer() {
   const x = cursor.x - b.x;
   const y = cursor.y - b.y;
   const inside = x >= 0 && y >= 0 && x < b.width && y < b.height;
-  const key = inside ? `${x},${y}` : '';
-  if (key === pointerKey) return;
-  pointerKey = key;
+  // PET-DRAG: keep checking a stationary cursor too: the sprite animates beneath it, and its first
+  // frame (or a page reload) may not have been ready when we last asked for a hit test.
   // Once clicks reach the page it follows the cursor itself, but it can miss it leaving.
   if (inside !== pointerInteractive) win.webContents.send('pet:pointer', inside ? { x, y } : null);
 }
@@ -465,10 +466,19 @@ function currentUsage() {
   return usageView({ claude: withWeeklyResets(usage.claude, settings.get('claudeWeeklyResetAt')), codex: usage.codex });
 }
 
+function displayUsage() {
+  // PET-USAGE: keep both rows visible when Codex has usage but Claude has no desktop sample.
+  const items = currentUsage();
+  if (items.some((u) => u.app === 'codex') && !items.some((u) => u.app === 'claude')) {
+    items.unshift({ app: 'claude', name: 'Claude', percent: null, elapsed: null, resetsIn: null });
+  }
+  return items;
+}
+
 // Also runs every minute: a week can turn over, and figures can get old, with no news.
 function sendUsage(force = false) {
   if (!win || win.isDestroyed()) return;
-  const items = settings.get('showUsage') ? currentUsage() : [];
+  const items = settings.get('showUsage') ? displayUsage() : [];
   const key = JSON.stringify(items);
   if (key === usageKey && force !== true) return;
   usageKey = key;
@@ -578,7 +588,8 @@ function openSession(id) {
   const url = s && sessionUrl(s);
   if (!url) return false;
   openApp(url);
-  if (s.status !== 'running') {
+  // PET-INPUT: opening an unanswered request must not remove its activity pill.
+  if (s.status === 'review' || s.status === 'failed') {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }
@@ -637,7 +648,6 @@ function registerIpc() {
     sendLayout();
     sendSessions();
     sendUsage(true);
-    pointerKey = '';                    // and where the cursor is, on the next check
   });
   ipcMain.on('pet:interactive', (e, value) => {
     if (!fromPet(e)) return;
@@ -667,6 +677,15 @@ function registerIpc() {
       finishMove();
     }
   });
+  ipcMain.on('pet:resize-step', (e, direction) => {
+    // PET-SIZE: the renderer requests one step; the main process owns the saved scale.
+    if (!fromPet(e) || !Number.isFinite(direction) || direction === 0) return;
+    const current = settings.get('scale');
+    const next = direction > 0
+      ? SCALES.find((s) => s.value > current + 0.001)
+      : [...SCALES].reverse().find((s) => s.value < current - 0.001);
+    if (next) resizeInPlace(() => settings.set({ scale: next.value }));
+  });
   ipcMain.on('pet:activate', (e, id) => {
     if (!fromPet(e)) return;
     if (typeof id === 'string') {
@@ -679,6 +698,8 @@ function registerIpc() {
   });
   ipcMain.on('pet:dismiss', (e, id) => {
     if (!fromPet(e) || typeof id !== 'string') return;
+    // PET-INPUT: a waiting request stays visible until it is answered or the turn ends.
+    if (sessions.some((s) => s.id === id && s.status === 'waiting')) return;
     trackerFor(id)?.dismiss(id);
     persistDismissed();
   });
@@ -726,7 +747,12 @@ function buildMenu() {
       click: () => openSession(s.id),
     });
   }
-  for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
+  for (const u of displayUsage()) {
+    items.push({
+      label: u.percent == null ? 'Claude: no desktop usage data' : usageLabel(u),
+      enabled: false,
+    });
+  }
   items.push({ type: 'separator' });
   items.push({
     label: 'Show pet',

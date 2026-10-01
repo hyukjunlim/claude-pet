@@ -70,7 +70,35 @@ test('stopped turns go quiet, errors fail, and approvals wait for you', () => {
   assert.deepEqual(rolloutStatus(failed, { now: T0 + 5000 }), { status: 'failed', detail: 'stream disconnected', since: T0 + 4000 });
   const ask = rollout([meta(cli), started(1), { timestamp: at(2), type: 'event_msg', payload: { type: 'exec_approval_request', command: ['bash', '-lc', 'rm -rf build'] } }]);
   assert.deepEqual(rolloutStatus(ask, { now: T0 + 3000 }), { status: 'waiting', detail: 'Approve: rm -rf build', since: T0 + 2000 });
-  assert.equal(rolloutStatus(ask, { now: T0 + 3000, dismissedAt: T0 + 2500 }).status, 'running');   // the × on it
+  assert.equal(rolloutStatus(ask, { now: T0 + 3000, dismissedAt: T0 + 2500 }).status, 'waiting');
+});
+
+test('an async input request does not make an active turn await input', () => {
+  const s = rollout([
+    meta({ originator: 'codex_cli_rs' }), started(1),
+    { timestamp: at(2), type: 'response_item', payload: {
+      type: 'function_call', name: 'request_user_input_async', call_id: 'q1',
+      arguments: JSON.stringify({ questions: [{ title: 'Choose a size' }] }),
+    } },
+    { timestamp: at(3), type: 'response_item', payload: { type: 'function_call_output', call_id: 'q1', output: 'queued' } },
+  ]);
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 4000 }),
+    { status: 'running', detail: 'Thinking', since: T0 + 1000 });
+});
+
+test('a blocking input request stays visible until its answer arrives', () => {
+  const s = rollout([
+    meta({ originator: 'codex_cli_rs' }), started(1),
+    { timestamp: at(2), type: 'response_item', payload: {
+      type: 'function_call', name: 'request_user_input', call_id: 'q1',
+      arguments: JSON.stringify({ questions: [{ question: 'Which runtime?' }] }),
+    } },
+  ]);
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 60 * 60_000 }),
+    { status: 'waiting', detail: 'Which runtime?', since: T0 + 2000 });
+  applyRolloutEntry(s, { timestamp: at(3601), type: 'response_item', payload: { type: 'function_call_output', call_id: 'q1', output: 'Node' } });
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 3602_000 }),
+    { status: 'running', detail: 'Thinking', since: T0 + 1000 });
 });
 
 test('a turn is running even when the rollout is read from after its start', () => {

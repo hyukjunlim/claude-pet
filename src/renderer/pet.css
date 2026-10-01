@@ -254,6 +254,12 @@ body {
   --fill: color-mix(in srgb, var(--running), #be6446);
   --ink: #fff;
 }
+/* PET-USAGE: show the Claude row without implying a zero-percent measurement. */
+.gauge.unavailable { color: var(--muted); }
+.gauge.claude.unavailable .base,
+.gauge.claude.unavailable .ink { display: none; }
+.gauge.claude.unavailable > .name,
+.gauge.claude.unavailable > .pct { visibility: visible; }
 
 /* Between the rows, a divider that stops short of the edges. */
 .gauge + .gauge::after {

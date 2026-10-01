@@ -259,7 +259,7 @@ test('a permission prompt shows "Needs you" instead of "Running"', () => {
   assert.equal(desktopStatus(r, copy, { now: T0 + 10_000 }).status, 'running');
   const logTurn = { running: true, at: T0, asking: { tool: 'Bash', at: T0 + 6000 } };
   assert.deepEqual(desktopStatus(r, copy, { now: T0 + 10_000, logTurn }), { status: 'waiting', detail: 'Asking to use Bash', since: T0 + 6000 });
-  assert.equal(desktopStatus(r, copy, { now: T0 + 10_000, logTurn, dismissedAt: T0 + 8000 }).status, 'running');   // the × on it
+  assert.equal(desktopStatus(r, copy, { now: T0 + 10_000, logTurn, dismissedAt: T0 + 8000 }).status, 'waiting');
   const mcp = { ...logTurn, asking: { tool: 'mcp__files__read_file', at: T0 + 6000 } };
   assert.equal(desktopStatus(r, copy, { now: T0 + 10_000, logTurn: mcp }).detail, 'Asking to use read file');
 });

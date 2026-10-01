@@ -1,4 +1,6 @@
+# PET-LOCAL: local runtimes and installed dependencies stay outside version control.
 node_modules/
+.local/
 *.log
 __pycache__/
 # made on each PC by `npm run shortcut`

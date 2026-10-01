@@ -12,6 +12,7 @@ const SHELL_RE = /(^|[\\/])(bash|zsh|sh|pwsh|powershell)(\.exe)?$/i;
 const CALLS = new Set(['function_call', 'custom_tool_call', 'local_shell_call', 'web_search_call']);
 const CALL_OUTPUTS = new Set(['function_call_output', 'custom_tool_call_output']);
 const QUESTIONS = new Set(['exec_approval_request', 'apply_patch_approval_request', 'request_user_input', 'elicitation_request']);
+const BLOCKING_INPUT_CALL_RE = /(?:^|[._])request_user_input$/;
 
 function createRolloutState() {
   return {
@@ -69,12 +70,25 @@ function applyRolloutEntry(state, entry) {
     }
   }
   if (entry.type === 'response_item') {
-    if (CALL_OUTPUTS.has(p.type)) state.question = null;
+    // PET-INPUT: only the blocking input tool pauses a turn. request_user_input_async
+    // returns immediately while the agent keeps working, so it remains Running.
+    if (CALL_OUTPUTS.has(p.type)) {
+      state.question = null;
+      state.step = '';
+    }
+    if (state.turnActive && CALLS.has(p.type) && BLOCKING_INPUT_CALL_RE.test(String(p.name || ''))) {
+      state.question = { detail: describeInputCall(p), at };
+    }
     if (state.turnActive && CALLS.has(p.type)) state.step = describeCall(p);
     return;
   }
   if (entry.type !== 'event_msg') return;
   switch (p.type) {
+    case 'user_message':
+      // PET-INPUT: a direct reply settles any pending request.
+      state.question = null;
+      state.step = '';
+      return;
     case 'task_started':
       Object.assign(state, {
         turnActive: true, turnStartedAt: fromSeconds(p.started_at) || at, step: '', aborted: false, error: null, question: null,
@@ -154,6 +168,15 @@ function describeQuestion(p) {
   return oneLine(q || 'Has a question for you', 90);
 }
 
+function describeInputCall(p) {
+  let input = p.arguments ?? p.input;
+  if (typeof input === 'string') {
+    try { input = JSON.parse(input); } catch { input = {}; }
+  }
+  const first = Array.isArray(input?.questions) ? input.questions[0] : null;
+  return oneLine(first?.title || first?.question || 'Your input is needed', 90);
+}
+
 // Threads from the desktop app are "Ready" while the app lists them as unread. CLI threads,
 // which it doesn't track, are "Ready" for a few minutes after they finish. `skew` is how far
 // the clock of the machine that wrote the rollout is ahead of ours.
@@ -161,7 +184,8 @@ function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 
   const clock = now + skew;
   const seen = dismissedAt ? dismissedAt + skew : 0;
   const local = (d) => (d.since ? { ...d, since: d.since - skew } : d);
-  if (state.question && !(seen >= state.question.at)) {   // dismissed, it shows as the running turn it is
+  // PET-INPUT: opening the thread or dismissing a pill cannot answer a pending request.
+  if (state.question) {
     return local({ status: 'waiting', detail: state.question.detail, since: state.question.at });
   }
   if (state.turnActive) {

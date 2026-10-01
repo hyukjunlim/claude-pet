@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('pet', {
   dragStart: (screenX, screenY) => ipcRenderer.send('pet:drag-start', { screenX, screenY }),
   dragMove: (screenX, screenY) => ipcRenderer.send('pet:drag-move', { screenX, screenY }),
   dragEnd: (vx, vy) => ipcRenderer.send('pet:drag-end', { vx, vy }),
+  resizeStep: (direction) => ipcRenderer.send('pet:resize-step', direction), // PET-SIZE
   activate: (id) => ipcRenderer.send('pet:activate', typeof id === 'string' ? id : null),
   dismiss: (id) => ipcRenderer.send('pet:dismiss', id),
   traySize: (height) => ipcRenderer.send('pet:tray-size', Number(height) || 0),

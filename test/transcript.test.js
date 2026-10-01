@@ -45,7 +45,7 @@ test('AskUserQuestion puts the pet in waiting until answered', () => {
   let s = run([prompt(0), ask]);
   assert.equal(deriveStatus(s, {}, T0 + 60_000).status, 'waiting');
   assert.equal(deriveStatus(s, {}, T0 + 60_000).detail, 'Which runtime?');
-  assert.equal(deriveStatus(s, { dismissedAt: T0 + 30_000 }, T0 + 60_000).status, 'running');   // the × on it
+  assert.equal(deriveStatus(s, { dismissedAt: T0 + 30_000 }, T0 + 60_000).status, 'waiting');
   s = run([prompt(0), ask, toolResult(90, 'q1')]);
   assert.equal(deriveStatus(s, {}, T0 + 91_000).status, 'running');
 });
@@ -63,12 +63,13 @@ test('the desktop summary for this turn can mark it as blocked on the user', () 
   assert.deepEqual(deriveStatus(s, { summary }, T0 + 10_000), { status: 'waiting', detail: 'Pick one of the 4 options', since: T0 + 6000 });
 });
 
-test('a turn that ended waiting on you needs you until you have seen it', () => {
+test('a turn that ended waiting on you stays visible until answered', () => {
   const s = run([prompt(0), reply(5, 'a-last'), stopSummary(6)]);
   const summary = { status_category: 'need_input', status_detail: 'Asked which port to use', summarizes_uuid: 'a-last' };
   assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 - 1000 }, T0 + 10_000).status, 'waiting');
-  assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');   // looked at
-  assert.equal(deriveStatus(s, { summary, dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
+  assert.equal(deriveStatus(s, { summary, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');
+  assert.equal(deriveStatus(s, { summary, dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');
+  assert.equal(deriveStatus(s, { summary }, T0 + 13 * 60 * 60_000).status, 'waiting');
   // A question Claude is still waiting on (the question tool) doesn't clear by looking.
   const asking = run([prompt(0), toolUse(3, 'q1', 'AskUserQuestion', { questions: [{ question: 'Which port?' }] })]);
   assert.equal(deriveStatus(asking, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');
