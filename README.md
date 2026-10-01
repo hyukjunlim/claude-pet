@@ -48,7 +48,8 @@ From its first run on, the pet starts at login; untick *Start at login* in the t
 that. To start it yourself without a console window, double-click **Claude Pet.lnk** in this
 folder. The flags `--start-at-login` and `--no-start-at-login` set the same option from the
 command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
-(or click the tray icon) for the menu.
+(or click the tray icon) for the menu, which also has *Restart Claude Pet* (after you edit its
+code, say).
 
 The pet logs what goes wrong (a crash, a link that wouldn't open) to `claude-pet.log` in
 `%APPDATA%\claude-pet\logs` (`~/Library/Logs/claude-pet` on macOS). Past 1 MB it starts over and

@@ -833,8 +833,19 @@ function buildMenu() {
   items.push({ type: 'separator' });
   if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
   if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
+  items.push({ label: 'Restart Claude Pet', click: restart });
   items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
   return Menu.buildFromTemplate(items);
+}
+
+// Starts a fresh pet as this one exits. The single-instance lock is let go first, so the new
+// pet never finds it still held. The login flags aren't passed on: they'd undo a change made
+// to Start at login since this pet started.
+function restart() {
+  log('restarting');
+  app.relaunch({ args: [APP_ROOT, ...(DEMO ? ['--demo'] : [])] });
+  app.releaseSingleInstanceLock();
+  app.quit();
 }
 
 function openPetsFolder() {
