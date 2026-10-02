@@ -174,6 +174,7 @@ test('the tracker combines running threads here with unread threads on other hos
 
 const DOT = '0199d0d0-0001-7000-8000-00000000d071';
 const DOT_TASK = '0199d0d0-0002-7000-8000-00000000d072';
+const DOT_DREAM = '0199d0d0-0003-7000-8000-00000000d073';   // "Heartbeat Dreamer", the dot's hourly upkeep
 
 // The app's persisted state for one dot, with `unread` threads on the cloud host.
 function dotState(activity, unread = []) {
@@ -182,21 +183,30 @@ function dotState(activity, unread = []) {
       [`aeon-introduction-v1:${DOT}`]: 'dot',
       [`aeon-last-activity-v1:${DOT}`]: activity,
       'aeon-subtasks-by-account-v1': { me: { [JSON.stringify(['durable', DOT])]: [DOT_TASK] } },
+      'cloud-aeon-sidebar-cache-v1': {
+        threads: [
+          { id: DOT_DREAM, name: 'Heartbeat Dreamer', threadSource: 'dreaming' },
+          { id: DOT, name: null, threadSource: 'aeon' },
+        ],
+      },
     },
     'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`durable:${'c'.repeat(64)}`]: unread } } },
   };
 }
 
 test("a dot's name, last activity and subtasks come from the app's persisted state", () => {
-  const { aeons, subtasks } = parseAeons(dotState(T0 + 396));
+  const { aeons, subtasks, dreams } = parseAeons(dotState(T0 + 396));
   assert.deepEqual([...aeons], [[DOT, { name: 'dot', activity: T0 + 396, hostId: 'durable' }]]);
   assert.deepEqual([...subtasks], [[DOT_TASK, DOT]]);
+  assert.deepEqual([...dreams], [DOT_DREAM]);   // the upkeep thread, not the dot's chat
   // A dot known only from its subtasks still gets a name, and its host is the one they name.
   const bare = parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': { me: { [JSON.stringify(['elsewhere', DOT])]: [DOT_TASK] } } } });
   assert.equal(bare.aeons.get(DOT).name, 'dot');
   assert.equal(bare.aeons.get(DOT).hostId, 'elsewhere');
   assert.equal(parseAeons(null).aeons.size, 0);
   assert.equal(parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': 'nonsense' } }).subtasks.size, 0);
+  assert.equal(parseAeons({ 'electron-persisted-atom-state': { 'cloud-aeon-sidebar-cache-v1': { threads: 'nonsense' } } }).dreams.size, 0);
+  assert.equal(parseAeons(null).dreams.size, 0);
 });
 
 // A tracker on a throwaway Codex folder with a clock of its own. `advance(ms, state)` moves the
@@ -251,6 +261,8 @@ test("a dot works from the app's own stamp until the server's whole-second one, 
 
     // A thread the dot started finishing is not news; only the dot's own replies are.
     assert.deepEqual(await advance(2000, dotState(T0 + 80_000, [DOT_TASK])), []);
+    // Nor is its upkeep thread (the hourly "Heartbeat Dreamer"), which also ends turns unattended.
+    assert.deepEqual(await advance(2000, dotState(T0 + 82_000, [DOT_DREAM])), []);
   } finally {
     done();
   }

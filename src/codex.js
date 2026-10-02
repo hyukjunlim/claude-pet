@@ -35,6 +35,7 @@ const CATALOG_MIN_MS = 5000;
 const KICK_DELAY_MS = 100;
 const DOT_NAME = 'dot';
 const DOT_HOST = 'durable';                      // the cloud host a dot's threads live on
+const DREAM_SOURCE = 'dreaming';                 // a dot's upkeep threads (their threadSource)
 const DOT_WORKING_MS = 45 * 1000;                // a turn with no new stamp this long is taken as over
 const DOT_TURN_MS = 60 * 1000;                   // a stamp this soon after a turn's last belongs to it
 const DOT_READY_MS = 20 * 1000;                  // an unread flag this soon after a turn's stamp is its reply
@@ -163,11 +164,16 @@ function parseConnections(j) {
 //                               to the millisecond; the server's stamp for a finished reply is
 //                               a whole second. So an odd millisecond means a turn is under way.
 //   aeon-subtasks-by-account-v1: { <account>: { '["<host>","<id>"]': [Codex threads it started] } }
+//   cloud-aeon-sidebar-cache-v1: { threads: [{ id, threadSource }] }. Next to the dot's chat
+//                               (threadSource "aeon") it lists the thread the dot's own upkeep
+//                               runs in (e.g. "Heartbeat Dreamer", threadSource "dreaming"),
+//                               which finishes a turn on a timer, whether or not you wrote.
 function parseAeons(j) {
   const atoms = j?.['electron-persisted-atom-state'];
   const aeons = new Map();      // dot threadId -> { name, activity, hostId }
   const subtasks = new Map();   // subtask threadId -> its dot's threadId
-  if (!atoms || typeof atoms !== 'object') return { aeons, subtasks };
+  const dreams = new Set();     // threadIds of a dot's upkeep threads
+  if (!atoms || typeof atoms !== 'object') return { aeons, subtasks, dreams };
   const aeon = (id) => {
     if (!aeons.has(id)) aeons.set(id, { name: DOT_NAME, activity: 0, hostId: DOT_HOST });
     return aeons.get(id);
@@ -192,7 +198,11 @@ function parseAeons(j) {
       for (const id of ids) if (typeof id === 'string') subtasks.set(id, parentId);
     }
   }
-  return { aeons, subtasks };
+  const cached = atoms['cloud-aeon-sidebar-cache-v1']?.threads;
+  for (const t of Array.isArray(cached) ? cached : []) {
+    if (t?.threadSource === DREAM_SOURCE && typeof t.id === 'string') dreams.add(t.id);
+  }
+  return { aeons, subtasks, dreams };
 }
 
 function hostName(hostId, names) {
@@ -250,6 +260,7 @@ class CodexTracker extends EventEmitter {
     this.unreadSince = new Map();     // threadId -> when it became unread while we watched
     this.aeons = new Map();           // dot threadId -> { name, activity, working, since, activeAt }
     this.subtasks = new Map();        // a dot's subtask threadId -> the dot's threadId
+    this.dreams = new Set();          // threadIds of a dot's upkeep threads
     this.connections = [];            // the SSH hosts the app works on
     this.hostNames = new Map();       // hostId -> the name you gave the host
     this.remotes = new Map();         // hostId -> CodexRemote
@@ -445,7 +456,7 @@ class CodexTracker extends EventEmitter {
   // own, or the flag raised again right after you read it. A reply you were part of comes with
   // the stamps of a turn (odd ones, then the server's, or one soon after). So the unread flag
   // makes a dot Ready (`replied`) only if such a stamp arrived since you last read it.
-  followAeons({ aeons, subtasks }, { unread, prevUnread, now, firstRead }) {
+  followAeons({ aeons, subtasks, dreams }, { unread, prevUnread, now, firstRead }) {
     const next = new Map();
     for (const [id, a] of aeons) {
       const prev = this.aeons.get(id);
@@ -475,6 +486,7 @@ class CodexTracker extends EventEmitter {
     }
     this.aeons = next;
     this.subtasks = subtasks;
+    this.dreams = dreams;
   }
 
   // One watcher per SSH host the app works on, while the tracker runs.
@@ -608,7 +620,8 @@ class CodexTracker extends EventEmitter {
     }
     // Threads on other hosts that finished while you weren't looking.
     for (const [threadId, hostId] of this.unread) {
-      if (followed.has(threadId) || this.subtasks.has(threadId)) continue;   // a dot's replies are news, what it started isn't
+      // A dot's replies are news; what it started, and its upkeep on a timer, aren't.
+      if (followed.has(threadId) || this.subtasks.has(threadId) || this.dreams.has(threadId)) continue;
       if (this.aeons.get(threadId)?.replied === false) continue;             // unread, but the chat has nothing new
       const host = this.catalog.get(threadId)?.hostId || hostId;
       const dotAt = Math.min(this.aeons.get(threadId)?.activity || 0, now);   // when a dot last spoke

@@ -218,7 +218,8 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   and *Ready* while the app lists it as unread. The app also flags a dot as unread at times when
   the chat has nothing new (a server stamp on its own, or the flag raised again right after you
   read it), so only a flag that follows a turn's stamps since you last read counts. The threads a
-  dot starts don't make it Ready either; only its own replies do. Clicking opens the dot's conversation (`codex://threads/<id>` on the
+  dot starts, and the one its upkeep runs in on a timer (*Heartbeat Dreamer*), don't make it Ready
+  either; only its own replies do. Clicking opens the dot's conversation (`codex://threads/<id>` on the
   dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
