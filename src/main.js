@@ -239,7 +239,8 @@ function createWindow() {
     alwaysOnTop: true,
     focusable: false,
     show: false,
-    ...(process.platform === 'win32' ? { thickFrame: false, roundedCorners: false, accentColor: false } : {}),
+    // Windows tool windows stay across virtual desktops.
+    ...(process.platform === 'win32' ? { type: 'toolbar', thickFrame: false, roundedCorners: false, accentColor: false } : {}),
     ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -255,7 +256,6 @@ function createWindow() {
   // wasn't either, and other windows went over it. There the other levels are all simply
   // always on top.
   win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setMenuBarVisibility(false);
   applyPointerPolicy();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
