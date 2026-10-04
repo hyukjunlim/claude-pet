@@ -310,6 +310,11 @@
 
   petEl.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
+    // If a release event is missed, a button-free move ends the drag.
+    if (!(e.buttons & 1)) {
+      endDrag(e, true);
+      return;
+    }
     drag.samples.push({ x: e.screenX, y: e.screenY, t: e.timeStamp });
     while (drag.samples.length > 2 && e.timeStamp - drag.samples[0].t > 100) drag.samples.shift();
     const dx = e.screenX - drag.x;
@@ -349,6 +354,7 @@
 
   petEl.addEventListener('pointerup', (e) => endDrag(e, false));
   petEl.addEventListener('pointercancel', (e) => endDrag(e, true));
+  petEl.addEventListener('lostpointercapture', (e) => endDrag(e, true));
 
   api.onLanded(() => {
     if (awaitingLanding) {
