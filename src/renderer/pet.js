@@ -9,7 +9,11 @@
   const meterEl = document.createElement('div');   // the weekly limits, at the pet's end of the stack
   const badgeEl = document.getElementById('badge');
   const player = new window.SpritePlayer(spriteEl);
-  player.onMeasured = (headroom) => stage.style.setProperty('--headroom', String(Math.min(0.5, headroom)));
+  player.onMeasured = (headroom) => {
+    stage.style.setProperty('--headroom', String(Math.min(0.5, headroom)));
+    updateShape();
+  };
+  player.onShapeChange = () => updateShape();
 
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
   const ATTENTION = new Set(['waiting', 'failed', 'review']);
@@ -20,7 +24,6 @@
   let usage = [];              // weekly limits: [{ app, name, percent, elapsed, resetsIn }]
   let drag = null;
   let awaitingLanding = false;
-  let isInteractive = false;
   let scale = 0.75;
   let petCenterX = window.innerWidth / 2;
   let bubbleMargin = 12;
@@ -67,6 +70,7 @@
       el.style.marginLeft = `${Math.round(x)}px`;
     }
     fitTray();
+    updateShape();
   }
 
   // Every session gets a bubble. The window grows to fit the stack (up to the monitor's edge);
@@ -128,12 +132,12 @@
     badgeEl.hidden = badge <= 0;
     badgeEl.textContent = badge > 9 ? '9+' : String(badge);
     badgeEl.className = attention ? 'attention' : '';
+    updateShape();
   }
 
   function pill(s) {
     const el = document.createElement('div');
     el.className = `pill status-${s.status}`;
-    el.dataset.interactive = '';
     el.setAttribute('role', 'listitem');
     const codex = s.kind === 'codex';
     // No hover tooltip (it pops up over the other bubbles); screen readers still get the details.
@@ -170,7 +174,6 @@
       const close = document.createElement('button');
       close.className = 'close';
       close.type = 'button';
-      close.dataset.interactive = '';
       close.setAttribute('aria-label', 'Dismiss');
       close.textContent = '×';
       close.addEventListener('click', (e) => {
@@ -184,13 +187,14 @@
       api.activate(s.id);
       player.playOnce('waving');
     });
+    el.addEventListener('animationend', () => updateShape());   // it has settled where it was laid out
     return el;
   }
 
   // One bubble with a row per app: how much of its weekly limit is used (the fill, and the number
   // on the right), against how far into the week it is (the line across the row). A fill past the
-  // line means you're using it faster than the week goes by. Clicks go through it, like through
-  // the empty parts of the window.
+  // line means you're using it faster than the week goes by. Clicking it does nothing (the window's
+  // shape covers it, so the click doesn't reach what's behind either).
   meterEl.className = 'meter';
   meterEl.setAttribute('role', 'listitem');
 
@@ -199,7 +203,10 @@
   function sizeWeekLine() {
     const dpr = window.devicePixelRatio || 1;
     document.documentElement.style.setProperty('--now-width', `${Math.max(1, Math.round(2 * dpr)) / dpr}px`);
-    matchMedia(`(resolution: ${dpr}dppx)`).addEventListener('change', sizeWeekLine, { once: true });
+    matchMedia(`(resolution: ${dpr}dppx)`).addEventListener('change', () => {
+      sizeWeekLine();
+      updateShape();
+    }, { once: true });
   }
   sizeWeekLine();
 
@@ -251,37 +258,61 @@
 
   setInterval(render, 30_000);     // keep "3m ago" fresh
 
-  // ---------------------------------------------------------- click-through
+  // ---------------------------------------------------------- the window's shape
+
+  // The window takes the mouse only where something is drawn, the pet and the bubbles, and a click
+  // anywhere else goes to the window behind it (see src/shape.js). Windows tells apart what's in
+  // the shape and what isn't, so nothing here follows the cursor. Each rectangle is reported as a
+  // distance from the edge of the window the content is anchored to (the bottom, while the
+  // bubbles are above the pet), so the main process can keep it in place while it resizes the
+  // window.
+  // Room around each bubble for its shadow. It has to be drawn inside the shape, and where the
+  // shape ends the shadow is cut off, so this reaches as far as the shadow does: in the dark
+  // theme over a white page it is down to 1/255 about 25 px out to the sides, 16 above (it falls
+  // 6 px down) and 31 below. Less shows as a faint box around the stack.
+  const BUBBLE_REACH = { left: 26, top: 18, right: 26, bottom: 32 };
+  let shapeKey = '';
+
+  function updateShape() {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const above = stage.classList.contains('above');
+    const rects = [];
+    const cover = (left, top, right, bottom) => {
+      const x0 = Math.max(0, Math.floor(left));
+      const y0 = Math.max(0, Math.floor(top));
+      const x1 = Math.min(width, Math.ceil(right));
+      const y1 = Math.min(height, Math.ceil(bottom));
+      if (x1 > x0 && y1 > y0) rects.push([x0, above ? height - y1 : y0, x1 - x0, y1 - y0]);
+    };
+    const box = spriteEl.getBoundingClientRect();
+    for (const [x, y, w, h] of player.shapeRects(box.width, box.height)) {
+      cover(box.left + x, box.top + y, box.left + x + w, box.top + y + h);
+    }
+    if (!badgeEl.hidden) {
+      const r = badgeEl.getBoundingClientRect();
+      cover(r.left - 4, r.top - 4, r.right + 4, r.bottom + 4);
+    }
+    const tray = trayEl.getBoundingClientRect();
+    for (const el of trayEl.children) {
+      const r = el.getBoundingClientRect();
+      const top = Math.max(r.top, tray.top);          // a scrolled stack is cut off by the tray
+      const bottom = Math.min(r.bottom, tray.bottom);
+      if (bottom > top) cover(r.left - BUBBLE_REACH.left, top - BUBBLE_REACH.top, r.right + BUBBLE_REACH.right, bottom + BUBBLE_REACH.bottom);
+    }
+    const key = `${above}|${JSON.stringify(rects)}`;
+    if (key === shapeKey) return;
+    shapeKey = key;
+    api.setShape({ layout: above ? 'above' : 'below', rects });
+  }
+
+  trayEl.addEventListener('scroll', () => updateShape());
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => updateShape()).observe(trayEl);
 
   function overPet(clientX, clientY) {
     const r = spriteEl.getBoundingClientRect();
     return player.hitTest(clientX - r.left, clientY - r.top, r.width, r.height);
   }
-
-  function hitTest(x, y) {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return false;
-    if (el === petEl || el === spriteEl) return overPet(x, y);
-    return Boolean(el.closest('[data-interactive]'));
-  }
-
-  function setInteractive(value) {
-    if (value === isInteractive) return;
-    isInteractive = value;
-    api.setInteractive(value);
-  }
-
-  window.addEventListener('mousemove', (e) => {
-    if (!drag) setInteractive(hitTest(e.clientX, e.clientY));
-  });
-  document.documentElement.addEventListener('mouseleave', () => {
-    if (!drag) setInteractive(false);
-  });
-  // While clicks pass through, the page gets no mouse events; the main process says where the
-  // cursor is instead (null once it has left the window).
-  api.onPointer((p) => {
-    if (!drag) setInteractive(p ? hitTest(p.x, p.y) : false);
-  });
 
   // ---------------------------------------------------------- hover, drag, throw, click
 
@@ -304,7 +335,6 @@
     petEl.setPointerCapture(e.pointerId);
     drag = { id: e.pointerId, x: e.screenX, y: e.screenY, moved: false, samples: [{ x: e.screenX, y: e.screenY, t: e.timeStamp }] };
     petEl.classList.add('dragging');
-    setInteractive(true);
     api.dragStart(e.screenX, e.screenY);
   });
 
@@ -349,7 +379,6 @@
       api.activate(null);
       player.playOnce('waving');
     }
-    setInteractive(hitTest(e.clientX, e.clientY));
   }
 
   petEl.addEventListener('pointerup', (e) => endDrag(e, false));

@@ -14,6 +14,7 @@ const { SessionTracker, defaultPaths } = require('./sessions');
 const { CodexTracker, codexPaths } = require('./codex');
 const { compareSessions } = require('./transcript');
 const { nextLocalTime, usageView, withWeeklyResets } = require('./usage');
+const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForUpdate, startUpdate } = require('./updater');
 
@@ -42,7 +43,6 @@ const BOUNCE = 0.7;
 const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
-const POINTER_POLL_MS = 50;     // how often the cursor is checked, for click-through
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
@@ -63,9 +63,8 @@ let pets = [];
 let currentPet = null;
 let petPos = null;              // top-left of the pet sprite, screen DIPs
 let layout = 'above';           // pills above or below the pet
-let pointerInteractive = false;
-let pointerKey = '';            // where the cursor was last seen in the window ('' outside it)
-let pointerTimer = null;
+let shape = null;               // what the page says is drawn: the pet and the bubbles (see shape.js)
+let shapeKey = '';              // the shape last set on the window, to skip setting it again
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
@@ -182,7 +181,35 @@ function placeWindow() {
   if (!win || win.isDestroyed()) return;
   const b = windowBounds();
   win.setBounds(b);
+  applyShape();
   if (layoutKey(b) !== lastLayoutKey) sendLayout();
+}
+
+// The window takes the mouse only where the pet or a bubble is drawn; clicks elsewhere go to the
+// window behind it. The page measures them from the edge the content sits against, so this lays
+// them on the window as it is now (see shape.js). Windows keeps the shape in pixels, so it is set
+// again when the pet's monitor has a different scaling.
+let shapeScale = 0;
+function applyShape() {
+  if (!win || win.isDestroyed()) return;
+  const { width, height } = win.getBounds();
+  const rects = shape ? shapeForWindow(shape, width, height) : NO_SHAPE;
+  const scale = displayForPet().scaleFactor;
+  const key = `${scale}|${JSON.stringify(rects)}`;
+  if (key === shapeKey) return;
+  const rescaled = shapeScale !== 0 && scale !== shapeScale;
+  shapeKey = key;
+  shapeScale = scale;
+  win.setShape(rects);
+  if (rescaled) {
+    // Windows may rescale the window a moment after it was moved onto the other monitor.
+    const current = win;
+    setTimeout(() => {
+      if (current !== win || current.isDestroyed()) return;
+      shapeKey = '';
+      applyShape();
+    }, 200);
+  }
 }
 
 function layoutKey(b) {
@@ -257,7 +284,10 @@ function createWindow() {
   // always on top.
   win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
   win.setMenuBarVisibility(false);
-  applyPointerPolicy();
+  // Until the page says where the pet is, the window takes no mouse at all.
+  shape = null;
+  shapeKey = '';
+  applyShape();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   const created = win;
@@ -275,38 +305,12 @@ function createWindow() {
 }
 
 // A crashed page gets a new window rather than a reload, so the new page starts out as the main
-// process then assumes: letting clicks through, with no drag under way.
+// process then assumes: with no drag under way, and no shape until the page says where the pet is.
 function replaceWindow(old) {
   if (old !== win || old.isDestroyed()) return;
   drag = null;
-  pointerInteractive = false;
   createWindow();
   old.destroy();
-}
-
-function applyPointerPolicy() {
-  if (!win || win.isDestroyed()) return;
-  if (pointerInteractive || drag) win.setIgnoreMouseEvents(false);
-  else win.setIgnoreMouseEvents(true);
-}
-
-// While the window lets clicks through it gets no mouse events, so the cursor is watched from
-// here and the page says whether it's over the pet or a bubble. Electron can forward mouse moves
-// to the page instead (setIgnoreMouseEvents' forward option), but on Windows those come through
-// a mouse hook and a child window of the page's, and they can stop coming: after the page had
-// reloaded they stopped for good, and the pet could no longer be hovered, clicked or dragged.
-function watchPointer() {
-  if (!win || win.isDestroyed() || !win.isVisible() || drag) return;
-  const cursor = screen.getCursorScreenPoint();
-  const b = win.getBounds();
-  const x = cursor.x - b.x;
-  const y = cursor.y - b.y;
-  const inside = x >= 0 && y >= 0 && x < b.width && y < b.height;
-  const key = inside ? `${x},${y}` : '';
-  if (key === pointerKey) return;
-  pointerKey = key;
-  // Once clicks reach the page it follows the cursor itself, but it can miss it leaving.
-  if (inside !== pointerInteractive) win.webContents.send('pet:pointer', inside ? { x, y } : null);
 }
 
 function setVisible(visible) {
@@ -632,23 +636,25 @@ function fromPet(event) {
 function registerIpc() {
   ipcMain.on('pet:ready', (e) => {
     if (!fromPet(e)) return;
+    shape = null;                       // a page that has just loaded sends its own
+    applyShape();
     sendPet();
     sendMotion();
     sendLayout();
     sendSessions();
     sendUsage(true);
-    pointerKey = '';                    // and where the cursor is, on the next check
   });
-  ipcMain.on('pet:interactive', (e, value) => {
+  ipcMain.on('pet:shape', (e, payload) => {
     if (!fromPet(e)) return;
-    pointerInteractive = value === true;
-    applyPointerPolicy();
+    const next = cleanShape(payload);
+    if (!next) return;
+    shape = next;
+    applyShape();
   });
   ipcMain.on('pet:drag-start', (e, p) => {
     if (!fromPet(e) || !isPoint(p)) return;
     stopMomentum();
     drag = { dx: p.screenX - petPos.x, dy: p.screenY - petPos.y };
-    applyPointerPolicy();
   });
   ipcMain.on('pet:drag-move', (e, p) => {
     if (!fromPet(e) || !drag || !isPoint(p)) return;
@@ -658,7 +664,6 @@ function registerIpc() {
   ipcMain.on('pet:drag-end', (e, v) => {
     if (!fromPet(e) || !drag) return;
     drag = null;
-    applyPointerPolicy();
     const vx = Number(v?.vx) || 0;
     const vy = Number(v?.vy) || 0;
     if (Math.hypot(vx, vy) >= MIN_THROW_SPEED) startMomentum(vx, vy);
@@ -997,7 +1002,6 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createTray();
     createWindow();
-    pointerTimer = setInterval(watchPointer, POINTER_POLL_MS);
     if (!DEMO) showUpdateResult();
 
     tracker = DEMO
@@ -1053,7 +1057,6 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     clearInterval(usageTimer);
-    clearInterval(pointerTimer);
     stopMomentum();
     tracker?.stop();
     codex?.stop();

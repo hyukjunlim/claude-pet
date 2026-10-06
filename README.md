@@ -310,10 +310,14 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
   and when the taskbar isn't on top at that moment, the pet isn't either.
 - **Clicks pass through.** The window runs `setIgnoreMouseEvents(true,{forward:true})` so it
   still receives mouse movement. The page tests whether the cursor is over the pet and only then
-  asks for real clicks. Claude Pet goes one step further and tests the actual pixels, so the
-  transparent area around the pet passes clicks through too. And it doesn't use the forwarded
-  mouse moves: on Windows they can stop coming, so the main process checks where the cursor is
-  every 50 ms instead.
+  asks for real clicks. Claude Pet doesn't do that, because it needs two programs to agree on
+  whether the window is taking clicks, and they can stop agreeing: on Windows the forwarded mouse
+  moves can stop coming, and watching the cursor from the main process instead left the pet deaf
+  until the mouse moved, after a virtual-desktop switch. Instead the window is cut to what's
+  drawn with `setShape`: the pet's outline (every frame of the row it's showing, so the pixels
+  themselves, not its box) and the bubbles. Windows decides what's inside the shape, so there's
+  nothing to track, and a click anywhere else goes to the window behind. The cost is that the
+  bubbles' shadows, and the weekly-limit bubble, take clicks too.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
   plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
   instead plays it twice and rests on its first frame. Its reactions to you (the jump on hover,
@@ -326,7 +330,8 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 ## Project layout
 
 ```text
-src/main.js         Electron main process: window, click-through, drag/throw, tray, deep links
+src/main.js         Electron main process: window, drag/throw, tray, deep links
+src/shape.js        The window's shape: which parts take the mouse (the pet and the bubbles)
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
 src/renderer/       Pet page: sprite engine, activity bubbles
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
