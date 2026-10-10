@@ -136,9 +136,12 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   (`%LOCALAPPDATA%\Claude\logs\main.log`), which gets a line when a prompt is sent and when a turn
   ends. It also uses the session index, which the app saves now and then during a turn.
 - **Questions and permission prompts:** the app's log also gets a line when Claude stops to ask
-  you something or to ask permission for a tool, and another when you answer. That's how the pet
-  shows "Needs you" right away for SSH sessions and for permission prompts. Until the transcript
-  has the question, the bubble says "Has a question for you" rather than the question itself.
+  you something or to ask permission for a tool, and another when you answer or the question is
+  withdrawn. That's how the pet shows "Needs you" right away for SSH sessions and for permission
+  prompts. The app asks some questions of its own the same way, such as whether to load the mods
+  Claude wrote. Those can stay up after the turn ends, and so does the bubble. Until the
+  transcript has the question, the bubble says "Has a question for you" rather than the question
+  itself.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
   that clock is off from the copies and corrects for it, so "Ready" still clears once you've
   looked at a session.

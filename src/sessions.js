@@ -39,6 +39,9 @@ const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 const RELEASED_SUFFIX = '.desktop-released.json';
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const LOG_SLACK_MS = 3000;   // log times are whole seconds, and the clock skew is an estimate
+// A second copy of the app (opening any claude:// link starts one) hands over and quits within
+// a second of starting. A start nothing like that follows within this long was the app itself.
+const LAUNCH_SETTLE_MS = 5000;
 // The longest to wait for a turn's summary. The app waits 5 s before it notifies you, but they
 // often take 3–4 s, and the wait ends as soon as one comes.
 const SUMMARY_WAIT_MS = 10_000;
@@ -185,7 +188,9 @@ class AppLogFollower extends FileFollower {
     this.turns = new Map();   // hostSessionId -> { running, at }, from the newest line about it
     this.asks = new Map();    // requestId -> { sessionId, tool, at }, until you answer
     this.selected = null;     // the session selected in the app, if any
+    this.selectedAt = 0;
     this.left = new Map();    // hostSessionId -> when you last switched away from it in the app
+    this.launches = [];       // starts of the app not yet known to be a second copy of it
   }
 
   // You were in the app with the session on screen until you switched away from it.
@@ -196,6 +201,7 @@ class AppLogFollower extends FileFollower {
   handleLine(line) {
     const e = parseLogLine(line);
     if (!e) return;
+    this.settleLaunches(e.at);
     switch (e.kind) {
       case 'ask':
         this.asks.set(e.requestId, { sessionId: e.sessionId, tool: e.tool, at: e.at });
@@ -203,19 +209,36 @@ class AppLogFollower extends FileFollower {
       case 'answer':
         this.asks.delete(e.requestId);
         return;
-      case 'restart':
-        this.asks.clear();   // the questions went with the sessions' CLIs
-        this.selected = null;
+      case 'launch':
+        this.launches.push(e.at);
+        return;
+      case 'second':
+        this.launches.pop();
         return;
       case 'focus':
         if (this.selected && e.sessionId !== this.selected) this.left.set(this.selected, e.at);
         this.selected = e.sessionId;
+        this.selectedAt = e.at;
         return;
+      case 'start':
+        // A new prompt withdraws whatever was asked before it. The end of a turn doesn't: the app
+        // asks some questions of its own as a turn ends (whether to load the mods Claude wrote),
+        // and they stay up until you answer.
+        for (const [id, ask] of this.asks) if (ask.sessionId === e.sessionId && ask.at <= e.at) this.asks.delete(id);
+        // falls through
       default:
         this.turns.set(e.sessionId, { running: e.kind === 'start', at: e.at });
-        // A new prompt or the end of the turn settles whatever Claude was asking.
-        for (const [id, ask] of this.asks) if (ask.sessionId === e.sessionId) this.asks.delete(id);
     }
+  }
+
+  // The app (re)started at a launch that no second copy's quitting followed. The questions went
+  // with the sessions' CLIs. `now` is a time on the log's clock.
+  settleLaunches(now) {
+    let restartedAt = 0;
+    while (this.launches.length && now - this.launches[0] > LAUNCH_SETTLE_MS) restartedAt = this.launches.shift();
+    if (!restartedAt) return;
+    for (const [id, ask] of this.asks) if (ask.at < restartedAt) this.asks.delete(id);
+    if (this.selectedAt < restartedAt) this.selected = null;
   }
 
   // What the log says about a session: { running, at, asking }, where `asking` is the oldest
@@ -244,10 +267,15 @@ const LOG_EVENTS = [
   [/^\[Stop hook\] Query completed for session (?<session>local_[\w-]+)/, 'end'],
   [/^Session (?<session>local_[\w-]+) query iterator completed/, 'end'],
   // Claude stops to ask you something (AskUserQuestion, ExitPlanMode) or for permission to use a
-  // tool, and later you answer. The answer names only the request.
+  // tool, and later you answer, or the question is withdrawn (you stopped the turn, say). Both
+  // name only the request. The app asks its own questions the same way.
   [/^Emitted tool permission request (?<request>[\w-]+) for (?<tool>\S+) in session (?<session>local_[\w-]+)/, 'ask'],
   [/^Received permission response for (?<request>[\w-]+)/, 'answer'],
-  [/^Starting app\b/, 'restart'],
+  [/^Permission request (?<request>[\w-]+) for \S+ aborted/, 'answer'],
+  // Every copy of the app logs its start, and a second one (started by a claude:// link) then
+  // says it isn't the main one and quits.
+  [/^Starting app\b/, 'launch'],
+  [/^Not main instance\b/, 'second'],
   // The session you select in the app ("null" in between two, or when none is).
   [/^\[CCD\] LocalSessions\.setFocusedSession: sessionId=(?:(?<session>local_[\w-]+)|null)\b/, 'focus'],
 ];
@@ -460,7 +488,10 @@ class SessionTracker extends EventEmitter {
       for (const [file, follower] of this.followers) {
         if (!only || only.has(file) || follower.offset < 0) await follower.poll().catch(() => {});
       }
-      if (this.appLog && (!only || only.has(this.appLog.file))) await this.appLog.poll().catch(() => {});
+      if (this.appLog) {
+        if (!only || only.has(this.appLog.file)) await this.appLog.poll().catch(() => {});
+        this.appLog.settleLaunches(now);
+      }
       this.recompute();
     } finally {
       this.busy = false;
@@ -709,9 +740,9 @@ function desktopStatus(r, state, opts = {}) {
   const derived = transcriptStatus(r, state, opts);
   const asking = opts.logTurn?.asking;
   if (!asking || derived?.status === 'waiting') return derived;   // the transcript has the question itself
-  // Claude asked something the SSH copy doesn't have yet, or wants permission for a tool (which
-  // the transcript shows as just running it).
-  if (state && state.turnEndedAt - (opts.skew || 0) > asking.at + LOG_SLACK_MS) return derived;   // that turn is over
+  // Claude asked something the SSH copy doesn't have yet, wants permission for a tool (which the
+  // transcript shows as just running it), or the app asked something of its own, which can
+  // outlast the turn.
   if (opts.dismissedAt >= asking.at) return derived;
   return { status: 'waiting', detail: describeAsk(asking.tool), since: asking.at };
 }

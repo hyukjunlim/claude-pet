@@ -146,10 +146,13 @@ test('the app log lines the pet understands', () => {
     { kind: 'ask', sessionId: id, requestId: req, tool: 'AskUserQuestion', at: local(41) });
   assert.deepEqual(parseLogLine(`2026-09-24 23:47:45 [info] Received permission response for ${req}: once (tool: AskUserQuestion)`),
     { kind: 'answer', sessionId: null, requestId: req, at: local(45) });
-  assert.equal(parseLogLine('2026-09-24 23:47:50 [info] Starting app {').kind, 'restart');
+  assert.deepEqual(parseLogLine(`2026-09-24 23:47:46 [info] Permission request ${req} for AskUserQuestion aborted`),
+    { kind: 'answer', sessionId: null, requestId: req, at: local(46) });
+  assert.equal(parseLogLine('2026-09-24 23:47:50 [info] Starting app {').kind, 'launch');
+  assert.equal(parseLogLine('2026-09-24 23:47:51 [info] Not main instance, returning early from app ready').kind, 'second');
 });
 
-test('the log keeps each question until you answer it, the turn ends or the app restarts', () => {
+test('the log keeps each question until you answer it, a new prompt withdraws it or the app restarts', () => {
   const log = new AppLogFollower('main.log');
   const id = 'local_4f2c9a10-1d3e-4b5a-9c7d-2e8f6a1b3c4d';
   const line = (s, text) => log.handleLine(`2026-09-24 23:47:${String(s).padStart(2, '0')} [info] ${text}`);
@@ -161,13 +164,29 @@ test('the log keeps each question until you answer it, the turn ends or the app 
   assert.deepEqual(log.turnOf(id), { running: true, at: local(10), asking: { tool: 'Bash', at: local(20) } });
   line(25, 'Received permission response for r1: once (tool: Bash)');
   assert.deepEqual(log.turnOf(id).asking, { tool: 'AskUserQuestion', at: local(21) });
+  // The app's own questions (whether to load the mods Claude wrote) stay up after the turn.
   line(30, `[Stop hook] Query completed for session ${id}`);
-  assert.deepEqual(log.turnOf(id), { running: false, at: local(30), asking: null });
+  assert.deepEqual(log.turnOf(id), { running: false, at: local(30), asking: { tool: 'AskUserQuestion', at: local(21) } });
+  line(31, 'Permission request r2 for AskUserQuestion aborted');
+  assert.equal(log.turnOf(id).asking, null);
+  line(32, `Emitted tool permission request r4 for AskUserQuestion in session ${id}`);
+  line(35, `Sending message to session ${id}`);
+  assert.equal(log.turnOf(id).asking, null);
   // Read from the middle of a turn: the question alone says a turn is running.
   line(40, 'Emitted tool permission request r3 for ExitPlanMode in session local_other');
   assert.deepEqual(log.turnOf('local_other'), { running: true, at: local(40), asking: { tool: 'ExitPlanMode', at: local(40) } });
+  // Opening a claude:// link starts a second copy of the app, which quits at once.
   line(50, 'Starting app {');
+  line(51, 'Not main instance, returning early from app ready');
+  log.settleLaunches(local(59));
+  assert.deepEqual(log.turnOf('local_other').asking, { tool: 'ExitPlanMode', at: local(40) });
+  // The app itself restarting takes its questions along, but not ones asked since.
+  line(52, 'Starting app {');
+  line(53, `Emitted tool permission request r5 for AskUserQuestion in session ${id}`);
+  assert.deepEqual(log.turnOf('local_other').asking, { tool: 'ExitPlanMode', at: local(40) });   // not known yet
+  log.settleLaunches(local(58));
   assert.equal(log.turnOf('local_other'), null);
+  assert.deepEqual(log.turnOf(id).asking, { tool: 'AskUserQuestion', at: local(53) });
 });
 
 test('the log says which session is selected in the app', () => {
@@ -181,7 +200,13 @@ test('the log says which session is selected in the app', () => {
   // Switching away means it was on screen until then.
   assert.equal(log.leftAt('local_a'), new Date(2026, 8, 24, 23, 47, 0).getTime());
   assert.equal(log.leftAt('local_b'), 0);
+  // A second copy of the app, from a claude:// link, changes nothing.
   log.handleLine('2026-09-24 23:48:00 [info] Starting app {');
+  log.handleLine('2026-09-24 23:48:01 [info] Not main instance, returning early from app ready');
+  log.settleLaunches(new Date(2026, 8, 24, 23, 49, 0).getTime());
+  assert.equal(log.selected, 'local_b');
+  log.handleLine('2026-09-24 23:50:00 [info] Starting app {');
+  log.handleLine('2026-09-24 23:50:30 [info] Session local_c query iterator completed');
   assert.equal(log.selected, null);
   assert.equal(log.leftAt('local_b'), 0);   // the app closing isn't you looking
 });
@@ -248,9 +273,10 @@ test('a question in the log shows "Needs you" before the SSH copy has it', () =>
   assert.equal(desktopStatus(r, copy, { now: T0 + 700_000, skew: SKEW, logTurn: asking('ExitPlanMode', 650) }).detail, 'Plan ready for your review');
   // Also for as long as it takes you to answer.
   assert.equal(desktopStatus(r, copy, { now: T0 + 5 * 60 * 60 * 1000, skew: SKEW, logTurn: asking('AskUserQuestion', 650) }).status, 'waiting');
-  // A copy from after the question already ended that turn.
+  // Even once the turn is over: the app's own questions outlast it.
   const later = copyOf([prompt(remote(600)), reply(remote(660), 'a2')]);
-  assert.notEqual(desktopStatus(r, later, { now: T0 + 700_000, skew: SKEW, logTurn: asking('AskUserQuestion', 650) }).status, 'waiting');
+  assert.deepEqual(desktopStatus(r, later, { now: T0 + 700_000, skew: SKEW, logTurn: { ...ended(660), asking: { tool: 'AskUserQuestion', at: T0 + 650_000 } } }),
+    { status: 'waiting', detail: 'Has a question for you', since: T0 + 650_000 });
 });
 
 test('a permission prompt shows "Needs you" instead of "Running"', () => {
