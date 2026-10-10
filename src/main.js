@@ -13,7 +13,9 @@ const { discoverPets, petRoots } = require('./pets');
 const { SessionTracker, defaultPaths } = require('./sessions');
 const { CodexTracker, codexPaths } = require('./codex');
 const { compareSessions } = require('./transcript');
-const { nextLocalTime, usageView, withWeeklyResets } = require('./usage');
+const { combineClaudeUsage, usageView } = require('./usage');
+const { ClaudeUsage } = require('./claude-usage');
+const { LocalMod, bundledVersion, modFiles, runningWslDistros, sshInstaller, wslInstaller } = require('./claude-mod');
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForUpdate, startUpdate } = require('./updater');
@@ -44,7 +46,6 @@ const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const FOREGROUND_HANDOFF_MS = 1500;
@@ -71,7 +72,11 @@ let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures i
 let sessions = [];              // Claude and Codex together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
-const usage = { claude: null, codex: null };   // each app's newest usage figures (see usage.js)
+const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
+let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
+let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
+let modBusy = null;             // what the Live Claude usage menu is doing, while it does it
+const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 let usageKey = '';
 let usageTimer = null;
 let logFile = null;
@@ -466,7 +471,7 @@ function setUsage(patch) {
 }
 
 function currentUsage() {
-  return usageView({ claude: withWeeklyResets(usage.claude, settings.get('claudeWeeklyResetAt')), codex: usage.codex });
+  return usageView({ claude: combineClaudeUsage(usage.claude), codex: usage.codex });
 }
 
 // Also runs every minute: a week can turn over, and figures can get old, with no news.
@@ -479,40 +484,192 @@ function sendUsage(force = false) {
   win.webContents.send('pet:usage', items);
 }
 
-// "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h"
+// "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h · as of 2h ago"
 function usageLabel(u) {
   return [
     `${u.name}: ${u.percent}% of the weekly limit used`,
     u.elapsed != null && `${u.elapsed}% into the week`,
     u.resetsIn && `resets in ${u.resetsIn}`,
+    u.age && `as of ${u.age} ago`,
   ].filter(Boolean).join(' · ');
 }
 
-// When Claude's week resets (see withWeeklyResets): a weekday, then an hour, on this PC's clock.
-function claudeResetMenu() {
-  const anchor = settings.get('claudeWeeklyResetAt');
-  const slot = Number.isFinite(anchor) ? new Date(anchor) : null;
-  const pad = (n) => String(n).padStart(2, '0');
-  const set = (value) => {
-    settings.set({ claudeWeeklyResetAt: value });
-    sendUsage();
-  };
-  return {
-    label: `Claude's week resets: ${slot ? `${WEEKDAYS[slot.getDay()].slice(0, 3)} ${pad(slot.getHours())}:${pad(slot.getMinutes())}` : 'not set'}`,
-    submenu: [
-      { label: 'Not set', type: 'radio', checked: !slot, click: () => set(null) },
-      { type: 'separator' },
-      ...WEEKDAYS.map((name, day) => ({
-        label: name,
-        submenu: Array.from({ length: 24 }, (_, hour) => ({
-          label: `${pad(hour)}:00`,
-          type: 'radio',
-          checked: slot?.getDay() === day && slot.getHours() === hour && slot.getMinutes() === 0,
-          click: () => set(nextLocalTime(day, hour)),
-        })),
-      })),
-    ],
-  };
+// ---------------------------------------------------------------- live Claude usage (see claude-mod.js)
+
+const LIVE_USAGE_DOC = 'https://github.com/hyukjunlim/claude-pet#live-claude-usage';
+
+function wslDistros() {
+  return process.platform === 'win32' ? tracker?.wslDistros?.() ?? [] : [];
+}
+
+function sshHosts() {
+  return settings.get('claudeUsageOverSsh') ? claudeUsage?.hostStates() ?? [] : [];
+}
+
+function rememberWsl(distro, on) {
+  settings.set({ claudeModWsl: { ...settings.get('claudeModWsl'), [distro]: on } });
+}
+
+// WSL runs the Windows copy of the mod, so it needs this PC's.
+async function setWsl(distro, on) {
+  if (on && !localMod.status().installed) localMod.install();
+  const r = await wslInstaller(distro, { action: on ? 'install' : 'uninstall', windowsDir: localMod.dir });
+  if (!r.ok) throw new Error(`WSL ${distro}: ${r.error}`);
+  rememberWsl(distro, r.enabled);
+  log(`mod ${on ? 'set up' : 'removed'} in WSL ${distro}`);
+}
+
+async function setSsh(host, on) {
+  const r = await sshInstaller(host, on ? { action: 'install', files: modFiles() } : { action: 'uninstall' });
+  if (!r.ok) throw new Error(`${host.name}: ${r.error}`);
+  log(`mod ${on ? 'set up' : 'removed'} on ${host.name}`);
+}
+
+// This PC, and the WSL distros running its copy.
+async function setLocal(on) {
+  if (on) {
+    localMod.install();
+    log('mod set up on this PC');
+    return;
+  }
+  const failures = [];
+  for (const distro of wslDistros().filter((d) => settings.get('claudeModWsl')?.[d])) {
+    try {
+      await setWsl(distro, false);
+    } catch (err) {
+      failures.push(err.message);
+    }
+  }
+  localMod.uninstall();
+  log('mod removed from this PC');
+  if (failures.length) throw new Error(failures.join('\n'));
+}
+
+async function runModTask(label, task) {
+  if (modBusy) return;
+  modBusy = label;
+  try {
+    await task();
+  } catch (err) {
+    log('mod:', err.message);
+    await dialog.showMessageBox({
+      type: 'warning', title: 'Claude Pet', message: "Couldn't change Claude Pet's mod for Claude Code.", detail: err.message,
+    });
+  } finally {
+    modBusy = null;
+  }
+}
+
+function liveUsageMenu() {
+  const local = localMod.status();
+  const busy = Boolean(modBusy);
+  const toggle = (set) => (mi) => runModTask(mi.checked ? 'Setting up' : 'Removing', () => set(mi.checked));
+  const items = [
+    { label: busy ? `${modBusy}…` : 'Saves your usage after each reply, in sessions started after setup', enabled: false },
+    { type: 'separator' },
+    { label: 'This PC', type: 'checkbox', checked: local.installed, enabled: !busy, click: toggle(setLocal) },
+  ];
+  for (const distro of wslDistros()) {
+    items.push({
+      label: `WSL: ${distro}`,
+      type: 'checkbox',
+      checked: settings.get('claudeModWsl')?.[distro] === true,
+      enabled: !busy,
+      click: toggle((on) => setWsl(distro, on)),
+    });
+  }
+  for (const h of sshHosts()) {
+    items.push({
+      label: `SSH: ${h.name}${h.mod ? '' : ' (connecting…)'}`,
+      type: 'checkbox',
+      checked: h.mod?.enabled === true,
+      enabled: !busy && Boolean(h.mod),
+      click: toggle((on) => setSsh(h, on)),
+    });
+  }
+  items.push({ type: 'separator' });
+  items.push({
+    label: 'Read usage on SSH hosts',
+    type: 'checkbox',
+    checked: settings.get('claudeUsageOverSsh'),
+    click: (mi) => {
+      settings.set({ claudeUsageOverSsh: mi.checked });
+      claudeUsage?.setWatchHosts(mi.checked);
+    },
+  });
+  items.push({ label: 'How it works…', click: () => shell.openExternal(LIVE_USAGE_DOC) });
+  return { label: `Live Claude usage${local.installed ? '' : ' (off)'}`, submenu: items };
+}
+
+// Asked once: a new install, or the first start after the pet gained the mod.
+async function offerLiveUsage() {
+  if (DEMO || modBusy || settings.get('claudeModOffered') || !localMod.hasClaudeCode() || localMod.status().installed) return;
+  const distros = wslDistros();
+  const hosts = sshHosts();
+  const elsewhere = [...distros.map((d) => `WSL (${d})`), ...hosts.map((h) => h.name)];
+  const answer = await dialog.showMessageBox({
+    type: 'question',
+    title: 'Claude Pet',
+    message: "Show Claude's weekly limit?",
+    detail: [
+      "Claude Pet reads Claude's usage from a small mod for Claude Code, which saves your plan's",
+      "usage after each reply, as Claude reports it: how much of the weekly limit you've used,",
+      'and when the week resets.',
+      '',
+      'It puts the mod in ~/.claude-pet and adds two entries to the "env" of ~/.claude/settings.json',
+      '(a backup is kept). Sessions you start from now on use it.',
+      '',
+      'Tray menu → Live Claude usage changes this later.',
+    ].join('\n'),
+    buttons: ['Set it up', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    ...(elsewhere.length ? { checkboxLabel: `Also in ${elsewhere.join(', ')}`, checkboxChecked: true } : {}),
+  });
+  settings.set({ claudeModOffered: true });
+  if (answer.response !== 0) return;
+  await runModTask('Setting up', async () => {
+    await setLocal(true);
+    if (!answer.checkboxChecked) return;
+    const failures = [];
+    for (const distro of distros) await setWsl(distro, true).catch((err) => failures.push(err.message));
+    for (const h of hosts) await setSsh(h, true).catch((err) => failures.push(err.message));
+    if (failures.length) throw new Error(`Set up on this PC, but not on:\n${failures.join('\n')}`);
+  });
+}
+
+// After the pet itself updates: the copies of the mod it set up get its newer version. WSL runs
+// this PC's copy.
+function updateLocalMod() {
+  const st = localMod.status();
+  if (!st.installed || st.version === bundledVersion()) return;
+  try {
+    localMod.update();
+    log(`mod updated on this PC (${st.version} → ${bundledVersion()})`);
+  } catch (err) {
+    log('mod update on this PC failed:', err.message);
+  }
+}
+
+function updateHostMods() {
+  for (const h of sshHosts()) {
+    if (!h.mod?.enabled || !h.mod.version || h.mod.version === bundledVersion() || modUpdated.has(h.key)) continue;
+    modUpdated.add(h.key);
+    sshInstaller(h, { action: 'update', files: modFiles() }).then((r) => {
+      log(r.ok ? `mod updated on ${h.name} (${h.mod.version} → ${bundledVersion()})` : `mod update on ${h.name} failed: ${r.error}`);
+    });
+  }
+}
+
+// What the WSL distros say, for those running (asking the others would start them).
+async function checkWslMods() {
+  const distros = wslDistros();
+  if (!distros.length) return;
+  const running = await runningWslDistros();
+  for (const distro of distros.filter((d) => running.has(d))) {
+    const r = await wslInstaller(distro, { action: 'status', windowsDir: localMod.dir });
+    if (r.ok) rememberWsl(distro, r.enabled);
+  }
 }
 
 function trayTooltip() {
@@ -758,7 +915,7 @@ function buildMenu() {
       sendUsage();
     },
   });
-  if (claudeInstalled()) items.push(claudeResetMenu());
+  if (localMod?.hasClaudeCode()) items.push(liveUsageMenu());
   if (codexInstalled() && !DEMO) {
     items.push({
       label: 'Show Codex threads',
@@ -1014,8 +1171,27 @@ if (!app.requestSingleInstanceLock()) {
       mergeSessions();
     });
     tracker.on('seen', () => settings.set({ seen: tracker.seenSnapshot() }));
-    tracker.on('usage', setUsage);
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
+    if (DEMO) {
+      tracker.on('usage', ({ claude, codex }) => setUsage({ claude: claude ? [claude] : [], codex }));
+    } else {
+      localMod = new LocalMod();
+      updateLocalMod();
+      claudeUsage = new ClaudeUsage({
+        usageFile: localMod.usageFile,
+        sshConnections: defaultPaths(app.getPath('appData')).sshConnections,
+        watchHosts: settings.get('claudeUsageOverSsh'),
+      });
+      claudeUsage.on('change', (readings) => setUsage({ claude: readings }));
+      claudeUsage.on('hosts', updateHostMods);
+      claudeUsage.on('error', (err) => log('claude usage:', err?.message || err));
+      claudeUsage.start();
+      // once the desktop index (for WSL distros) and the SSH connections have been read
+      setTimeout(() => {
+        offerLiveUsage().catch((err) => log('mod offer:', err.message));
+        checkWslMods().catch((err) => log('mod check:', err.message));
+      }, 8000);
+    }
     tracker.start();
     startCodex();
     usageTimer = setInterval(sendUsage, 60_000);
@@ -1060,6 +1236,7 @@ if (!app.requestSingleInstanceLock()) {
     stopMomentum();
     tracker?.stop();
     codex?.stop();
+    claudeUsage?.stop();
     if (settings) settings.save();
   });
 

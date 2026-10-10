@@ -11,7 +11,9 @@ const DEFAULTS = {
   showActivity: true,
   alwaysAnimate: true,     // animate even when Windows' Animation effects are off
   showUsage: true,         // the weekly-limit meter next to the pet
-  claudeWeeklyResetAt: null,   // one of the times Claude's weekly limit resets (ms); it's the same every week
+  claudeUsageOverSsh: true,  // read Claude's usage from the mod on the desktop app's SSH hosts
+  claudeModOffered: false,   // the pet has asked once whether to set up its Claude Code mod
+  claudeModWsl: {},          // distro -> whether the mod is set up there, as last seen
   showCodex: true,         // also show Codex threads, when Codex is installed
   codexOverSsh: true,      // and follow the ones running on Codex's SSH hosts
   shortcut: 'CommandOrControl+Alt+P',
