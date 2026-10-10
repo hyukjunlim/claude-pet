@@ -5,11 +5,10 @@
 // ~/.ssh/config (the ones the Codex app uses too). The watcher sends new lines of recently
 // written rollouts, which are read the same way as rollouts on this PC, plus the host's clock.
 
-const { spawn } = require('node:child_process');
-const { EventEmitter } = require('node:events');
 const { applyRolloutEntry, createRolloutState, rateLimitsOf } = require('./rollout');
+const { BOOTSTRAP, LOADER, SshWatcher } = require('./ssh-watcher');
 
-// Runs on the host (see BOOTSTRAP). Output, one JSON object per line:
+// Runs on the host (see ssh-watcher.js). Output, one JSON object per line:
 //   {"now": <host time, s>}  every 5 s      {"open": <n>, "path": …}  started following a rollout
 //   {"n": <n>, "l": <line>}  a rollout line  {"close": <n>}            stopped following it
 //   {"limits": <line>}       once, at the start: the newest rollout line with the account's rate
@@ -151,126 +150,27 @@ while True:
     time.sleep(1)
 `;
 
-// The watcher arrives as the first line on stdin, and stdin then stays open (see above).
-const LOADER = 'import sys, json; exec(json.loads(sys.stdin.readline()))';
-const BOOTSTRAP = `exec python3 -u -c '${LOADER}'`;
-const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-T'];
-const RETRY_MS = [5000, 30_000, 2 * 60_000, 10 * 60_000];
-const STEADY_MS = 60_000;   // a connection that lasted this long resets the retry delay
-
-class CodexRemote extends EventEmitter {
+class CodexRemote extends SshWatcher {
   // target: what to pass to ssh (a ~/.ssh/config alias or a host name)
-  constructor({ hostId, target, port = null, identity = null, spawnFn = spawn, now = Date.now }) {
-    super();
-    Object.assign(this, { hostId, target, port, identity, spawnFn, now });
+  constructor({ hostId, target, port = null, identity = null, spawnFn, now }) {
+    super({ target, port, identity, spawnFn, now, script: WATCHER, label: 'Codex' });
+    this.hostId = hostId;
     this.files = new Map();     // id -> { path, state }
-    this.skew = 0;              // how far the host's clock is ahead of ours, ms
     this.limits = null;         // the newest rate limits seen on the host, on its clock
-    this.child = null;
-    this.stopped = true;
-    this.attempt = 0;
-    this.retryTimer = null;
-    this.lastError = '';
   }
 
-  start() {
-    if (!this.stopped) return;
-    this.stopped = false;
-    this.connect();
+  onDisconnect() {
+    if (!this.files.size) return;
+    this.files.clear();
+    this.emit('change');
   }
 
-  stop() {
-    this.stopped = true;
-    clearTimeout(this.retryTimer);
-    this.retryTimer = null;
-    const child = this.child;
-    this.child = null;
-    child?.kill();
-    if (this.files.size) {
-      this.files.clear();
-      this.emit('change');
-    }
-  }
-
-  connect() {
-    const args = [...SSH_OPTIONS];
-    if (this.port) args.push('-p', String(this.port));
-    if (this.identity) args.push('-i', this.identity);
-    args.push(this.target, BOOTSTRAP);
-    let child;
-    try {
-      child = this.spawnFn('ssh', args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    } catch (err) {
-      this.onExit(null, err.message);
-      return;
-    }
-    this.child = child;
-    const startedAt = this.now();
-    let buffer = '';
-    const stderr = [];
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      buffer += chunk;
-      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
-        this.handle(buffer.slice(0, nl));
-        buffer = buffer.slice(nl + 1);
-      }
-    });
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (s) => {
-      stderr.push(...String(s).split(/\r?\n/).filter(Boolean));
-      stderr.splice(0, Math.max(0, stderr.length - 3));
-    });
-    let done = false;
-    const finish = (reason) => {
-      if (done) return;
-      done = true;
-      if (this.now() - startedAt >= STEADY_MS) this.attempt = 0;
-      this.onExit(child, stderr.join(' ') || reason);
-    };
-    child.on('error', (err) => finish(err.message));
-    child.on('exit', (code) => finish(`exited with ${code}`));
-    child.stdin.on('error', () => {});
-    child.stdin.write(`${JSON.stringify(WATCHER)}\n`);   // and no end(): see WATCHER
-  }
-
-  onExit(child, reason) {
-    if (child && child !== this.child) return;   // an old connection we already replaced or stopped
-    this.child = null;
-    if (this.files.size) {
-      this.files.clear();
-      this.emit('change');
-    }
-    if (this.stopped) return;
-    const message = `Codex on ${this.target}: ${reason}`;
-    if (message !== this.lastError) this.emit('error', new Error(message));
-    this.lastError = message;
-    const delay = RETRY_MS[Math.min(this.attempt, RETRY_MS.length - 1)];
-    this.attempt += 1;
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      if (!this.stopped) this.connect();
-    }, delay);
-  }
-
-  handle(line) {
-    let m;
-    try {
-      m = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (typeof m?.now === 'number') {
-      this.lastError = '';
-      const skew = Math.round(m.now * 1000 - this.now());
-      const moved = Math.abs(skew - this.skew) > 1000;
-      this.skew = skew;
-      if (moved) this.emit('change');
-    } else if (m?.open != null && typeof m.path === 'string') {
+  onMessage(m) {
+    if (m.open != null && typeof m.path === 'string') {
       this.files.set(m.open, { path: m.path, state: createRolloutState() });
-    } else if (m?.close != null) {
+    } else if (m.close != null) {
       if (this.files.delete(m.close)) this.emit('change');
-    } else if (typeof m?.limits === 'string') {
+    } else if (typeof m.limits === 'string') {
       let limits = null;
       try {
         limits = rateLimitsOf(JSON.parse(m.limits));
@@ -278,7 +178,7 @@ class CodexRemote extends EventEmitter {
         return;
       }
       if (this.keepLimits(limits)) this.emit('change');
-    } else if (m?.n != null && typeof m.l === 'string') {
+    } else if (m.n != null && typeof m.l === 'string') {
       const f = this.files.get(m.n);
       if (!f) return;
       try {
