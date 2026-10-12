@@ -9,7 +9,10 @@
   const meterEl = document.createElement('div');   // the weekly limits, at the pet's end of the stack
   const badgeEl = document.getElementById('badge');
   const player = new window.SpritePlayer(spriteEl);
-  player.onMeasured = (headroom) => stage.style.setProperty('--headroom', String(Math.min(0.5, headroom)));
+  player.onMeasured = (headroom) => {
+    stage.style.setProperty('--headroom', String(Math.min(0.5, headroom)));
+    reportInputRegions();
+  };
 
   // PET-INPUT: distinguish an unanswered request from a turn that is still working.
   const LABELS = { waiting: 'Awaiting input', failed: 'Error', review: 'Ready', running: 'Running' };
@@ -68,7 +71,35 @@
       el.style.marginLeft = `${Math.round(x)}px`;
     }
     fitTray();
+    reportInputRegions();
   }
+
+  // PET-DRAG: the main process keeps the Windows input shape aligned with visible
+  // bubbles. The pet itself is placed there synchronously while the window moves.
+  let inputReportPending = false;
+  function reportInputRegions() {
+    if (inputReportPending) return;
+    inputReportPending = true;
+    requestAnimationFrame(() => {
+      inputReportPending = false;
+      const viewport = trayEl.getBoundingClientRect();
+      const regions = [];
+      for (const el of trayEl.children) {
+        const r = el.getBoundingClientRect();
+        const left = Math.max(r.left, viewport.left);
+        const top = Math.max(r.top, viewport.top);
+        const right = Math.min(r.right, viewport.right);
+        const bottom = Math.min(r.bottom, viewport.bottom);
+        if (right > left && bottom > top) {
+          // The close button and tray shadow extend beyond a pill's own box.
+          regions.push({ x: left - 12, y: top - 12, width: right - left + 24, height: bottom - top + 24 });
+        }
+      }
+      api.setInputRegions(regions);
+    });
+  }
+
+  trayEl.addEventListener('scroll', reportInputRegions);
 
   // Every session gets a bubble. The window grows to fit the stack (up to the monitor's edge);
   // if even that isn't enough, the stack scrolls.
@@ -281,8 +312,8 @@
   document.documentElement.addEventListener('mouseleave', () => {
     if (!drag) setInteractive(false);
   });
-  // While clicks pass through, the page gets no mouse events; the main process says where the
-  // cursor is instead (null once it has left the window).
+  // On platforms using click-through fallback, the page gets no mouse events; the main
+  // process supplies the cursor position instead (null once it leaves the window).
   api.onPointer((p) => {
     if (!drag) setInteractive(p ? hitTest(p.x, p.y) : false);
   });
@@ -303,16 +334,25 @@
   });
 
   petEl.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || !overPet(e.clientX, e.clientY)) return;
+    // PET-DRAG: the native input region already limits clicks to this small pet box.
+    // Atlas alpha changes between frames, so its transparent fringe is a drag handle too.
+    if (e.button !== 0) return;
     e.preventDefault();
-    petEl.setPointerCapture(e.pointerId);
+    // PET-DRAG: a release can be lost while the native window moves. End that
+    // unfinished gesture before a new press replaces its pointer id.
+    if (drag) endDrag({ pointerId: drag.id, clientX: e.clientX, clientY: e.clientY }, true);
     drag = { id: e.pointerId, x: e.screenX, y: e.screenY, moved: false, samples: [{ x: e.screenX, y: e.screenY, t: e.timeStamp }] };
+    try {
+      petEl.setPointerCapture(e.pointerId);
+    } catch {
+      // PET-DRAG: still track moves in this window if Chromium cannot capture the pointer.
+    }
     petEl.classList.add('dragging');
     setInteractive(true);
     api.dragStart(e.screenX, e.screenY);
   });
 
-  petEl.addEventListener('pointermove', (e) => {
+  window.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     drag.samples.push({ x: e.screenX, y: e.screenY, t: e.timeStamp });
     while (drag.samples.length > 2 && e.timeStamp - drag.samples[0].t > 100) drag.samples.shift();
@@ -343,7 +383,7 @@
       vy = ((last.y - first.y) / dt) * 1.6;
     }
     awaitingLanding = d.moved;
-    api.dragEnd(vx, vy);
+    api.dragEnd(vx, vy, cancelled);
     if (!d.moved && !cancelled) {
       api.activate(null);
       player.playOnce('waving');
@@ -351,8 +391,9 @@
     setInteractive(hitTest(e.clientX, e.clientY));
   }
 
-  petEl.addEventListener('pointerup', (e) => endDrag(e, false));
-  petEl.addEventListener('pointercancel', (e) => endDrag(e, true));
+  window.addEventListener('pointerup', (e) => endDrag(e, false));
+  window.addEventListener('pointercancel', (e) => endDrag(e, true));
+  petEl.addEventListener('lostpointercapture', (e) => endDrag(e, true));
   petEl.addEventListener('wheel', (e) => {
     // PET-SIZE: Ctrl+wheel changes the same saved preset as the tray menu.
     if (!e.ctrlKey || !e.deltaY) return;
@@ -374,5 +415,9 @@
 
   api.onWake(() => player.playOnce('waving', 3));   // a longer hello than a click's
 
+  // PET-FREEZE: a pulse after a paint frame lets the main process replace a stalled page.
+  // A plain timer can keep firing even when the visible pet no longer paints.
+  setInterval(() => requestAnimationFrame(() => api.pulse()), 5_000);
   api.ready();
+  requestAnimationFrame(() => api.pulse());
 })();

@@ -20,10 +20,12 @@ contextBridge.exposeInMainWorld('pet', {
   onLanded: listen('pet:landed'),
   onPointer: listen('pet:pointer'),
   ready: () => ipcRenderer.send('pet:ready'),
+  pulse: () => ipcRenderer.send('pet:pulse'),
   setInteractive: (value) => ipcRenderer.send('pet:interactive', value === true),
+  setInputRegions: (regions) => ipcRenderer.send('pet:input-regions', regions),
   dragStart: (screenX, screenY) => ipcRenderer.send('pet:drag-start', { screenX, screenY }),
   dragMove: (screenX, screenY) => ipcRenderer.send('pet:drag-move', { screenX, screenY }),
-  dragEnd: (vx, vy) => ipcRenderer.send('pet:drag-end', { vx, vy }),
+  dragEnd: (vx, vy, cancelled) => ipcRenderer.send('pet:drag-end', { vx, vy, cancelled }),
   resizeStep: (direction) => ipcRenderer.send('pet:resize-step', direction), // PET-SIZE
   activate: (id) => ipcRenderer.send('pet:activate', typeof id === 'string' ? id : null),
   dismiss: (id) => ipcRenderer.send('pet:dismiss', id),

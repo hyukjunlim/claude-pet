@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, screen, shell,
+  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
 const { discoverPets, petRoots } = require('./pets');
@@ -45,7 +45,9 @@ const BOUNCE = 0.7;
 const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
-const POINTER_POLL_MS = 16;     // PET-DRAG: reduce click-through hover latency before a drag starts
+const POINTER_POLL_MS = 16;     // PET-DRAG: reduce hover latency where shaped input is unavailable
+const RENDERER_WATCHDOG_MS = 10_000;
+const RENDERER_STALE_MS = 35_000;
 const STATUS_LABEL = { waiting: 'Awaiting input', failed: 'Error', review: 'Ready', running: 'Running' };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
@@ -68,6 +70,13 @@ let petPos = null;              // top-left of the pet sprite, screen DIPs
 let layout = 'above';           // pills above or below the pet
 let pointerInteractive = false;
 let pointerTimer = null;
+let rendererWatchdogTimer = null;
+let rendererPulseAt = 0;
+let shapedWindow = false;
+let inputRegions = [];
+let lastShapeKey = '';
+let lastShapeRefresh = 0;
+let pointerOverPet = false;
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
@@ -79,6 +88,10 @@ let usageKey = '';
 let usageTimer = null;
 let logFile = null;
 let logBytes = 0;
+// PET-LOG: GUI launches can inherit a pipe whose reader exits before the pet does.
+// Keep the file log independent of that optional console output.
+let consoleOutputAvailable = Boolean(process.stdout?.isTTY);
+process.stdout?.on('error', () => { consoleOutputAvailable = false; });
 let update = null;              // what the last check found, when there's an update waiting
 let updateBusy = null;          // 'checking' while looking, 'asking' while a dialog is up
 
@@ -89,7 +102,6 @@ function log(...args) {
   const pad = (n, width = 2) => String(n).padStart(width, '0');
   const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const line = `[claude-pet ${day} ${now.toTimeString().slice(0, 8)}.${pad(now.getMilliseconds(), 3)}] ${format(...args)}`;
-  console.log(line);
   try {
     if (!logFile) {
       logFile = path.join(app.getPath('logs'), 'claude-pet.log');
@@ -103,7 +115,14 @@ function log(...args) {
     fs.appendFileSync(logFile, `${line}\n`);
     logBytes += Buffer.byteLength(line) + 1;
   } catch {
-    // the console still has it
+    // Logging must never interrupt pointer or session events.
+  }
+  if (consoleOutputAvailable) {
+    try {
+      console.log(line);
+    } catch {
+      consoleOutputAvailable = false;
+    }
   }
 }
 
@@ -184,6 +203,7 @@ function placeWindow() {
   if (!win || win.isDestroyed()) return;
   const b = windowBounds();
   win.setBounds(b);
+  updateInputShape();
   if (layoutKey(b) !== lastLayoutKey) sendLayout();
 }
 
@@ -226,6 +246,12 @@ function finishMove() {
 // ---------------------------------------------------------------- window
 
 function createWindow() {
+  rendererPulseAt = performance.now();
+  shapedWindow = false;
+  inputRegions = [];
+  lastShapeKey = '';
+  lastShapeRefresh = 0;
+  pointerOverPet = false;
   win = new BrowserWindow({
     ...windowBounds(),
     title: 'Claude Pet',
@@ -259,6 +285,12 @@ function createWindow() {
   win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setMenuBarVisibility(false);
+  // PET-DRAG: Windows can deliver pointerdown before the click-through hover poll and
+  // renderer reply finish. Give the visible pet an OS input region from the start.
+  if (process.platform === 'win32') {
+    shapedWindow = true;
+    updateInputShape();
+  }
   applyPointerPolicy();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -273,6 +305,8 @@ function createWindow() {
       wake();
     }
   });
+  win.on('show', () => updateInputShape(true));
+  win.on('restore', () => updateInputShape(true));
   win.loadURL('pet://app/ui/index.html');
 }
 
@@ -286,20 +320,70 @@ function replaceWindow(old) {
   old.destroy();
 }
 
+function watchRenderer() {
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  if (performance.now() - rendererPulseAt < RENDERER_STALE_MS) return;
+  // PET-FREEZE: a live process can retain a frozen page after sleep or graphics recovery.
+  // Recreate only the pet window; the session trackers and saved position remain alive.
+  log('pet renderer stopped painting; recreating window');
+  replaceWindow(win);
+}
+
 function applyPointerPolicy() {
   if (!win || win.isDestroyed()) return;
+  if (shapedWindow) {
+    win.setIgnoreMouseEvents(false);
+    return;
+  }
   if (pointerInteractive || drag) win.setIgnoreMouseEvents(false);
   else win.setIgnoreMouseEvents(true);
 }
 
-// While the window lets clicks through it gets no mouse events, so the cursor is watched from
-// here and the page says whether it's over the pet or a bubble. Electron can forward mouse moves
-// to the page instead (setIgnoreMouseEvents' forward option), but on Windows those come through
-// a mouse hook and a child window of the page's, and they can stop coming: after the page had
-// reloaded they stopped for good, and the pet could no longer be hovered, clicked or dragged.
+function updateInputShape(force = false) {
+  if (!shapedWindow || !win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  const size = petSize();
+  // Once a drag begins, keep receiving the pointer even if it outruns the moving pet.
+  const candidates = drag
+    ? [{ x: 0, y: 0, width: b.width, height: b.height }]
+    : [{ x: petPos.x - b.x - 6, y: petPos.y - b.y - 6, width: size.width + 12, height: size.height + 12 }, ...inputRegions];
+  const regions = candidates.map((r) => {
+    const left = Math.max(0, Math.floor(r.x));
+    const top = Math.max(0, Math.floor(r.y));
+    const right = Math.min(b.width, Math.ceil(r.x + r.width));
+    const bottom = Math.min(b.height, Math.ceil(r.y + r.height));
+    return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+  }).filter((r) => r.width && r.height);
+  const key = JSON.stringify(regions);
+  if (!force && key === lastShapeKey) return;
+  try {
+    win.setShape(regions);
+    // PET-DRAG: reassert the native hit region after a display or window-state change,
+    // and when the cursor returns, even if its rectangle has not changed.
+    win.setIgnoreMouseEvents(false);
+    lastShapeKey = key;
+    lastShapeRefresh = performance.now();
+  } catch (error) {
+    shapedWindow = false;
+    log('pet input shape unavailable:', error);
+    applyPointerPolicy();
+  }
+}
+
+// On platforms without shaped input, the click-through window gets no mouse events, so the
+// cursor is watched here and the page says whether it's over the pet or a bubble. Electron's
+// forwarded mouse moves stopped after page reloads on Windows, so polling remains the fallback.
 function watchPointer() {
   if (!win || win.isDestroyed() || !win.isVisible() || drag) return;
   const cursor = screen.getCursorScreenPoint();
+  if (shapedWindow) {
+    const size = petSize();
+    const over = cursor.x >= petPos.x - 6 && cursor.y >= petPos.y - 6
+      && cursor.x < petPos.x + size.width + 6 && cursor.y < petPos.y + size.height + 6;
+    if (over && (!pointerOverPet || performance.now() - lastShapeRefresh > 5_000)) updateInputShape(true);
+    pointerOverPet = over;
+    return;
+  }
   const b = win.getBounds();
   const x = cursor.x - b.x;
   const y = cursor.y - b.y;
@@ -315,6 +399,7 @@ function setVisible(visible) {
   if (!win || win.isDestroyed()) return;
   if (visible) {
     win.showInactive();
+    updateInputShape(true);
     wake();
   } else {
     win.hide();
@@ -458,7 +543,10 @@ function trackerFor(id) {
 // ---------------------------------------------------------------- weekly limits
 
 function setUsage(patch) {
+  const before = JSON.stringify(currentUsage().map(({ app, percent }) => [app, percent]));
   Object.assign(usage, patch);
+  const after = JSON.stringify(currentUsage().map(({ app, percent }) => [app, percent]));
+  if (before !== after) log('weekly usage updated:', after);
   sendUsage();
 }
 
@@ -643,31 +731,48 @@ function fromPet(event) {
 function registerIpc() {
   ipcMain.on('pet:ready', (e) => {
     if (!fromPet(e)) return;
+    rendererPulseAt = performance.now();
+    log('pet renderer ready');
     sendPet();
     sendMotion();
     sendLayout();
     sendSessions();
     sendUsage(true);
   });
+  ipcMain.on('pet:pulse', (e) => {
+    if (fromPet(e)) rendererPulseAt = performance.now();
+  });
   ipcMain.on('pet:interactive', (e, value) => {
     if (!fromPet(e)) return;
     pointerInteractive = value === true;
     applyPointerPolicy();
   });
+  ipcMain.on('pet:input-regions', (e, regions) => {
+    if (!fromPet(e) || !Array.isArray(regions) || regions.length > 100) return;
+    if (!regions.every((r) => r && [r.x, r.y, r.width, r.height].every(Number.isFinite)
+      && r.width >= 0 && r.height >= 0)) return;
+    inputRegions = regions;
+    updateInputShape();
+  });
   ipcMain.on('pet:drag-start', (e, p) => {
     if (!fromPet(e) || !isPoint(p)) return;
     stopMomentum();
-    drag = { dx: p.screenX - petPos.x, dy: p.screenY - petPos.y };
+    drag = { dx: p.screenX - petPos.x, dy: p.screenY - petPos.y, moves: 0 };
+    log('pet drag started');
+    updateInputShape();
     applyPointerPolicy();
   });
   ipcMain.on('pet:drag-move', (e, p) => {
     if (!fromPet(e) || !drag || !isPoint(p)) return;
+    drag.moves += 1;
     petPos = clampPet({ x: p.screenX - drag.dx, y: p.screenY - drag.dy });
     placeWindow();
   });
   ipcMain.on('pet:drag-end', (e, v) => {
     if (!fromPet(e) || !drag) return;
+    log(`pet drag ${v?.cancelled ? 'cancelled' : 'ended'} (${drag.moves} moves)`);
     drag = null;
+    updateInputShape();
     applyPointerPolicy();
     const vx = Number(v?.vx) || 0;
     const vy = Number(v?.vy) || 0;
@@ -1013,6 +1118,7 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     createWindow();
     pointerTimer = setInterval(watchPointer, POINTER_POLL_MS);
+    rendererWatchdogTimer = setInterval(watchRenderer, RENDERER_WATCHDOG_MS);
     if (!DEMO) showUpdateResult();
 
     tracker = DEMO
@@ -1043,7 +1149,9 @@ if (!app.requestSingleInstanceLock()) {
     const onDisplaysChanged = () => {
       petPos = clampPet(petPos);
       finishMove();
+      updateInputShape(true);
     };
+    powerMonitor.on('resume', () => updateInputShape(true));
     // Debug aid: CLAUDE_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
     if (DEBUG_OPEN_AFTER_MS) {
       setTimeout(() => {
@@ -1069,6 +1177,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     clearInterval(usageTimer);
     clearInterval(pointerTimer);
+    clearInterval(rendererWatchdogTimer);
     stopMomentum();
     tracker?.stop();
     codex?.stop();
