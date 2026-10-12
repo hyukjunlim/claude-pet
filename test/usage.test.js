@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  formatDuration, nextLocalTime, nextWeeklyReset, parseClaudeUsage, parseRateLimits, usageView, withWeeklyResets,
+  combineClaudeUsage, formatDuration, nextWeeklyReset, parseModUsage, parseRateLimits, usageView, withWeeklyResets,
 } = require('../src/usage');
 
 const T0 = Date.parse('2026-09-25T04:00:00.000Z');
@@ -12,20 +12,38 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 
-test("Claude's figures are the desktop app's newest usage sample", () => {
-  const u = parseClaudeUsage({
-    version: 2,
-    samples: [
-      { t: T0 - 2 * HOUR, org: 'org-a', u: { fh: 30, sd: 60 } },
-      { t: T0 - HOUR, org: 'org-a', u: { fh: 5, sd: 61 } },
-      { t: T0, org: 'org-b', u: {} },     // no figures, e.g. right after signing in
+test("Claude's figures from the pet's mod come with their reset times", () => {
+  const u = parseModUsage({
+    version: 1,
+    at: T0,
+    limits: [
+      { kind: 'five_hour', percent: 12, resetsAt: T0 + 3 * HOUR },
+      { kind: 'seven_day', percent: 45, resetsAt: T0 + 2 * DAY },
+      { kind: 'spend_limit', percent: 10, resetsAt: null },    // a gateway's, not shown
     ],
   });
   assert.deepEqual(u, {
-    weekly: { percent: 61, resetsAt: null, windowMs: WEEK }, fiveHour: { percent: 5, resetsAt: null, windowMs: 5 * HOUR }, at: T0 - HOUR,
+    weekly: { percent: 45, resetsAt: T0 + 2 * DAY, windowMs: WEEK }, fiveHour: { percent: 12, resetsAt: T0 + 3 * HOUR, windowMs: 5 * HOUR }, at: T0,
   });
-  assert.equal(parseClaudeUsage(null), null);
-  assert.equal(parseClaudeUsage({ samples: 'no' }), null);
+  assert.deepEqual(parseModUsage({ version: 1, at: T0, limits: [{ kind: 'seven_day', percent: 5 }] }).weekly, { percent: 5, resetsAt: null, windowMs: WEEK });
+  assert.equal(parseModUsage({ version: 1, at: T0, limits: [] }), null);
+  assert.equal(parseModUsage({ version: 2, at: T0, limits: [{ kind: 'seven_day', percent: 5 }] }), null, 'a format this pet does not know');
+  assert.equal(parseModUsage(null), null);
+});
+
+test("Claude's newest figures win, wherever the mod saved them, and its week resets as Claude says", () => {
+  const reset = T0 + 2 * DAY;
+  const here = { weekly: { percent: 40, resetsAt: reset, windowMs: WEEK }, fiveHour: null, at: T0 - 2 * HOUR };
+  const host = { weekly: { percent: 44, resetsAt: reset, windowMs: WEEK }, fiveHour: null, at: T0 - 10 * MINUTE };
+  // A host's session replied last.
+  assert.deepEqual(combineClaudeUsage([here, host]).weekly, { percent: 44, resetsAt: reset, windowMs: WEEK, repeats: true });
+  // Figures without a reset time take the week from older ones that have it.
+  const untimed = { weekly: { percent: 47, resetsAt: null, windowMs: WEEK }, fiveHour: null, at: T0 };
+  const [view] = usageView({ claude: combineClaudeUsage([here, untimed]) }, T0);
+  assert.deepEqual([view.percent, view.resetsIn], [47, '2d']);
+  assert.equal(combineClaudeUsage([untimed]).weekly.resetsAt, null);
+  assert.equal(combineClaudeUsage([]), null);
+  assert.equal(combineClaudeUsage([null, { at: T0, weekly: null, fiveHour: null }]), null);
 });
 
 test("Codex's weekly limit is the window that lasts a week, in whichever slot it comes", () => {
@@ -57,13 +75,13 @@ test('the pet shows how much of each weekly limit is used, and how far into the 
   const claude = { weekly: { percent: 67.6, resetsAt: null, windowMs: WEEK }, fiveHour: null, at: T0 - 10 * MINUTE };
   const codex = { weekly: { percent: 99, resetsAt: T0 + 2 * DAY + 5 * HOUR, windowMs: WEEK }, fiveHour: null, at: T0 - DAY };
   assert.deepEqual(usageView({ claude, codex }, T0), [
-    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null },   // no reset time set
-    { app: 'codex', name: 'Codex', percent: 99, elapsed: 68, resetsIn: '2d 5h' },    // 4d 19h of 7d gone
+    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null, age: null },   // no reset time set
+    { app: 'codex', name: 'Codex', percent: 99, elapsed: 68, resetsIn: '2d 5h', age: '1d' },    // 4d 19h of 7d gone
   ]);
   // Three days on, Codex's week has turned over (the next one starts with its next reply).
   assert.deepEqual(usageView({ claude, codex }, T0 + 3 * DAY), [
-    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null },
-    { app: 'codex', name: 'Codex', percent: 0, elapsed: null, resetsIn: null },
+    { app: 'claude', name: 'Claude', percent: 68, elapsed: null, resetsIn: null, age: '3d' },
+    { app: 'codex', name: 'Codex', percent: 0, elapsed: null, resetsIn: null, age: null },
   ]);
   assert.deepEqual(usageView({ claude: null, codex: { weekly: null, fiveHour: { percent: 3, resetsAt: null }, at: T0 } }, T0), []);
 });
@@ -75,18 +93,11 @@ test("one of Claude's weekly resets gives them all", () => {
   const claude = { weekly: { percent: 69, resetsAt: null, windowMs: WEEK }, fiveHour: null, at: T0 - 10 * MINUTE };
   const [now] = usageView({ claude: withWeeklyResets(claude, anchor) }, T0);
   assert.deepEqual([now.percent, now.elapsed, now.resetsIn], [69, 68, '2d 5h']);
-  // After the reset, and before the desktop app's next sample: a fresh week.
+  // After the reset, and before the next reply: a fresh week.
   const [later] = usageView({ claude: withWeeklyResets(claude, anchor) }, T0 + 2 * DAY + 5 * HOUR + 1000);
   assert.deepEqual([later.percent, later.elapsed, later.resetsIn], [0, 0, '7d']);
   // Without a reset time, there's no telling how far into the week it is.
   assert.equal(usageView({ claude: withWeeklyResets(claude, null) }, T0)[0].elapsed, null);
-});
-
-test('a weekday and hour picked in the menu become the next such time', () => {
-  const friday6pm = new Date(2026, 8, 25, 18, 0).getTime();   // on this PC's clock
-  assert.equal(nextLocalTime(3, 11, friday6pm), new Date(2026, 8, 30, 11, 0).getTime());  // Wednesday 11:00
-  assert.equal(nextLocalTime(5, 20, friday6pm), new Date(2026, 8, 25, 20, 0).getTime());  // later today
-  assert.equal(nextLocalTime(5, 9, friday6pm), new Date(2026, 9, 2, 9, 0).getTime());     // earlier today: next week
 });
 
 test('reset times read as the time left', () => {

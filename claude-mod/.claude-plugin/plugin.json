@@ -1,0 +1,7 @@
+{
+  "name": "pet-usage",
+  "version": "1.0.0",
+  "description": "Saves your Claude plan's usage (the 5-hour and weekly limits) after each reply, for Claude Pet to show",
+  "author": { "name": "Claude Pet" },
+  "homepage": "https://github.com/hyukjunlim/claude-pet"
+}

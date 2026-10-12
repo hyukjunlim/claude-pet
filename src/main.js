@@ -13,7 +13,10 @@ const { discoverPets, petRoots } = require('./pets');
 const { SessionTracker, defaultPaths } = require('./sessions');
 const { CodexTracker, codexPaths } = require('./codex');
 const { compareSessions } = require('./transcript');
-const { nextLocalTime, usageView, withWeeklyResets } = require('./usage');
+const { combineClaudeUsage, usageView } = require('./usage');
+const { ClaudeUsage } = require('./claude-usage');
+const { LocalMod, bundledVersion, modFiles, runningWslDistros, sshInstaller, wslInstaller } = require('./claude-mod');
+const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForUpdate, startUpdate } = require('./updater');
 
@@ -45,11 +48,9 @@ const BOUNCE = 0.7;
 const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
-const POINTER_POLL_MS = 16;     // PET-DRAG: reduce hover latency where shaped input is unavailable
 const RENDERER_WATCHDOG_MS = 10_000;
 const RENDERER_STALE_MS = 35_000;
 const STATUS_LABEL = { waiting: 'Awaiting input', failed: 'Error', review: 'Ready', running: 'Running' };
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const FOREGROUND_HANDOFF_MS = 1500;
@@ -68,22 +69,21 @@ let pets = [];
 let currentPet = null;
 let petPos = null;              // top-left of the pet sprite, screen DIPs
 let layout = 'above';           // pills above or below the pet
-let pointerInteractive = false;
-let pointerTimer = null;
-let rendererWatchdogTimer = null;
+let shape = null;               // what the page says is drawn: the pet and the bubbles (see shape.js)
+let shapeKey = '';              // the shape last set on the window, to skip setting it again
 let rendererPulseAt = 0;
-let shapedWindow = false;
-let inputRegions = [];
-let lastShapeKey = '';
-let lastShapeRefresh = 0;
-let pointerOverPet = false;
+let rendererWatchdogTimer = null;
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
 let sessions = [];              // Claude and Codex together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
-const usage = { claude: null, codex: null };   // each app's newest usage figures (see usage.js)
+const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
+let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
+let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
+let modBusy = null;             // what the Live Claude usage menu is doing, while it does it
+const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 let usageKey = '';
 let usageTimer = null;
 let logFile = null;
@@ -203,8 +203,36 @@ function placeWindow() {
   if (!win || win.isDestroyed()) return;
   const b = windowBounds();
   win.setBounds(b);
-  updateInputShape();
+  applyShape();
   if (layoutKey(b) !== lastLayoutKey) sendLayout();
+}
+
+// The window takes the mouse only where the pet or a bubble is drawn; clicks elsewhere go to the
+// window behind it. The page measures them from the edge the content sits against, so this lays
+// them on the window as it is now (see shape.js). Windows keeps the shape in pixels, so it is set
+// again when the pet's monitor has a different scaling.
+let shapeScale = 0;
+function applyShape(force = false) {
+  if (!win || win.isDestroyed()) return;
+  const { width, height } = win.getBounds();
+  // PET-DRAG: keep the pointer inside the native input region while the window moves.
+  const rects = drag ? [{ x: 0, y: 0, width, height }] : shape ? shapeForWindow(shape, width, height) : NO_SHAPE;
+  const scale = displayForPet().scaleFactor;
+  const key = `${scale}|${JSON.stringify(rects)}`;
+  if (!force && key === shapeKey) return;
+  const rescaled = shapeScale !== 0 && scale !== shapeScale;
+  shapeKey = key;
+  shapeScale = scale;
+  win.setShape(rects);
+  if (rescaled) {
+    // Windows may rescale the window a moment after it was moved onto the other monitor.
+    const current = win;
+    setTimeout(() => {
+      if (current !== win || current.isDestroyed()) return;
+      shapeKey = '';
+      applyShape();
+    }, 200);
+  }
 }
 
 function layoutKey(b) {
@@ -247,11 +275,6 @@ function finishMove() {
 
 function createWindow() {
   rendererPulseAt = performance.now();
-  shapedWindow = false;
-  inputRegions = [];
-  lastShapeKey = '';
-  lastShapeRefresh = 0;
-  pointerOverPet = false;
   win = new BrowserWindow({
     ...windowBounds(),
     title: 'Claude Pet',
@@ -267,7 +290,8 @@ function createWindow() {
     alwaysOnTop: true,
     focusable: false,
     show: false,
-    ...(process.platform === 'win32' ? { thickFrame: false, roundedCorners: false, accentColor: false } : {}),
+    // Windows tool windows stay across virtual desktops.
+    ...(process.platform === 'win32' ? { type: 'toolbar', thickFrame: false, roundedCorners: false, accentColor: false } : {}),
     ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -283,15 +307,11 @@ function createWindow() {
   // wasn't either, and other windows went over it. There the other levels are all simply
   // always on top.
   win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setMenuBarVisibility(false);
-  // PET-DRAG: Windows can deliver pointerdown before the click-through hover poll and
-  // renderer reply finish. Give the visible pet an OS input region from the start.
-  if (process.platform === 'win32') {
-    shapedWindow = true;
-    updateInputShape();
-  }
-  applyPointerPolicy();
+  // Until the page says where the pet is, the window takes no mouse at all.
+  shape = null;
+  shapeKey = '';
+  applyShape();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   const created = win;
@@ -305,17 +325,16 @@ function createWindow() {
       wake();
     }
   });
-  win.on('show', () => updateInputShape(true));
-  win.on('restore', () => updateInputShape(true));
+  win.on('show', () => applyShape(true));
+  win.on('restore', () => applyShape(true));
   win.loadURL('pet://app/ui/index.html');
 }
 
 // A crashed page gets a new window rather than a reload, so the new page starts out as the main
-// process then assumes: letting clicks through, with no drag under way.
+// process then assumes: with no drag under way, and no shape until the page says where the pet is.
 function replaceWindow(old) {
   if (old !== win || old.isDestroyed()) return;
   drag = null;
-  pointerInteractive = false;
   createWindow();
   old.destroy();
 }
@@ -323,75 +342,9 @@ function replaceWindow(old) {
 function watchRenderer() {
   if (!win || win.isDestroyed() || !win.isVisible()) return;
   if (performance.now() - rendererPulseAt < RENDERER_STALE_MS) return;
-  // PET-FREEZE: a live process can retain a frozen page after sleep or graphics recovery.
-  // Recreate only the pet window; the session trackers and saved position remain alive.
+  // PET-FREEZE: recover a page that stopped painting while Electron stays alive.
   log('pet renderer stopped painting; recreating window');
   replaceWindow(win);
-}
-
-function applyPointerPolicy() {
-  if (!win || win.isDestroyed()) return;
-  if (shapedWindow) {
-    win.setIgnoreMouseEvents(false);
-    return;
-  }
-  if (pointerInteractive || drag) win.setIgnoreMouseEvents(false);
-  else win.setIgnoreMouseEvents(true);
-}
-
-function updateInputShape(force = false) {
-  if (!shapedWindow || !win || win.isDestroyed()) return;
-  const b = win.getBounds();
-  const size = petSize();
-  // Once a drag begins, keep receiving the pointer even if it outruns the moving pet.
-  const candidates = drag
-    ? [{ x: 0, y: 0, width: b.width, height: b.height }]
-    : [{ x: petPos.x - b.x - 6, y: petPos.y - b.y - 6, width: size.width + 12, height: size.height + 12 }, ...inputRegions];
-  const regions = candidates.map((r) => {
-    const left = Math.max(0, Math.floor(r.x));
-    const top = Math.max(0, Math.floor(r.y));
-    const right = Math.min(b.width, Math.ceil(r.x + r.width));
-    const bottom = Math.min(b.height, Math.ceil(r.y + r.height));
-    return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-  }).filter((r) => r.width && r.height);
-  const key = JSON.stringify(regions);
-  if (!force && key === lastShapeKey) return;
-  try {
-    win.setShape(regions);
-    // PET-DRAG: reassert the native hit region after a display or window-state change,
-    // and when the cursor returns, even if its rectangle has not changed.
-    win.setIgnoreMouseEvents(false);
-    lastShapeKey = key;
-    lastShapeRefresh = performance.now();
-  } catch (error) {
-    shapedWindow = false;
-    log('pet input shape unavailable:', error);
-    applyPointerPolicy();
-  }
-}
-
-// On platforms without shaped input, the click-through window gets no mouse events, so the
-// cursor is watched here and the page says whether it's over the pet or a bubble. Electron's
-// forwarded mouse moves stopped after page reloads on Windows, so polling remains the fallback.
-function watchPointer() {
-  if (!win || win.isDestroyed() || !win.isVisible() || drag) return;
-  const cursor = screen.getCursorScreenPoint();
-  if (shapedWindow) {
-    const size = petSize();
-    const over = cursor.x >= petPos.x - 6 && cursor.y >= petPos.y - 6
-      && cursor.x < petPos.x + size.width + 6 && cursor.y < petPos.y + size.height + 6;
-    if (over && (!pointerOverPet || performance.now() - lastShapeRefresh > 5_000)) updateInputShape(true);
-    pointerOverPet = over;
-    return;
-  }
-  const b = win.getBounds();
-  const x = cursor.x - b.x;
-  const y = cursor.y - b.y;
-  const inside = x >= 0 && y >= 0 && x < b.width && y < b.height;
-  // PET-DRAG: keep checking a stationary cursor too: the sprite animates beneath it, and its first
-  // frame (or a page reload) may not have been ready when we last asked for a hit test.
-  // Once clicks reach the page it follows the cursor itself, but it can miss it leaving.
-  if (inside !== pointerInteractive) win.webContents.send('pet:pointer', inside ? { x, y } : null);
 }
 
 function setVisible(visible) {
@@ -399,7 +352,7 @@ function setVisible(visible) {
   if (!win || win.isDestroyed()) return;
   if (visible) {
     win.showInactive();
-    updateInputShape(true);
+    applyShape(true);
     wake();
   } else {
     win.hide();
@@ -551,7 +504,7 @@ function setUsage(patch) {
 }
 
 function currentUsage() {
-  return usageView({ claude: withWeeklyResets(usage.claude, settings.get('claudeWeeklyResetAt')), codex: usage.codex });
+  return usageView({ claude: combineClaudeUsage(usage.claude), codex: usage.codex });
 }
 
 function displayUsage() {
@@ -573,40 +526,192 @@ function sendUsage(force = false) {
   win.webContents.send('pet:usage', items);
 }
 
-// "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h"
+// "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h · as of 2h ago"
 function usageLabel(u) {
   return [
     `${u.name}: ${u.percent}% of the weekly limit used`,
     u.elapsed != null && `${u.elapsed}% into the week`,
     u.resetsIn && `resets in ${u.resetsIn}`,
+    u.age && `as of ${u.age} ago`,
   ].filter(Boolean).join(' · ');
 }
 
-// When Claude's week resets (see withWeeklyResets): a weekday, then an hour, on this PC's clock.
-function claudeResetMenu() {
-  const anchor = settings.get('claudeWeeklyResetAt');
-  const slot = Number.isFinite(anchor) ? new Date(anchor) : null;
-  const pad = (n) => String(n).padStart(2, '0');
-  const set = (value) => {
-    settings.set({ claudeWeeklyResetAt: value });
-    sendUsage();
-  };
-  return {
-    label: `Claude's week resets: ${slot ? `${WEEKDAYS[slot.getDay()].slice(0, 3)} ${pad(slot.getHours())}:${pad(slot.getMinutes())}` : 'not set'}`,
-    submenu: [
-      { label: 'Not set', type: 'radio', checked: !slot, click: () => set(null) },
-      { type: 'separator' },
-      ...WEEKDAYS.map((name, day) => ({
-        label: name,
-        submenu: Array.from({ length: 24 }, (_, hour) => ({
-          label: `${pad(hour)}:00`,
-          type: 'radio',
-          checked: slot?.getDay() === day && slot.getHours() === hour && slot.getMinutes() === 0,
-          click: () => set(nextLocalTime(day, hour)),
-        })),
-      })),
-    ],
-  };
+// ---------------------------------------------------------------- live Claude usage (see claude-mod.js)
+
+const LIVE_USAGE_DOC = 'https://github.com/hyukjunlim/claude-pet#live-claude-usage';
+
+function wslDistros() {
+  return process.platform === 'win32' ? tracker?.wslDistros?.() ?? [] : [];
+}
+
+function sshHosts() {
+  return settings.get('claudeUsageOverSsh') ? claudeUsage?.hostStates() ?? [] : [];
+}
+
+function rememberWsl(distro, on) {
+  settings.set({ claudeModWsl: { ...settings.get('claudeModWsl'), [distro]: on } });
+}
+
+// WSL runs the Windows copy of the mod, so it needs this PC's.
+async function setWsl(distro, on) {
+  if (on && !localMod.status().installed) localMod.install();
+  const r = await wslInstaller(distro, { action: on ? 'install' : 'uninstall', windowsDir: localMod.dir });
+  if (!r.ok) throw new Error(`WSL ${distro}: ${r.error}`);
+  rememberWsl(distro, r.enabled);
+  log(`mod ${on ? 'set up' : 'removed'} in WSL ${distro}`);
+}
+
+async function setSsh(host, on) {
+  const r = await sshInstaller(host, on ? { action: 'install', files: modFiles() } : { action: 'uninstall' });
+  if (!r.ok) throw new Error(`${host.name}: ${r.error}`);
+  log(`mod ${on ? 'set up' : 'removed'} on ${host.name}`);
+}
+
+// This PC, and the WSL distros running its copy.
+async function setLocal(on) {
+  if (on) {
+    localMod.install();
+    log('mod set up on this PC');
+    return;
+  }
+  const failures = [];
+  for (const distro of wslDistros().filter((d) => settings.get('claudeModWsl')?.[d])) {
+    try {
+      await setWsl(distro, false);
+    } catch (err) {
+      failures.push(err.message);
+    }
+  }
+  localMod.uninstall();
+  log('mod removed from this PC');
+  if (failures.length) throw new Error(failures.join('\n'));
+}
+
+async function runModTask(label, task) {
+  if (modBusy) return;
+  modBusy = label;
+  try {
+    await task();
+  } catch (err) {
+    log('mod:', err.message);
+    await dialog.showMessageBox({
+      type: 'warning', title: 'Claude Pet', message: "Couldn't change Claude Pet's mod for Claude Code.", detail: err.message,
+    });
+  } finally {
+    modBusy = null;
+  }
+}
+
+function liveUsageMenu() {
+  const local = localMod.status();
+  const busy = Boolean(modBusy);
+  const toggle = (set) => (mi) => runModTask(mi.checked ? 'Setting up' : 'Removing', () => set(mi.checked));
+  const items = [
+    { label: busy ? `${modBusy}…` : 'Saves your usage after each reply, in sessions started after setup', enabled: false },
+    { type: 'separator' },
+    { label: 'This PC', type: 'checkbox', checked: local.installed, enabled: !busy, click: toggle(setLocal) },
+  ];
+  for (const distro of wslDistros()) {
+    items.push({
+      label: `WSL: ${distro}`,
+      type: 'checkbox',
+      checked: settings.get('claudeModWsl')?.[distro] === true,
+      enabled: !busy,
+      click: toggle((on) => setWsl(distro, on)),
+    });
+  }
+  for (const h of sshHosts()) {
+    items.push({
+      label: `SSH: ${h.name}${h.mod ? '' : ' (connecting…)'}`,
+      type: 'checkbox',
+      checked: h.mod?.enabled === true,
+      enabled: !busy && Boolean(h.mod),
+      click: toggle((on) => setSsh(h, on)),
+    });
+  }
+  items.push({ type: 'separator' });
+  items.push({
+    label: 'Read usage on SSH hosts',
+    type: 'checkbox',
+    checked: settings.get('claudeUsageOverSsh'),
+    click: (mi) => {
+      settings.set({ claudeUsageOverSsh: mi.checked });
+      claudeUsage?.setWatchHosts(mi.checked);
+    },
+  });
+  items.push({ label: 'How it works…', click: () => shell.openExternal(LIVE_USAGE_DOC) });
+  return { label: `Live Claude usage${local.installed ? '' : ' (off)'}`, submenu: items };
+}
+
+// Asked once: a new install, or the first start after the pet gained the mod.
+async function offerLiveUsage() {
+  if (DEMO || modBusy || settings.get('claudeModOffered') || !localMod.hasClaudeCode() || localMod.status().installed) return;
+  const distros = wslDistros();
+  const hosts = sshHosts();
+  const elsewhere = [...distros.map((d) => `WSL (${d})`), ...hosts.map((h) => h.name)];
+  const answer = await dialog.showMessageBox({
+    type: 'question',
+    title: 'Claude Pet',
+    message: "Show Claude's weekly limit?",
+    detail: [
+      "Claude Pet reads Claude's usage from a small mod for Claude Code, which saves your plan's",
+      "usage after each reply, as Claude reports it: how much of the weekly limit you've used,",
+      'and when the week resets.',
+      '',
+      'It puts the mod in ~/.claude-pet and adds two entries to the "env" of ~/.claude/settings.json',
+      '(a backup is kept). Sessions you start from now on use it.',
+      '',
+      'Tray menu → Live Claude usage changes this later.',
+    ].join('\n'),
+    buttons: ['Set it up', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    ...(elsewhere.length ? { checkboxLabel: `Also in ${elsewhere.join(', ')}`, checkboxChecked: true } : {}),
+  });
+  settings.set({ claudeModOffered: true });
+  if (answer.response !== 0) return;
+  await runModTask('Setting up', async () => {
+    await setLocal(true);
+    if (!answer.checkboxChecked) return;
+    const failures = [];
+    for (const distro of distros) await setWsl(distro, true).catch((err) => failures.push(err.message));
+    for (const h of hosts) await setSsh(h, true).catch((err) => failures.push(err.message));
+    if (failures.length) throw new Error(`Set up on this PC, but not on:\n${failures.join('\n')}`);
+  });
+}
+
+// After the pet itself updates: the copies of the mod it set up get its newer version. WSL runs
+// this PC's copy.
+function updateLocalMod() {
+  const st = localMod.status();
+  if (!st.installed || st.version === bundledVersion()) return;
+  try {
+    localMod.update();
+    log(`mod updated on this PC (${st.version} → ${bundledVersion()})`);
+  } catch (err) {
+    log('mod update on this PC failed:', err.message);
+  }
+}
+
+function updateHostMods() {
+  for (const h of sshHosts()) {
+    if (!h.mod?.enabled || !h.mod.version || h.mod.version === bundledVersion() || modUpdated.has(h.key)) continue;
+    modUpdated.add(h.key);
+    sshInstaller(h, { action: 'update', files: modFiles() }).then((r) => {
+      log(r.ok ? `mod updated on ${h.name} (${h.mod.version} → ${bundledVersion()})` : `mod update on ${h.name} failed: ${r.error}`);
+    });
+  }
+}
+
+// What the WSL distros say, for those running (asking the others would start them).
+async function checkWslMods() {
+  const distros = wslDistros();
+  if (!distros.length) return;
+  const running = await runningWslDistros();
+  for (const distro of distros.filter((d) => running.has(d))) {
+    const r = await wslInstaller(distro, { action: 'status', windowsDir: localMod.dir });
+    if (r.ok) rememberWsl(distro, r.enabled);
+  }
 }
 
 function trayTooltip() {
@@ -733,6 +838,8 @@ function registerIpc() {
     if (!fromPet(e)) return;
     rendererPulseAt = performance.now();
     log('pet renderer ready');
+    shape = null;                       // a page that has just loaded sends its own
+    applyShape();
     sendPet();
     sendMotion();
     sendLayout();
@@ -742,25 +849,19 @@ function registerIpc() {
   ipcMain.on('pet:pulse', (e) => {
     if (fromPet(e)) rendererPulseAt = performance.now();
   });
-  ipcMain.on('pet:interactive', (e, value) => {
+  ipcMain.on('pet:shape', (e, payload) => {
     if (!fromPet(e)) return;
-    pointerInteractive = value === true;
-    applyPointerPolicy();
-  });
-  ipcMain.on('pet:input-regions', (e, regions) => {
-    if (!fromPet(e) || !Array.isArray(regions) || regions.length > 100) return;
-    if (!regions.every((r) => r && [r.x, r.y, r.width, r.height].every(Number.isFinite)
-      && r.width >= 0 && r.height >= 0)) return;
-    inputRegions = regions;
-    updateInputShape();
+    const next = cleanShape(payload);
+    if (!next) return;
+    shape = next;
+    applyShape();
   });
   ipcMain.on('pet:drag-start', (e, p) => {
     if (!fromPet(e) || !isPoint(p)) return;
     stopMomentum();
     drag = { dx: p.screenX - petPos.x, dy: p.screenY - petPos.y, moves: 0 };
     log('pet drag started');
-    updateInputShape();
-    applyPointerPolicy();
+    applyShape();
   });
   ipcMain.on('pet:drag-move', (e, p) => {
     if (!fromPet(e) || !drag || !isPoint(p)) return;
@@ -772,8 +873,7 @@ function registerIpc() {
     if (!fromPet(e) || !drag) return;
     log(`pet drag ${v?.cancelled ? 'cancelled' : 'ended'} (${drag.moves} moves)`);
     drag = null;
-    updateInputShape();
-    applyPointerPolicy();
+    applyShape();
     const vx = Number(v?.vx) || 0;
     const vy = Number(v?.vy) || 0;
     if (Math.hypot(vx, vy) >= MIN_THROW_SPEED) startMomentum(vx, vy);
@@ -884,7 +984,7 @@ function buildMenu() {
       sendUsage();
     },
   });
-  if (claudeInstalled()) items.push(claudeResetMenu());
+  if (localMod?.hasClaudeCode()) items.push(liveUsageMenu());
   if (codexInstalled() && !DEMO) {
     items.push({
       label: 'Show Codex threads',
@@ -964,8 +1064,19 @@ function buildMenu() {
   items.push({ type: 'separator' });
   if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
   if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
+  items.push({ label: 'Restart Claude Pet', click: restart });
   items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
   return Menu.buildFromTemplate(items);
+}
+
+// Starts a fresh pet as this one exits. The single-instance lock is let go first, so the new
+// pet never finds it still held. The login flags aren't passed on: they'd undo a change made
+// to Start at login since this pet started.
+function restart() {
+  log('restarting');
+  app.relaunch({ args: [APP_ROOT, ...(DEMO ? ['--demo'] : [])] });
+  app.releaseSingleInstanceLock();
+  app.quit();
 }
 
 function openPetsFolder() {
@@ -1117,7 +1228,6 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createTray();
     createWindow();
-    pointerTimer = setInterval(watchPointer, POINTER_POLL_MS);
     rendererWatchdogTimer = setInterval(watchRenderer, RENDERER_WATCHDOG_MS);
     if (!DEMO) showUpdateResult();
 
@@ -1131,8 +1241,27 @@ if (!app.requestSingleInstanceLock()) {
       mergeSessions();
     });
     tracker.on('seen', () => settings.set({ seen: tracker.seenSnapshot() }));
-    tracker.on('usage', setUsage);
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
+    if (DEMO) {
+      tracker.on('usage', ({ claude, codex }) => setUsage({ claude: claude ? [claude] : [], codex }));
+    } else {
+      localMod = new LocalMod();
+      updateLocalMod();
+      claudeUsage = new ClaudeUsage({
+        usageFile: localMod.usageFile,
+        sshConnections: defaultPaths(app.getPath('appData')).sshConnections,
+        watchHosts: settings.get('claudeUsageOverSsh'),
+      });
+      claudeUsage.on('change', (readings) => setUsage({ claude: readings }));
+      claudeUsage.on('hosts', updateHostMods);
+      claudeUsage.on('error', (err) => log('claude usage:', err?.message || err));
+      claudeUsage.start();
+      // once the desktop index (for WSL distros) and the SSH connections have been read
+      setTimeout(() => {
+        offerLiveUsage().catch((err) => log('mod offer:', err.message));
+        checkWslMods().catch((err) => log('mod check:', err.message));
+      }, 8000);
+    }
     tracker.start();
     startCodex();
     usageTimer = setInterval(sendUsage, 60_000);
@@ -1149,9 +1278,9 @@ if (!app.requestSingleInstanceLock()) {
     const onDisplaysChanged = () => {
       petPos = clampPet(petPos);
       finishMove();
-      updateInputShape(true);
+      applyShape(true);
     };
-    powerMonitor.on('resume', () => updateInputShape(true));
+    powerMonitor.on('resume', () => applyShape(true));
     // Debug aid: CLAUDE_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
     if (DEBUG_OPEN_AFTER_MS) {
       setTimeout(() => {
@@ -1176,11 +1305,11 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     clearInterval(usageTimer);
-    clearInterval(pointerTimer);
     clearInterval(rendererWatchdogTimer);
     stopMomentum();
     tracker?.stop();
     codex?.stop();
+    claudeUsage?.stop();
     if (settings) settings.save();
   });
 

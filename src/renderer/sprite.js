@@ -13,6 +13,71 @@ const STATE_LOOPS = 2;
 const REACTION_LOOPS = 2;
 const REACTION_PACE = 1.25;   // how much longer each frame of a reaction shows
 
+const SHAPE_BLOCK = 4;        // the pet's outline is worked out in blocks of this many atlas pixels
+const SHAPE_GROW = 2;         // and grown by this many blocks (8 atlas pixels), so a click just off the art still lands
+const SHAPE_ALPHA = 4;        // anything fainter than this isn't visible, and needn't be inside the window's shape
+
+// Rectangles, in cell pixels, that cover the pet in every frame of one row of the atlas. The window
+// is cut to these (see src/shape.js), so a frame never draws outside them and a click beyond them
+// goes to the window behind the pet. `data` is the atlas' RGBA.
+function silhouetteRects(data, atlasWidth, atlasHeight, row) {
+  const whole = [[0, 0, CELL_W, CELL_H]];
+  const columns = Math.min(ATLAS_COLUMNS, Math.floor(atlasWidth / CELL_W));
+  if (columns < 1 || (row + 1) * CELL_H > atlasHeight) return whole;
+  const gw = Math.ceil(CELL_W / SHAPE_BLOCK);
+  const gh = Math.ceil(CELL_H / SHAPE_BLOCK);
+  let mask = new Uint8Array(gw * gh);
+  for (let col = 0; col < columns; col += 1) {
+    for (let y = 0; y < CELL_H; y += 1) {
+      const start = ((row * CELL_H + y) * atlasWidth + col * CELL_W) * 4 + 3;
+      const blockRow = Math.floor(y / SHAPE_BLOCK) * gw;
+      for (let x = 0; x < CELL_W; x += 1) {
+        if (data[start + x * 4] > SHAPE_ALPHA) mask[blockRow + Math.floor(x / SHAPE_BLOCK)] = 1;
+      }
+    }
+  }
+  const grown = (from, dx, dy) => {
+    const to = new Uint8Array(gw * gh);
+    for (let y = 0; y < gh; y += 1) {
+      for (let x = 0; x < gw; x += 1) {
+        if (!from[y * gw + x]) continue;
+        for (let k = -SHAPE_GROW; k <= SHAPE_GROW; k += 1) {
+          const nx = x + k * dx;
+          const ny = y + k * dy;
+          if (nx >= 0 && nx < gw && ny >= 0 && ny < gh) to[ny * gw + nx] = 1;
+        }
+      }
+    }
+    return to;
+  };
+  mask = grown(grown(mask, 1, 0), 0, 1);
+  // Runs of blocks along each row; a run directly under one of the same extent joins it.
+  const rects = [];
+  let open = new Map();
+  for (let by = 0; by < gh; by += 1) {
+    const next = new Map();
+    for (let bx = 0; bx < gw;) {
+      if (!mask[by * gw + bx]) {
+        bx += 1;
+        continue;
+      }
+      let end = bx;
+      while (end < gw && mask[by * gw + end]) end += 1;
+      const key = `${bx}:${end}`;
+      let rect = open.get(key);
+      if (!rect) {
+        rect = [bx * SHAPE_BLOCK, by * SHAPE_BLOCK, (end - bx) * SHAPE_BLOCK, 0];
+        rects.push(rect);
+      }
+      rect[3] = (by + 1) * SHAPE_BLOCK - rect[1];
+      next.set(key, rect);
+      bx = end;
+    }
+    open = next;
+  }
+  return rects.length ? rects : whole;
+}
+
 function frames(row, count, ms, lastMs) {
   return Array.from({ length: count }, (_, col) => ({ row, col, ms: col === count - 1 ? lastMs : ms }));
 }
@@ -51,6 +116,8 @@ class SpritePlayer {
     this.alpha = null;         // { data, width } of the atlas, for pixel-accurate hit testing
     this.headroom = 0;
     this.onMeasured = null;
+    this.shapes = new Map();   // atlas row -> the rectangles covering it (see silhouetteRects)
+    this.onShapeChange = null; // called when the frame about to show is in another row than the last
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     this.reducedMotion.addEventListener('change', () => this.restart());
     this.alwaysAnimate = true;   // the tray menu's "Animate even with Windows animation effects off"
@@ -73,6 +140,7 @@ class SpritePlayer {
     this.el.style.backgroundSize = `${ATLAS_COLUMNS * 100}% ${rows * 100}%`;
     this.el.classList.toggle('pixel', Boolean(pixelArt));
     this.alpha = null;
+    this.shapes.clear();
     const img = new Image();
     img.onload = () => {
       try {
@@ -179,7 +247,10 @@ class SpritePlayer {
   }
 
   show(frame) {
+    const otherRow = frame.row !== this.frame.row;
     this.frame = frame;
+    // The window's shape has to cover the new frame before it is drawn.
+    if (otherRow) this.onShapeChange?.();
     this.el.style.backgroundPosition = `${(frame.col / (ATLAS_COLUMNS - 1)) * 100}% ${(frame.row / (this.rows - 1)) * 100}%`;
   }
 
@@ -210,6 +281,20 @@ class SpritePlayer {
     return top >= CELL_H ? 0 : top / CELL_H;
   }
 
+  // Where the pet is drawn in the row of the frame on show, as [x, y, width, height] rectangles in
+  // CSS px relative to the sprite box. A pet whose atlas can't be read is taken to fill its box.
+  shapeRects(boxWidth, boxHeight) {
+    const row = this.frame.row;
+    let cell = this.shapes.get(row);
+    if (!cell && this.alpha) {
+      cell = silhouetteRects(this.alpha.data, this.alpha.width, this.alpha.height, row);
+      this.shapes.set(row, cell);
+    }
+    const sx = boxWidth / CELL_W;
+    const sy = boxHeight / CELL_H;
+    return (cell || [[0, 0, CELL_W, CELL_H]]).map(([x, y, w, h]) => [x * sx, y * sy, w * sx, h * sy]);
+  }
+
   // Is the pixel under (x, y) (relative to the sprite box, CSS px) part of the pet?
   hitTest(x, y, boxWidth, boxHeight) {
     if (x < 0 || y < 0 || x > boxWidth || y > boxHeight) return false;
@@ -231,4 +316,5 @@ class SpritePlayer {
   }
 }
 
+SpritePlayer.silhouetteRects = silhouetteRects;
 window.SpritePlayer = SpritePlayer;

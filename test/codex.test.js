@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { CodexTracker, parseConnections, parseUnread, threadUrl } = require('../src/codex');
+const { CodexTracker, parseAeons, parseConnections, parseUnread, threadUrl } = require('../src/codex');
 const { BOOTSTRAP, CodexRemote, LOADER, WATCHER } = require('../src/codex-remote');
 const { applyRolloutEntry, createRolloutState, rateLimitsOf, rolloutStatus } = require('../src/rollout');
 
@@ -193,6 +193,163 @@ test('the tracker combines running threads here with unread threads on other hos
 
     tracker.dismiss(ready.id);
     assert.deepEqual(tracker.sessions.map((s) => s.status), ['running']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+// ------------------------------------------------------------------ dot
+
+const DOT = '0199d0d0-0001-7000-8000-00000000d071';
+const DOT_TASK = '0199d0d0-0002-7000-8000-00000000d072';
+const DOT_DREAM = '0199d0d0-0003-7000-8000-00000000d073';   // "Heartbeat Dreamer", the dot's hourly upkeep
+
+// The app's persisted state for one dot, with `unread` threads on the cloud host.
+function dotState(activity, unread = []) {
+  return {
+    'electron-persisted-atom-state': {
+      [`aeon-introduction-v1:${DOT}`]: 'dot',
+      [`aeon-last-activity-v1:${DOT}`]: activity,
+      'aeon-subtasks-by-account-v1': { me: { [JSON.stringify(['durable', DOT])]: [DOT_TASK] } },
+      'cloud-aeon-sidebar-cache-v1': {
+        threads: [
+          { id: DOT_DREAM, name: 'Heartbeat Dreamer', threadSource: 'dreaming' },
+          { id: DOT, name: null, threadSource: 'aeon' },
+        ],
+      },
+    },
+    'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`durable:${'c'.repeat(64)}`]: unread } } },
+  };
+}
+
+test("a dot's name, last activity and subtasks come from the app's persisted state", () => {
+  const { aeons, subtasks, dreams } = parseAeons(dotState(T0 + 396));
+  assert.deepEqual([...aeons], [[DOT, { name: 'dot', activity: T0 + 396, hostId: 'durable' }]]);
+  assert.deepEqual([...subtasks], [[DOT_TASK, DOT]]);
+  assert.deepEqual([...dreams], [DOT_DREAM]);   // the upkeep thread, not the dot's chat
+  // A dot known only from its subtasks still gets a name, and its host is the one they name.
+  const bare = parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': { me: { [JSON.stringify(['elsewhere', DOT])]: [DOT_TASK] } } } });
+  assert.equal(bare.aeons.get(DOT).name, 'dot');
+  assert.equal(bare.aeons.get(DOT).hostId, 'elsewhere');
+  assert.equal(parseAeons(null).aeons.size, 0);
+  assert.equal(parseAeons({ 'electron-persisted-atom-state': { 'aeon-subtasks-by-account-v1': 'nonsense' } }).subtasks.size, 0);
+  assert.equal(parseAeons({ 'electron-persisted-atom-state': { 'cloud-aeon-sidebar-cache-v1': { threads: 'nonsense' } } }).dreams.size, 0);
+  assert.equal(parseAeons(null).dreams.size, 0);
+});
+
+// A tracker on a throwaway Codex folder with a clock of its own. `advance(ms, state)` moves the
+// clock, rewrites the app's state file with `state` (or what `state(clock)` returns) and gives
+// back the sessions the pet would show.
+function dotTracker(first) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const file = path.join(home, '.codex-global-state.json');
+  let clock = T0;
+  let version = 0;
+  const write = (j) => {
+    fs.writeFileSync(file, JSON.stringify(j));
+    fs.utimesSync(file, new Date(T0 + 1000 * ++version), new Date(T0 + 1000 * version));   // so it reads as changed
+  };
+  write(first);
+  const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => clock });
+  const advance = async (ms, state) => {
+    clock += ms;
+    if (state) write(typeof state === 'function' ? state(clock) : state);
+    await tracker.tick();
+    return tracker.sessions;
+  };
+  return { tracker, advance, done: () => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }) };
+}
+
+test("a dot works from the app's own stamp until the server's whole-second one, and its replies are ready", async () => {
+  const { tracker, advance, done } = dotTracker(dotState(T0 - 3_600_000));
+  try {
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);
+
+    // You send a message: the app stamps it to the millisecond.
+    let [dot] = await advance(2000, dotState(T0 + 2396));
+    assert.equal(dot.status, 'running');
+    assert.equal(dot.title, 'dot');
+    assert.equal(dot.id, `codex:${DOT}`);
+    assert.equal(dot.url, `codex://threads/${DOT}?hostId=durable`);   // the dot's own conversation
+    assert.equal(dot.since, T0 + 2000);
+    // More events in the same turn keep it going, from the same start.
+    [dot] = await advance(3000, dotState(T0 + 5852));
+    assert.deepEqual([dot.status, dot.since], ['running', T0 + 2000]);
+    // The server confirms the reply with a whole second, and the app lists the thread as unread.
+    [dot] = await advance(6000, dotState(T0 + 11_000, [DOT]));
+    assert.deepEqual([dot.status, dot.title, dot.url], ['review', 'dot', `codex://threads/${DOT}?hostId=durable`]);
+    assert.equal(dot.since, T0 + 11_000);
+    // A new message while the old reply is still unread: working again.
+    [dot] = await advance(2000, dotState(T0 + 13_165, [DOT]));
+    assert.deepEqual([dot.status, dot.since], ['running', T0 + 13_000]);
+    // No stamp for a while: the turn is taken as over, and the unread reply shows again.
+    [dot] = await advance(60_000);
+    assert.equal(dot.status, 'review');
+
+    // A thread the dot started finishing is not news; only the dot's own replies are.
+    assert.deepEqual(await advance(2000, dotState(T0 + 80_000, [DOT_TASK])), []);
+    // Nor is its upkeep thread (the hourly "Heartbeat Dreamer"), which also ends turns unattended.
+    assert.deepEqual(await advance(2000, dotState(T0 + 82_000, [DOT_DREAM])), []);
+  } finally {
+    done();
+  }
+});
+
+test('an unread dot is Ready only when a turn came before the flag', async () => {
+  const { tracker, advance, done } = dotTracker(dotState(T0 - 3_600_000));
+  // `stamp` is an offset from the new clock (0 is a server stamp, 396 the app's own); left out, the stamp stays.
+  let last = T0 - 3_600_000;
+  const read = (ms, { stamp, unread = [] } = {}) => advance(ms, (t) => dotState(last = stamp === undefined ? last : t + stamp, unread));
+  try {
+    await tracker.tick();
+    // A reply to you: your message's stamp, then the server's, and the flag.
+    await read(2000, { stamp: 396 });
+    let [dot] = await read(6000, { stamp: 0, unread: [DOT] });
+    assert.equal(dot.status, 'review');
+
+    // You read it. The app raises the flag again with nothing new in the chat: not Ready.
+    assert.deepEqual(await read(5000), []);
+    assert.deepEqual(await read(3000, { unread: [DOT] }), []);
+    assert.deepEqual(await read(3000), []);
+    // A server stamp on its own, minutes later, with the flag: not Ready either.
+    assert.deepEqual(await read(120_000, { stamp: 0, unread: [DOT] }), []);
+    assert.deepEqual(await read(2000), []);
+
+    // The flag can come a moment before the turn's stamp.
+    assert.deepEqual(await read(2000, { unread: [DOT] }), []);
+    [dot] = await read(1000, { stamp: 396, unread: [DOT] });
+    assert.equal(dot.status, 'running');
+    [dot] = await read(4000, { stamp: 0, unread: [DOT] });
+    assert.equal(dot.status, 'review');
+
+    // A follow-up message soon after a turn is part of it.
+    assert.deepEqual(await read(5000), []);
+    [dot] = await read(30_000, { stamp: 0, unread: [DOT] });
+    assert.equal(dot.status, 'review');
+    tracker.dismiss(`codex:${DOT}`);
+    assert.deepEqual(tracker.sessions, []);
+  } finally {
+    done();
+  }
+});
+
+test('a dot that is mid-turn when the pet starts is working, and one that stopped is not', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  try {
+    const file = path.join(home, '.codex-global-state.json');
+    const statusAt = async (activity, unread = []) => {
+      fs.writeFileSync(file, JSON.stringify(dotState(activity, unread)));
+      const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => T0 });
+      await tracker.tick();
+      return tracker.sessions;
+    };
+    const [dot] = await statusAt(T0 - 5000 + 123);
+    assert.deepEqual([dot.status, dot.since], ['running', T0 - 5000 + 123]);
+    assert.deepEqual(await statusAt(T0 - 120_000 + 123), []);   // its last stamp is long past
+    assert.deepEqual(await statusAt(T0 - 5000), []);            // the server's stamp: it finished
+    // Unread when the pet starts: there is nothing to judge it by, and a reply you missed is worth showing.
+    assert.deepEqual((await statusAt(T0 - 5000, [DOT])).map((s) => s.status), ['review']);
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }

@@ -28,6 +28,10 @@ npm install
 npm start
 ```
 
+On its first start, the pet offers to set up a small mod for Claude Code, which is where it gets
+Claude's weekly limit from ([Live Claude usage](#live-claude-usage)). Say *Set it up*, and that's
+all.
+
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
@@ -51,7 +55,8 @@ From its first run on, the pet starts at login; untick *Start at login* in the t
 that. To start it yourself without a console window, double-click **Claude Pet.lnk** in this
 folder. The flags `--start-at-login` and `--no-start-at-login` set the same option from the
 command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
-(or click the tray icon) for the menu.
+(or click the tray icon) for the menu, which also has *Restart Claude Pet* (after you edit its
+code, say).
 
 Drag the pet with the left mouse button to move it. Right-click it and choose **Size**, or hold
 **Ctrl** and scroll over the pet, to change its size. The menu's **Reset position** returns it to
@@ -146,9 +151,12 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   (`%LOCALAPPDATA%\Claude\logs\main.log`), which gets a line when a prompt is sent and when a turn
   ends. It also uses the session index, which the app saves now and then during a turn.
 - **Questions and permission prompts:** the app's log also gets a line when Claude stops to ask
-  you something or to ask permission for a tool, and another when you answer. That's how the pet
-  shows "Awaiting input" right away for SSH sessions and for permission prompts. Until the transcript
-  has the question, the bubble says "Has a question for you" rather than the question itself.
+  you something or to ask permission for a tool, and another when you answer or the question is
+  withdrawn. That's how the pet shows "Awaiting input" right away for SSH sessions and for permission
+  prompts. The app asks some questions of its own the same way, such as whether to load the mods
+  Claude wrote. Those can stay up after the turn ends, and so does the bubble. Until the
+  transcript has the question, the bubble says "Has a question for you" rather than the question
+  itself.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
   that clock is off from the copies and corrects for it, so "Ready" still clears once you've
   looked at a session.
@@ -222,6 +230,16 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   them every 30 s, so a resumed old thread can take that long to show. It exits as soon as the
   pet quits, even if the pet crashes. Tray menu → *Follow Codex on SSH hosts* turns this off. The host
   needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
+- **dot:** the app's *dots* (the assistant you message, named dot) run in the cloud and leave no
+  history file to follow, so there's no step to show. The pet goes by what the app keeps in its
+  state file: a dot is *working* from a message the app stamps to the millisecond until the
+  server's whole-second stamp for the reply (or 45 seconds after the last stamp, if none comes),
+  and *Ready* while the app lists it as unread. The app also flags a dot as unread at times when
+  the chat has nothing new (a server stamp on its own, or the flag raised again right after you
+  read it), so only a flag that follows a turn's stamps since you last read counts. The threads a
+  dot starts, and the one its upkeep runs in on a timer (*Heartbeat Dreamer*), don't make it Ready
+  either; only its own replies do. Clicking opens the dot's conversation (`codex://threads/<id>` on the
+  dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
 - **Not shown:** ChatGPT chats, and Codex's own helper threads such as its auto-reviewer.
@@ -237,27 +255,62 @@ shows how much of that plan's weekly limit you've used against how far into the 
 - **Reading it:** a fill that reaches past the line means you're using the limit faster than
   the week goes by.
 
-The tray menu lists the same figures, with how far into the week you are and the time until each
-reset. Tray menu → *Show weekly limits* turns the meter off. The pet reads both figures from files
-the two apps keep. It contacts no server itself (apart from the SSH hosts above).
+The tray menu lists the same figures, with how far into the week you are, the time until each
+reset, and how old the figures are once they're over an hour old. Tray menu → *Show weekly
+limits* turns the meter off. The pet reads the figures from files; it contacts no server itself
+(apart from the SSH hosts above, and below).
 
-- **Claude:** while it runs, the desktop app records your plan's usage (the 5-hour and the
-  weekly window, in percent) in `%APPDATA%\Claude\plan-usage-history.json`, about every 15
-  minutes while the figures change. The meter shows the newest record.
-- **Claude's reset time:** the weekly limit resets at the same time every week, a time that's
-  fixed for your account. Claude shows it in Settings → Usage. The desktop app doesn't save it
-  anywhere the pet can read, so set it once: tray menu → *Claude's week resets* → the weekday
-  → the hour. From then on the pet knows where each week starts and ends. Until you set it,
-  Claude's gauge has no line.
+- **Claude:** the pet's mod for Claude Code saves the figures after each reply of every session,
+  with when the week resets ([Live Claude usage](#live-claude-usage)). The pet shows the newest,
+  from this PC, WSL or an SSH host. Without the mod, there's no Claude row. (The desktop app keeps
+  a usage history of its own, but samples it only while you're at the PC, so the pet doesn't use
+  it.)
 - **Codex:** each reply in a rollout records the account's rate limits and when they reset. The
   pet uses the newest reply it can see, on this PC or on an SSH host. After the reset time
   passes, the meter shows 0% until the next reply.
 
 If Codex usage is present but Claude usage is not, the meter shows **Claude · No data** above
-Codex. Claude's percentage needs the Claude desktop app's
-`%APPDATA%\Claude\plan-usage-history.json`, which the app creates after recording plan usage.
-Claude CLI transcripts alone do not contain that weekly percentage. The pet fills in the Claude
-row automatically when the file becomes available; there is no separate account connection.
+Codex. Set up Live Claude usage below to fill in Claude's percentage as replies finish.
+
+## Live Claude usage
+
+The pet comes with a small mod for Claude Code ([claude-mod/](claude-mod)). After each reply, Claude
+Code knows how much of your plan's limits the account has used, and when they reset; the mod
+saves those figures to `~/.claude-pet/usage.json`, and does nothing else. The weekly-limit meter
+then follows your usage as it happens, from any session, whether you're at the PC or not.
+
+**Setting it up.** The pet asks once, on its first start. Later, use tray menu → *Live Claude
+usage*, which has a checkbox per machine:
+
+- **This PC:** the pet copies the mod to `~/.claude-pet/mod/pet-usage` and adds two entries to
+  the `env` of Claude Code's settings (`~/.claude/settings.json`, backed up first to
+  `settings.json.claude-pet.bak`):
+  - `CLAUDE_CODE_PLUGIN_DIRS`: the mod's folder, after any folders you already list there.
+  - `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`: `1`, which mods need. This turns function hooks on for
+    every Claude Code session on the machine.
+- **WSL:** the desktop app runs WSL sessions inside the distro, with the distro's own settings,
+  so each distro you've used gets the same two entries in its own `~/.claude/settings.json`.
+  They point at this PC's copy through `/mnt/c`, so WSL sessions write the same file the pet
+  reads here. The distro needs `python3` for the setup.
+- **SSH hosts:** the desktop app's SSH sessions run on the host, and the app leaves a plugin's
+  hooks out when it copies plugins there, so the mod has to be set up on the host itself: the pet
+  copies it there over SSH and adds the same entries to the host's settings. To read the host's
+  figures, the pet keeps one SSH connection per host (the desktop app's saved connections) with a
+  small read-only Python watcher that sends the file when it changes; tray menu → *Live Claude
+  usage* → *Read usage on SSH hosts* turns that off. As for Codex, the host needs `python3` and a
+  key that works without a prompt.
+
+Sessions you start after setting it up use it; sessions already open don't. When the pet updates,
+it brings the copies of the mod it set up up to date too. Unticking a machine removes the entries
+again (function hooks only if the pet turned them on), with the mod and its file.
+
+**How often.** The mod writes the file as each reply ends. The pet checks the file here every 3
+seconds, and the watcher on each SSH host checks every 2 seconds and sends it when it changed, so
+the meter follows within a few seconds.
+
+Claude Code's mods are an early-access feature and can change between releases. If the mod stops
+working, the meter keeps its last figures, and the tray menu says how old they are. The figures
+are the account's, so the pet assumes every machine uses the same Claude account.
 
 ## Pets
 
@@ -321,10 +374,14 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
   and when the taskbar isn't on top at that moment, the pet isn't either.
 - **Clicks pass through.** The window runs `setIgnoreMouseEvents(true,{forward:true})` so it
   still receives mouse movement. The page tests whether the cursor is over the pet and only then
-  asks for real clicks. Claude Pet goes one step further and tests the actual pixels, so the
-  transparent area around the pet passes clicks through too. And it doesn't use the forwarded
-  mouse moves: on Windows they can stop coming, so the main process checks where the cursor is
-  every 50 ms instead.
+  asks for real clicks. Claude Pet doesn't do that, because it needs two programs to agree on
+  whether the window is taking clicks, and they can stop agreeing: on Windows the forwarded mouse
+  moves can stop coming, and watching the cursor from the main process instead left the pet deaf
+  until the mouse moved, after a virtual-desktop switch. Instead the window is cut to what's
+  drawn with `setShape`: the pet's outline (every frame of the row it's showing, so the pixels
+  themselves, not its box) and the bubbles. Windows decides what's inside the shape, so there's
+  nothing to track, and a click anywhere else goes to the window behind. The cost is that the
+  bubbles' shadows, and the weekly-limit bubble, take clicks too.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
   plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
   instead plays it twice and rests on its first frame. Its reactions to you (the jump on hover,
@@ -337,17 +394,23 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 ## Project layout
 
 ```text
-src/main.js         Electron main process: window, click-through, drag/throw, tray, deep links
+src/main.js         Electron main process: window, drag/throw, tray, deep links
+src/shape.js        The window's shape: which parts take the mouse (the pet and the bubbles)
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
 src/renderer/       Pet page: sprite engine, activity bubbles
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
-src/codex.js        Codex threads: the unread list, the thread list, local histories
-src/codex-remote.js Follows Codex histories on SSH hosts (SSH + a small Python watcher)
+src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
+src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
+src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
+src/claude-usage.js Claude's usage from everywhere: the mod's file here and on SSH hosts, the app
+src/claude-remote.js Reads the mod's file on an SSH host (a small Python watcher)
+src/claude-mod.js   Sets the mod up on this PC, in WSL and on SSH hosts, and takes it away
 src/rollout.js      Codex rollout entries → running / waiting / review / failed
 src/transcript.js   Transcript entries → running / waiting / review / failed
-src/usage.js        Weekly limits: Claude's usage samples, Codex's rate limits
+src/usage.js        Weekly limits: Claude's figures (the mod's, the app's), Codex's rate limits
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
 tools/make_clay.py  Generates Clay, the built-in pet
+claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
 ```

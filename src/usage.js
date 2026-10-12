@@ -1,12 +1,11 @@
 'use strict';
 
-// How much of this week's usage your Claude and Codex plans have used, from what the two apps
-// keep on this PC.
+// How much of this week's usage your Claude and Codex plans have used.
 //
-//   - Claude: the desktop app samples your plan's usage (every 15 minutes while it changes) into
-//     <appData>/Claude/plan-usage-history.json: { samples: [{ t, org, u: { fh, sd } }] }, with the
-//     5-hour (fh) and weekly (sd) windows in percent. It doesn't keep when they reset, but the
-//     weekly one resets at the same time every week (see withWeeklyResets).
+//   - Claude: Claude Pet's mod (claude-mod/, see claude-mod.js) saves the account's limits after
+//     each reply of a Claude Code session, as Claude Code heard them, to ~/.claude-pet/usage.json on
+//     the machine the session runs on: { version: 1, at, limits: [{ kind, percent, resetsAt }] },
+//     with kind five_hour or seven_day.
 //   - Codex: each reply's token_count event in a rollout carries the account's rate limits,
 //     { primary, secondary: { used_percent, window_minutes, resets_at } }. Which of the two is the
 //     weekly window depends on the plan.
@@ -15,21 +14,34 @@ const DAY_MINUTES = 24 * 60;
 const WEEK_MINUTES = 7 * DAY_MINUTES;
 const WEEK_MS = WEEK_MINUTES * 60_000;
 const FIVE_HOURS_MS = 5 * 60 * 60_000;
+const STALE_MS = 60 * 60_000;
 
-// The newest sample that has the weekly figure: { weekly, fiveHour, at }, each window
-// { percent, resetsAt, windowMs }.
-function parseClaudeUsage(j) {
-  let newest = null;
-  for (const s of Array.isArray(j?.samples) ? j.samples : []) {
-    const u = s?.u;
-    if (!Number.isFinite(u?.sd) || !Number.isFinite(s.t) || (newest && s.t <= newest.at)) continue;
-    newest = {
-      weekly: { percent: u.sd, resetsAt: null, windowMs: WEEK_MS },
-      fiveHour: Number.isFinite(u.fh) ? { percent: u.fh, resetsAt: null, windowMs: FIVE_HOURS_MS } : null,
-      at: s.t,
-    };
+// What Claude Pet's mod saved: { weekly, fiveHour, at }, each window { percent, resetsAt, windowMs }
+// or null.
+function parseModUsage(j) {
+  if (j?.version !== 1 || !Number.isFinite(j.at) || !Array.isArray(j.limits)) return null;
+  const out = { weekly: null, fiveHour: null, at: j.at };
+  for (const l of j.limits) {
+    if (!Number.isFinite(l?.percent)) continue;
+    const resetsAt = Number.isFinite(l.resetsAt) ? l.resetsAt : null;
+    if (l.kind === 'seven_day') out.weekly = { percent: l.percent, resetsAt, windowMs: WEEK_MS };
+    else if (l.kind === 'five_hour') out.fiveHour = { percent: l.percent, resetsAt, windowMs: FIVE_HOURS_MS };
   }
-  return newest;
+  return out.weekly || out.fiveHour ? out : null;
+}
+
+// Claude's figures from everywhere the mod saved them (this PC, WSL, the SSH hosts). They're all
+// the account's, so the newest wins. Its week's reset comes from the newest reading that has one
+// (see withWeeklyResets).
+function combineClaudeUsage(readings) {
+  let newest = null;
+  let timed = null;
+  for (const r of readings || []) {
+    if (!r || !Number.isFinite(r.at)) continue;
+    if ((r.weekly || r.fiveHour) && (!newest || r.at > newest.at)) newest = r;
+    if (Number.isFinite(r.weekly?.resetsAt) && (!timed || r.at > timed.at)) timed = r;
+  }
+  return newest && withWeeklyResets(newest, timed?.weekly.resetsAt);
 }
 
 // A token_count event's rate_limits, for a reply at `at`: { weekly, fiveHour }, each
@@ -51,9 +63,9 @@ function parseRateLimits(r, at) {
   return out.weekly || out.fiveHour ? out : null;
 }
 
-// Claude's weekly limit resets at the same time every week, a time set for your account (Claude
-// shows it in Settings > Usage). The desktop app doesn't save it anywhere the pet can read, so
-// you pick it in the tray menu once. `anchor` is any one of those resets; it gives them all.
+// Claude's weekly limit resets at the same time every week, a time set for your account. `anchor`
+// is any one of those resets; it gives them all, so figures from before a reset read as a fresh
+// week after it, until the next reply.
 function withWeeklyResets(u, anchor) {
   if (!u?.weekly || !Number.isFinite(anchor)) return u;
   return { ...u, weekly: { ...u.weekly, resetsAt: nextWeeklyReset(anchor, u.at), repeats: true } };
@@ -64,16 +76,7 @@ function nextWeeklyReset(anchor, t) {
   return anchor + (Math.floor((t - anchor) / WEEK_MS) + 1) * WEEK_MS;
 }
 
-// The next time it's `hour`:00 on weekday `day` (0 is Sunday), on this PC's clock.
-function nextLocalTime(day, hour, now = Date.now()) {
-  const t = new Date(now);
-  t.setHours(hour, 0, 0, 0);
-  t.setDate(t.getDate() + ((day - t.getDay() + 7) % 7));
-  if (t.getTime() <= now) t.setDate(t.getDate() + 7);
-  return t.getTime();
-}
-
-// What the pet shows: each app's weekly limit, [{ app, name, percent, elapsed, resetsIn }].
+// What the pet shows: each app's weekly limit, [{ app, name, percent, elapsed, resetsIn, age }].
 // `percent` is how much of the limit is used and `elapsed` how much of the week has gone by, so
 // using more than `elapsed` means you'd run out before the reset. Without a known reset time,
 // `elapsed` and `resetsIn` are null.
@@ -92,6 +95,8 @@ function usageView({ claude = null, codex = null } = {}, now = Date.now()) {
       percent: reset ? 0 : pct(w.percent),
       elapsed: known && w.windowMs > 0 ? pct(100 - ((next - now) / w.windowMs) * 100) : null,
       resetsIn: known ? formatDuration(next - now) : null,
+      // how old the figures are, once over an hour (unless they're of a week that has ended)
+      age: !reset && Number.isFinite(u.at) && now - u.at > STALE_MS ? formatDuration(now - u.at) : null,
     });
   }
   return out;
@@ -107,5 +112,5 @@ function formatDuration(ms) {
 }
 
 module.exports = {
-  formatDuration, nextLocalTime, nextWeeklyReset, parseClaudeUsage, parseRateLimits, usageView, withWeeklyResets,
+  combineClaudeUsage, formatDuration, nextWeeklyReset, parseModUsage, parseRateLimits, usageView, withWeeklyResets,
 };
