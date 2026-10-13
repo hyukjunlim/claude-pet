@@ -24,6 +24,7 @@ const STEPS = [
     { status: 'running', kind: 'codex', title: 'Port the tokenizer to Rust', detail: 'cargo test', remote: 'lab-server', project: 'tokenizer' },
   ],
   [{ status: 'failed', title: 'Dataset cleanup', detail: 'API Error: 529 overloaded', project: 'datasets' }],
+  [{ status: 'background', title: 'Tune the search ranking', detail: 'In the background: Train the ranker', project: 'search' }],
   // A busy moment: more bubbles than the default room, so the stack grows.
   [
     { status: 'waiting', title: 'Write the migration guide', project: 'docs' },
@@ -33,11 +34,12 @@ const STEPS = [
     { status: 'running', title: 'Migrate the billing service to the new events API', project: 'billing' },
     { status: 'running', title: 'Tune the search ranking', project: 'search' },
     { status: 'running', kind: 'codex', title: 'Add retries to the uploader', project: 'uploader' },
+    { status: 'background', title: 'Train the ranking model', project: 'search' },
   ],
 ];
 
 // Weekly limits used with each step, in percent: [Claude, Codex].
-const USAGE = [[34, 12], [41, 20], [48, 33], [57, 52], [66, 78], [79, 91], [92, 97]];
+const USAGE = [[34, 12], [41, 20], [48, 33], [57, 52], [66, 78], [79, 91], [85, 94], [92, 97]];
 
 class DemoTracker extends EventEmitter {
   constructor({ stepMs = 6000 } = {}) {

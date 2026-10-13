@@ -3,16 +3,17 @@
 // Turns Claude Code transcript entries (one JSON object per line of
 // ~/.claude/projects/<project>/<session>.jsonl) into a pet status.
 //
-// Statuses, highest priority first (same order ChatGPT's pet uses):
-//   waiting  - Claude is blocked on you (a question, a plan to approve, or the
-//              desktop app's end-of-turn summary says it needs a decision; sessions.js
-//              adds permission prompts, from the app's log)
-//   failed   - the turn ended with an API error
-//   review   - the turn finished and you haven't looked at it yet
-//   running  - a turn is in progress, or one it started in the background (a command, an agent,
-//              a monitor) hasn't finished: its ending notice starts the next turn, and
-//              "Ready" in between would just flicker
-//   idle     - nothing to report
+// Statuses, highest priority first (the first four in the order ChatGPT's pet uses):
+//   waiting    - Claude is blocked on you (a question, a plan to approve, or the
+//                desktop app's end-of-turn summary says it needs a decision; sessions.js
+//                adds permission prompts, from the app's log)
+//   failed     - the turn ended with an API error
+//   review     - the turn finished and you haven't looked at it yet
+//   running    - a turn is in progress
+//   background - no turn is, but a task a turn sent to the background (a command, an agent, a
+//                monitor) hasn't finished: its ending notice starts the next turn, and
+//                "Ready" in between would just flicker
+//   idle       - nothing to report
 
 const path = require('node:path');
 
@@ -29,7 +30,7 @@ const MAX_TURN_UUIDS = 64;
 const MAX_SEEN_ASSISTANTS = 2000;
 const MAX_BACKGROUND_TASKS = 64;
 
-const STATUS_PRIORITY = { waiting: 0, failed: 1, review: 2, running: 3, idle: 4 };
+const STATUS_PRIORITY = { waiting: 0, failed: 1, review: 2, running: 3, background: 4, idle: 5 };
 
 function createTurnState() {
   return {
@@ -316,13 +317,13 @@ function applySystem(state, entry, at) {
 function deriveStatus(state, meta = {}, now = Date.now()) {
   const derived = turnStatus(state, meta, now);
   // Between the turn that starts a background task and the one its notice starts, Claude isn't
-  // working but the task is. That's still running, seen or not. A question, an error or a stale
-  // turn (its session is gone, and its tasks with it) still show as they are.
+  // working but the task is, seen or not. A question, an error or a stale turn (its session is
+  // gone, and its tasks with it) still show as they are.
   if (state.turnActive || (derived.status !== 'review' && derived.status !== 'idle')) return derived;
   const tasks = [...state.backgroundTasks.values()].filter((t) => now - t.at < STALE_BACKGROUND_MS);
   if (!tasks.length) return derived;
   return {
-    status: 'running',
+    status: 'background',
     detail: tasks.length === 1 ? `In the background: ${tasks[0].detail}` : `${tasks.length} background tasks`,
     since: Math.min(...tasks.map((t) => t.at)),
   };

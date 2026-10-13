@@ -45,7 +45,7 @@ const BOUNCE = 0.7;
 const STOP_SPEED = 65;
 const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
-const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
+const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const FOREGROUND_HANDOFF_MS = 1500;
@@ -739,7 +739,7 @@ function openSession(id) {
   const url = s && sessionUrl(s);
   if (!url) return false;
   openApp(url);
-  if (s.status !== 'running') {
+  if (s.status !== 'running' && s.status !== 'background') {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }

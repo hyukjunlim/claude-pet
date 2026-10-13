@@ -9,6 +9,7 @@
   --waiting: #c27c0e;
   --failed: #d93f3f;
   --review: #2e8b57;
+  --background: #5e7891;         /* a background task's, not the page's */
   --badge: #c96442;
   --pill-width: 242px;           /* every bubble, the weekly-limit meter too */
 }
@@ -24,6 +25,7 @@
     --waiting: #f0b24a;
     --failed: #f16d6d;
     --review: #5cc28b;
+    --background: #93abc4;
   }
 }
 
@@ -144,6 +146,7 @@ body {
 .pill.status-waiting { --c: var(--waiting); }
 .pill.status-failed { --c: var(--failed); }
 .pill.status-review { --c: var(--review); }
+.pill.status-background { --c: var(--background); }
 
 .icon {
   flex: none;

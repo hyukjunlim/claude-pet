@@ -15,7 +15,8 @@
   };
   player.onShapeChange = () => updateShape();
 
-  const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running' };
+  const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
+  const BUSY = new Set(['running', 'background']);   // still going: nothing to dismiss
   const ATTENTION = new Set(['waiting', 'failed', 'review']);
   const SHADOW_ROOM = 16;          // px kept around the bubbles so their shadows aren't cut off
 
@@ -92,7 +93,7 @@
     showActivity = payload.showActivity !== false;
     reactToChanges();
     render();
-    player.setBase(sessions[0]?.status || 'idle');
+    player.setBase(sessions[0]?.status || 'idle');   // background has no animation: the pet idles
   });
 
   api.onUsage((items) => {
@@ -106,7 +107,7 @@
     let finished = false;
     for (const [id, status] of next) {
       const before = previous.get(id);
-      if (before === 'running' && status === 'review') finished = true;
+      if (BUSY.has(before) && status === 'review') finished = true;
     }
     previous = next;
     if (finished && sessions[0]?.status === 'review') player.playOnce('jumping');
@@ -170,7 +171,7 @@
     text.append(line, detail);
     el.append(text);
 
-    if (s.status !== 'running') {
+    if (!BUSY.has(s.status)) {
       const close = document.createElement('button');
       close.className = 'close';
       close.type = 'button';

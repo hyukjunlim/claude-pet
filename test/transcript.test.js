@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyEntry, createTurnState, deriveStatus, describeTool } = require('../src/transcript');
+const { applyEntry, compareSessions, createTurnState, deriveStatus, describeTool } = require('../src/transcript');
 
 const T0 = Date.parse('2026-09-24T12:00:00.000Z');
 const at = (s) => new Date(T0 + s * 1000).toISOString();
@@ -169,10 +169,10 @@ const noticeAttachment = (s, taskId, status) => ({
 });
 const inBackground = [prompt(0), ...bashTask(1, 't1', 'b1'), reply(4), stopSummary(5)];
 
-test('a turn that leaves a background task running stays running, seen or not', () => {
+test('a turn that leaves a background task running shows Background, seen or not', () => {
   const s = run(inBackground);
   for (const meta of [{}, { lastFocusedAt: T0 + 9000 }, { dismissedAt: T0 + 9000 }]) {
-    assert.deepEqual(deriveStatus(s, meta, T0 + 60_000), { status: 'running', detail: 'In the background: Watch the build', since: T0 + 2000 });
+    assert.deepEqual(deriveStatus(s, meta, T0 + 60_000), { status: 'background', detail: 'In the background: Watch the build', since: T0 + 2000 });
   }
 });
 
@@ -211,7 +211,7 @@ test('agents, workflows and monitors count too, but a monitor for the whole sess
   assert.equal(deriveStatus(agent, {}, T0 + 60_000).detail, 'In the background: Agent: Review the diff');
   const workflow = run([prompt(0), toolUse(1, 'w1', 'Workflow'),
     toolResult(2, 'w1', 'started', { status: 'async_launched', taskId: 'wf1', taskType: 'local_workflow' }), reply(4), stopSummary(5)]);
-  assert.equal(deriveStatus(workflow, {}, T0 + 60_000).status, 'running');
+  assert.equal(deriveStatus(workflow, {}, T0 + 60_000).status, 'background');
   const monitor = (persistent) => run([prompt(0), toolUse(1, 'm1', 'Monitor', { description: 'the deploy' }),
     toolResult(2, 'm1', 'Monitor started (task m1x)', { taskId: 'm1x', timeoutMs: 1_800_000, persistent }), reply(4), stopSummary(5)]);
   assert.equal(deriveStatus(monitor(false), {}, T0 + 60_000).detail, 'In the background: Watching the deploy');
@@ -223,7 +223,7 @@ test("a monitor's progress notice does not end it, but its last one does", () =>
     reply(4), stopSummary(5),
     prompt(30, '<task-notification>\n<task-id>m1x</task-id>\n<summary>Monitor event: "the deploy"</summary>\n<event>step 2</event>\n</task-notification>'),
     reply(32, 'a-event'), stopSummary(33)]);
-  assert.equal(deriveStatus(s, {}, T0 + 40_000).status, 'running');
+  assert.equal(deriveStatus(s, {}, T0 + 40_000).status, 'background');
   applyEntry(s, noticePrompt(90, 'm1x', 'completed'));
   applyEntry(s, reply(92, 'a-done'));
   applyEntry(s, stopSummary(93));
@@ -252,9 +252,14 @@ test('one notice can end several tasks, as when the app reopens a session', () =
   assert.equal(deriveStatus(s, {}, T0 + 70_000).detail, 'In the background: Train the model');
 });
 
+test('a session with only a background task going sorts below one Claude is working in', () => {
+  const sorted = [{ status: 'background', since: T0 + 9000 }, { status: 'running', since: T0 }, { status: 'review', since: T0 }].sort(compareSessions);
+  assert.deepEqual(sorted.map((x) => x.status), ['review', 'running', 'background']);
+});
+
 test('a background task that never reports back stops counting after a few hours', () => {
   const s = run(inBackground);
-  assert.equal(deriveStatus(s, {}, T0 + 3 * 60 * 60 * 1000).status, 'running');
+  assert.equal(deriveStatus(s, {}, T0 + 3 * 60 * 60 * 1000).status, 'background');
   assert.equal(deriveStatus(s, {}, T0 + 5 * 60 * 60 * 1000).status, 'review');
 });
 
