@@ -26,12 +26,26 @@ class Settings {
     this.file = file;
     this.firstRun = !fs.existsSync(file);   // nothing saved yet: a new install
     this.data = { ...DEFAULTS };
+    let saved = {};
     try {
-      Object.assign(this.data, JSON.parse(fs.readFileSync(file, 'utf8')));
+      saved = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch {
       // first run or unreadable file: keep defaults
     }
+    // Settings an older pet kept but this one doesn't use are dropped, and the file saved without them.
+    let retired = false;
+    for (const [key, value] of Object.entries(saved ?? {})) {
+      if (Object.hasOwn(DEFAULTS, key)) this.data[key] = value;
+      else retired = true;
+    }
     this.timer = null;
+    if (retired) {
+      try {
+        this.save();
+      } catch {
+        // saved again with the next change
+      }
+    }
   }
 
   get(key) {
