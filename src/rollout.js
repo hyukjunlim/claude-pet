@@ -12,6 +12,10 @@ const SHELL_RE = /(^|[\\/])(bash|zsh|sh|pwsh|powershell)(\.exe)?$/i;
 const CALLS = new Set(['function_call', 'custom_tool_call', 'local_shell_call', 'web_search_call']);
 const CALL_OUTPUTS = new Set(['function_call_output', 'custom_tool_call_output']);
 const QUESTIONS = new Set(['exec_approval_request', 'apply_patch_approval_request', 'request_user_input', 'elicitation_request']);
+const ASK_TOOL = 'request_user_input';           // Plan mode's: the turn waits, and the tool's output is your answer
+const ASYNC_ASK_TOOL = 'request_user_input_async';   // the turn goes on, and your answer comes as a message
+const REPLY_OPEN = '<send_user_message_question_reply>';
+const REPLY_CLOSE = '</send_user_message_question_reply>';
 
 function createRolloutState() {
   return {
@@ -28,6 +32,7 @@ function createRolloutState() {
     aborted: false,
     error: null,
     question: null,
+    asks: new Map(),         // this turn's unanswered request_user_input_async questions: id -> { detail, at }
     endedTurns: new Set(),   // ids of recent turns that finished
     limits: null,            // the account's rate limits as of the newest reply (see rateLimitsOf)
   };
@@ -65,20 +70,26 @@ function applyRolloutEntry(state, entry) {
   if (work && !state.turnActive) {
     const turnId = turnIdOf(p);
     if (turnId ? !state.endedTurns.has(turnId) : CALLS.has(p.type) && at > state.turnEndedAt) {
-      Object.assign(state, { turnActive: true, turnStartedAt: at, step: '', aborted: false, error: null, question: null });
+      Object.assign(state, { turnActive: true, turnStartedAt: at, step: '', aborted: false, error: null, question: null, asks: new Map() });
     }
   }
   if (entry.type === 'response_item') {
     if (CALL_OUTPUTS.has(p.type)) state.question = null;
-    if (state.turnActive && CALLS.has(p.type)) state.step = describeCall(p);
+    if (state.turnActive && CALLS.has(p.type)) {
+      state.step = describeCall(p);
+      if (p.name === ASK_TOOL) state.question = { detail: describeQuestion(argsOf(p)), at };
+    }
     return;
   }
   if (entry.type !== 'event_msg') return;
   switch (p.type) {
     case 'task_started':
       Object.assign(state, {
-        turnActive: true, turnStartedAt: fromSeconds(p.started_at) || at, step: '', aborted: false, error: null, question: null,
+        turnActive: true, turnStartedAt: fromSeconds(p.started_at) || at, step: '', aborted: false, error: null, question: null, asks: new Map(),
       });
+      return;
+    case 'item_completed':
+      noteItem(state, p.item, at);
       return;
     case 'task_complete':
       markEnded(state, turnIdOf(p));
@@ -127,9 +138,7 @@ function describeCommand(cmd) {
   return oneLine(parts.join(' ') || 'Running a command', 60);
 }
 
-function describeCall(p) {
-  if (p.type === 'local_shell_call') return describeCommand(p.action?.command);
-  if (p.type === 'web_search_call') return 'Searching the web';
+function argsOf(p) {
   let args = p.arguments;
   if (typeof args === 'string') {
     try {
@@ -138,20 +147,65 @@ function describeCall(p) {
       args = {};
     }
   }
-  if (!args || typeof args !== 'object') args = {};
+  return args && typeof args === 'object' ? args : {};
+}
+
+function describeCall(p) {
+  if (p.type === 'local_shell_call') return describeCommand(p.action?.command);
+  if (p.type === 'web_search_call') return 'Searching the web';
+  const args = argsOf(p);
   const name = String(p.name || '');
   if (/^(shell|shell_command|exec_command|container\.exec)$/.test(name)) return describeCommand(args.command ?? args.cmd);
   if (name === 'apply_patch') return 'Editing files';
   if (name === 'update_plan') return 'Updating the plan';
   if (name === 'view_image') return 'Looking at an image';
+  if (name === ASK_TOOL || name === ASYNC_ASK_TOOL) return '';   // the question shows instead, until it's answered
   return oneLine(name.replace(/^mcp__/, '').replace(/__/g, ' ').replace(/_/g, ' ') || 'Working', 60);
 }
 
+// request_user_input's questions have a `question`, request_user_input_async's a `title`.
 function describeQuestion(p) {
   if (p.type === 'exec_approval_request') return oneLine(`Approve: ${describeCommand(p.command)}`, 90);
   if (p.type === 'apply_patch_approval_request') return 'Approve file changes';
-  const q = Array.isArray(p.questions) ? p.questions[0]?.question : p.message;
+  const q = Array.isArray(p.questions) ? p.questions[0]?.question ?? p.questions[0]?.title : p.message;
   return oneLine(q || 'Has a question for you', 90);
+}
+
+// request_user_input_async asks without holding up the turn. Its questions come in a message of
+// their own, and you answer them in a message of yours, which names each question the way the
+// Codex app does: ["request_user_input_async", <message id>, <index>].
+function noteItem(state, item, at) {
+  if (item?.type === 'AgentMessage' && Array.isArray(item.questions)) {
+    item.questions.forEach((q, i) => {
+      state.asks.set(JSON.stringify([ASYNC_ASK_TOOL, item.id, i]), { detail: describeQuestion({ questions: [q] }), at });
+    });
+  } else if (item?.type === 'UserMessage') {
+    for (const id of answeredQuestions(item.content)) state.asks.delete(id);
+  }
+}
+
+// A reply is the message's only text: the tags around a JSON list of { questionItemId, question, answer }.
+function answeredQuestions(content) {
+  if (!Array.isArray(content) || content.length !== 1 || typeof content[0]?.text !== 'string') return [];
+  const text = content[0].text.trim();
+  if (!text.startsWith(REPLY_OPEN) || !text.endsWith(REPLY_CLOSE)) return [];
+  try {
+    const replies = JSON.parse(text.slice(REPLY_OPEN.length, -REPLY_CLOSE.length));
+    return (Array.isArray(replies) ? replies : [replies]).map((r) => r?.questionItemId).filter((id) => typeof id === 'string');
+  } catch {
+    return [];
+  }
+}
+
+// What Codex is waiting on you for: a question that holds the turn up, or else the newest of the
+// turn's unanswered request_user_input_async questions. Like the app, those count only while
+// their turn is going.
+function pendingQuestion(state) {
+  if (state.question) return state.question;
+  if (!state.turnActive) return null;
+  let newest = null;
+  for (const q of state.asks.values()) if (!newest || q.at > newest.at) newest = q;   // of one message's, the first
+  return newest;
 }
 
 // Threads from the desktop app are "Ready" while the app lists them as unread. CLI threads,
@@ -161,8 +215,9 @@ function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 
   const clock = now + skew;
   const seen = dismissedAt ? dismissedAt + skew : 0;
   const local = (d) => (d.since ? { ...d, since: d.since - skew } : d);
-  if (state.question && !(seen >= state.question.at)) {   // dismissed, it shows as the running turn it is
-    return local({ status: 'waiting', detail: state.question.detail, since: state.question.at });
+  const question = pendingQuestion(state);
+  if (question && !(seen >= question.at)) {   // dismissed, it shows as the running turn it is
+    return local({ status: 'waiting', detail: question.detail, since: question.at });
   }
   if (state.turnActive) {
     if (clock - state.lastEventAt > STALE_RUNNING_MS) return local({ status: 'idle', detail: '', since: state.lastEventAt });

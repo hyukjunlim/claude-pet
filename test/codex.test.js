@@ -73,6 +73,50 @@ test('stopped turns go quiet, errors fail, and approvals wait for you', () => {
   assert.equal(rolloutStatus(ask, { now: T0 + 3000, dismissedAt: T0 + 2500 }).status, 'running');   // the × on it
 });
 
+test("Plan mode's questions wait for you until the answer comes back", () => {
+  const questions = [{ id: 'scope', header: 'Scope', question: 'Port the tests too?', options: [{ label: 'Yes' }, { label: 'No' }] }];
+  const ask = { timestamp: at(2), type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', arguments: JSON.stringify({ questions }), call_id: 'c1' } };
+  const s = rollout([meta(), started(1), ask]);
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 3000 }), { status: 'waiting', detail: 'Port the tests too?', since: T0 + 2000 });
+  applyRolloutEntry(s, { timestamp: at(30), type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: '{"answers":{}}' } });
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 31_000 }), { status: 'running', detail: 'Thinking', since: T0 + 1000 });
+});
+
+test('questions asked mid-turn wait for you until you answer them, while the turn goes on', () => {
+  const item = (s, it) => ({ timestamp: at(s), type: 'event_msg', payload: { type: 'item_completed', turn_id: 't1', item: it } });
+  const asked = (s, id, ...titles) => item(s, {
+    type: 'AgentMessage', id, phase: 'final_answer', delivery: 'async', questions: titles.map((title) => ({ title, options: ['A', 'B'] })),
+  });
+  const answer = (s, ...ids) => item(s, {
+    type: 'UserMessage',
+    id: `u${s}`,
+    content: [{
+      type: 'text',
+      text: `<send_user_message_question_reply>\n${JSON.stringify(ids.map((id) => ({ questionItemId: id, question: 'q', answer: 'A' })))}\n</send_user_message_question_reply>\n`,
+    }],
+  });
+  const qid = (id, i) => JSON.stringify(['request_user_input_async', id, i]);
+  const call = { timestamp: at(2), type: 'response_item', payload: { type: 'function_call', name: 'request_user_input_async', arguments: '{}', call_id: 'call_1' } };
+  const accepted = { timestamp: at(2), type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_1', output: '{"accepted":true}' } };
+
+  const s = rollout([meta(), started(1), call, asked(2, 'call_1', 'Which metric matters most?', 'Keep the old runs?'), accepted, shell(5, ['ls'])]);
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 6000 }), { status: 'waiting', detail: 'Which metric matters most?', since: T0 + 2000 });
+  assert.equal(rolloutStatus(s, { now: T0 + 6000, dismissedAt: T0 + 3000 }).detail, 'ls', 'the × shows the work going on');
+  applyRolloutEntry(s, answer(8, qid('call_1', 0)));
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 9000 }), { status: 'waiting', detail: 'Keep the old runs?', since: T0 + 2000 });
+  applyRolloutEntry(s, answer(9, qid('call_1', 1)));
+  assert.deepEqual(rolloutStatus(s, { now: T0 + 10_000 }), { status: 'running', detail: 'ls', since: T0 + 1000 });
+
+  // A message that isn't a reply answers nothing.
+  const other = rollout([meta(), started(1), asked(2, 'call_2', 'Which one?'), item(4, { type: 'UserMessage', id: 'u4', content: [{ type: 'text', text: 'also check the logs' }] })]);
+  assert.equal(rolloutStatus(other, { now: T0 + 5000 }).status, 'waiting');
+  // Like in the app, a question left unanswered stops counting once its turn ends.
+  const ended = rollout([meta({ originator: 'codex_cli_rs' }), started(1), asked(2, 'call_3', 'Which one?'), complete(9)]);
+  assert.equal(rolloutStatus(ended, { now: T0 + 10_000 }).status, 'review');
+  applyRolloutEntry(ended, started(20));
+  assert.equal(rolloutStatus(ended, { now: T0 + 21_000 }).status, 'running');
+});
+
 test('a turn is running even when the rollout is read from after its start', () => {
   const work = (s, turn, type = 'item_completed') => (type === 'token_usage_record'
     ? { timestamp: at(s), type, payload: { turn_id: turn } }

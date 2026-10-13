@@ -210,6 +210,10 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 - **Running, Needs you, Error:** read from each thread's history (its rollout file), the way
   Codex writes it. For threads on this PC (Codex's local host and the Codex CLI) that's
   `~/.codex/sessions`.
+- **Questions:** when Codex asks you something (the app's "Needs input"), the bubble says "Needs
+  you" with the question. That covers Plan mode's questions, which hold the turn up, and the ones
+  Codex asks while it keeps working, which stay up until you answer them or the turn ends, the
+  way the app counts them.
 - **SSH hosts:** a thread on an SSH host keeps its history on that host. For each host Codex
   works on, the pet keeps one SSH connection open, using your `~/.ssh/config`, and runs a
   small read-only Python watcher there. The watcher sends the new lines of rollouts written in
