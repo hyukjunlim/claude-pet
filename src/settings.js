@@ -16,6 +16,9 @@ const DEFAULTS = {
   claudeModWsl: {},          // distro -> whether the mod is set up there, as last seen
   showCodex: true,         // also show Codex threads, when Codex is installed
   codexOverSsh: true,      // and follow the ones running on Codex's SSH hosts
+  etlEnabled: false,       // watch SNU eTL for deadlines and notices (needs a token)
+  etlOnboardingOffered: false, // the pet has offered the optional eTL connection once
+  etlWorkspace: null,      // the eTL chat folder; null: Documents\etl-assistant
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
   seen: {},                // sessions you saw in the app with its window in front, and when

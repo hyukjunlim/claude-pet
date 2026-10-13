@@ -6,7 +6,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, screen, shell,
+  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage,
+  screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
 const { discoverPets, petRoots } = require('./pets');
@@ -19,6 +20,7 @@ const { LocalMod, bundledVersion, modFiles, runningWslDistros, sshInstaller, wsl
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForUpdate, startUpdate } = require('./updater');
+const { EtlFeature } = require('./etl/feature');
 
 const DEMO = process.argv.includes('--demo');
 const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
@@ -48,6 +50,7 @@ const MIN_THROW_SPEED = 450;
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
+const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;   // the only pages an eTL bubble opens
 const FOREGROUND_HANDOFF_MS = 1500;
 const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as claude-pet.old.log
 
@@ -58,6 +61,7 @@ protocol.registerSchemesAsPrivileged([
 let settings;
 let tracker;
 let codex = null;               // Codex threads, when Codex is installed and shown
+let etl = null;                 // SNU eTL notices, when turned on (see etl/feature.js)
 let win = null;
 let tray = null;
 let pets = [];
@@ -69,9 +73,10 @@ let shapeKey = '';              // the shape last set on the window, to skip set
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
-let sessions = [];              // Claude and Codex together, most urgent first
+let sessions = [];              // Claude, Codex and eTL together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
+let etlSessions = [];
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
@@ -413,7 +418,7 @@ function sendSessions() {
 }
 
 function mergeSessions() {
-  sessions = [...claudeSessions, ...codexSessions].sort(compareSessions);
+  sessions = [...claudeSessions, ...codexSessions, ...etlSessions].sort(compareSessions);
   sendSessions();
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
 }
@@ -459,7 +464,23 @@ function stopCodex() {
   setUsage({ codex: null });
 }
 
+function startEtl() {
+  etl = new EtlFeature({
+    electron: { app, dialog, powerMonitor, safeStorage, shell },
+    settings,
+    appRoot: APP_ROOT,
+    log,
+    codexInstalled,
+  });
+  etl.on('change', (list) => {
+    etlSessions = list;
+    mergeSessions();
+  });
+  etl.start();
+}
+
 function trackerFor(id) {
+  if (String(id).startsWith('etl:')) return etl;
   return String(id).startsWith('codex:') ? codex : tracker;
 }
 
@@ -638,6 +659,33 @@ async function offerLiveUsage() {
   });
 }
 
+// A one-time, optional invitation to connect SNU eTL. The tray menu remains available if they
+// skip, and setEnabled() reuses the normal token registration and verification flow.
+async function offerEtlConnection() {
+  if (DEMO || !etl || settings.get('etlOnboardingOffered')) return;
+  if (etl.enabled) {
+    settings.set({ etlOnboardingOffered: true });
+    return;
+  }
+
+  const answer = await dialog.showMessageBox({
+    type: 'question',
+    title: 'Claude Pet',
+    message: 'eTL에 연결할까요?',
+    detail: [
+      '서울대 eTL을 쓰는 경우 과제 마감과 공지를 펫 알림으로 받을 수 있습니다.',
+      '연결을 누르면 토큰 입력 창이 열립니다. eTL의 계정 → 설정 → 새 액세스 토큰에서 발급해 붙여 넣으면 됩니다.',
+      '토큰은 이 컴퓨터에 암호화해 저장됩니다.',
+      '지금 건너뛰어도 트레이 메뉴의 eTL에서 언제든 연결할 수 있습니다.',
+    ].join('\n'),
+    buttons: ['eTL 연결', '나중에'],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  settings.set({ etlOnboardingOffered: true });
+  if (answer.response === 0) await etl.setEnabled(true);
+}
+
 // After the pet itself updates: the copies of the mod it set up get its newer version. WSL runs
 // this PC's copy.
 function updateLocalMod() {
@@ -675,7 +723,7 @@ async function checkWslMods() {
 function trayTooltip() {
   if (!sessions.length) return 'Claude Pet: all quiet';
   const top = sessions[0];
-  return `Claude Pet: ${STATUS_LABEL[top.status]} · ${top.title}`.slice(0, 120);
+  return `Claude Pet: ${top.badge || STATUS_LABEL[top.status]} · ${top.title}`.slice(0, 120);
 }
 
 // Claude's claude://code/continue?session=… links sit behind a server-side flag and quietly
@@ -684,6 +732,7 @@ function trayTooltip() {
 // sessions that are still in the desktop index get a link, so resume never imports a copy.
 function sessionUrl(s) {
   if (s?.kind === 'codex') return s.url || null;   // codex://threads/<id>?hostId=…
+  if (s?.kind === 'etl') return ETL_LINK.test(s.url || '') ? s.url : null;
   const m = DESKTOP_SESSION_RE.exec(s?.hostSessionId || '');
   if (!m || !tracker.desktop?.has(s.hostSessionId)) return null;
   return `claude://resume?session=${m[1]}`;
@@ -880,10 +929,10 @@ function applyLoginFlag(argv) {
 function buildMenu() {
   const items = [];
   items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
-  const tags = { cli: ' (terminal)', codex: ' (Codex)' };
+  const tags = { cli: ' (terminal)', codex: ' (Codex)', etl: ' (eTL)' };
   for (const s of sessions.slice(0, 8)) {
     items.push({
-      label: `${STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tags[s.kind] || ''}`,
+      label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tags[s.kind] || ''}`,
       enabled: Boolean(sessionUrl(s)),
       click: () => openSession(s.id),
     });
@@ -938,6 +987,7 @@ function buildMenu() {
       },
     });
   }
+  if (etl) items.push(etl.menu());
   items.push({
     label: 'Pet',
     submenu: [
@@ -1188,12 +1238,16 @@ if (!app.requestSingleInstanceLock()) {
       claudeUsage.start();
       // once the desktop index (for WSL distros) and the SSH connections have been read
       setTimeout(() => {
-        offerLiveUsage().catch((err) => log('mod offer:', err.message));
+        (async () => {
+          await offerLiveUsage().catch((err) => log('mod offer:', err.message));
+          await offerEtlConnection().catch((err) => log('eTL offer:', err.message));
+        })();
         checkWslMods().catch((err) => log('mod check:', err.message));
       }, 8000);
     }
     tracker.start();
     startCodex();
+    if (!DEMO) startEtl();
     usageTimer = setInterval(sendUsage, 60_000);
 
     const shortcut = settings.get('shortcut');
@@ -1236,6 +1290,7 @@ if (!app.requestSingleInstanceLock()) {
     stopMomentum();
     tracker?.stop();
     codex?.stop();
+    etl?.stop();
     claudeUsage?.stop();
     if (settings) settings.save();
   });

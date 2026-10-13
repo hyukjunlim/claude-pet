@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node etl.js *)",
+      "Bash(node ./etl.js *)",
+      "PowerShell(node etl.js *)",
+      "PowerShell(node ./etl.js *)",
+      "PowerShell(node .\\etl.js *)",
+      "Read(/todos.md)",
+      "Edit(/todos.md)"
+    ],
+    "deny": [
+      "Edit(/etl.js)",
+      "Edit(/AGENTS.md)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/.etl-workspace-version)",
+      "Edit(/.etl-bridge/**)",
+      "Edit(/.claude/**)",
+      "Edit(/.agents/**)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}

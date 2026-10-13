@@ -1,0 +1,127 @@
+:root {
+  color-scheme: light dark;
+  --surface: #fffdfa;
+  --field: #ffffff;
+  --text: #1f1e1d;
+  --muted: #6f6a64;
+  --border: rgba(31, 30, 29, 0.18);
+  --accent: #c96442;
+  --accent-text: #ffffff;
+  --link: #a8512f;
+  --failed: #d93f3f;
+  --review: #2e8b57;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #282623;
+    --field: #1f1e1c;
+    --text: #f3efe9;
+    --muted: #b2aaa1;
+    --border: rgba(255, 255, 255, 0.18);
+    --accent: #e08a68;
+    --accent-text: #1f1e1d;
+    --link: #f0a585;
+    --failed: #f16d6d;
+    --review: #5cc28b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", system-ui, -apple-system, sans-serif;
+}
+
+form {
+  padding: 18px 20px 16px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 8px;
+}
+
+.guide {
+  color: var(--muted);
+}
+
+a {
+  color: var(--link);
+}
+
+label {
+  display: block;
+  margin: 12px 0 4px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+#status {
+  min-height: 1.5em;
+  margin: 8px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#status.error {
+  color: var(--failed);
+}
+
+#status.success {
+  color: var(--review);
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button {
+  min-width: 76px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
