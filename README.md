@@ -324,7 +324,11 @@ After that, a bubble appears for:
   (online submissions only). It shows the time left, kept current, and stays until the deadline
   or until you submit.
 - **마감 변경**, **새 과제**, **성적** (a new or changed grade) and **새 공지** (announcements of the
-  last 14 days).
+  last 14 days; one that mentions a makeup or cancelled class says **보강 공지** or **휴강 공지**).
+- **Today's classes:** from 6:00, one bubble per class (start time, course, room and how soon it
+  starts, kept current), each until that class ends. The class under way or next stands out; 보강
+  and 휴강 get their own badge. × closes one for the day; tray menu → *eTL* → *오늘 수업 알림* turns
+  them off.
 - **토큰 만료:** once, when eTL stops accepting the token.
 
 Clicking a bubble opens that eTL page in your browser; × dismisses it for good. Other bubbles go
@@ -332,7 +336,8 @@ away after 3 days, and at most 30 are kept. Changes made while the pet wasn't ru
 the next check.
 
 **Chat folder.** Turning eTL on also creates a chat folder, `Documents\etl-assistant` by default
-(*채팅 폴더 위치 변경…* moves it; your `todos.md` is copied and the old folder is left alone). Open
+(*채팅 폴더 위치 변경…* moves it; your `todos.md` and `timetable.md` are copied and the old folder is left
+alone). Open
 it in the Claude desktop app's Code tab or in Codex, and ask things like "이번 주 마감 알려줘".
 With Codex installed, turning eTL on opens a new chat there in this folder, and *Codex에서 eTL
 비서 열기* does it again later. *eTL 비서 말풍선 보이기* (offered when you first save a token) keeps
@@ -343,6 +348,21 @@ command the AI runs to ask the pet. The AI never sees the token: `etl.js` sends 
 the running pet over a local named pipe (`~/.claude-pet/etl.sock` on macOS and Linux), the pet
 asks eTL, and only the answer goes back. With the pet closed or eTL off, the AI says so. When
 the pet updates, the folder's files are updated too, except `todos.md`.
+
+**Anything else on eTL.** Besides its ready-made lookups, `etl.js api "/api/v1/…"` asks the pet for
+any Canvas API path with GET, so the chat can answer about modules, pages, discussions, quizzes,
+the calendar, the inbox and the rest. The `etl-api` skill lists the paths to try. Signed file links
+and calendar-feed addresses are masked in the answer, paths about access tokens are refused, and
+opening a conversation doesn't mark it read.
+
+**Timetable.** eTL has no class times, but each syllabus links to the course in SNU's public course
+catalog (`sugang.snu.ac.kr`), which has them. The pet looks each of this term's courses up there
+(no login, and the eTL token is never sent there), keeps the weekly timetable for a day, and adds
+the day's eTL calendar events. Makeup and cancelled classes go in `timetable.md` in the chat folder,
+one per line (`- 2026-10-20 보강 18:00~19:15 | 전기에너지변환 | 301-103`,
+`- 2026-10-21 휴강 | 제어공학개론`); the `/timetable` skill offers to add the ones it finds in
+announcements, and the class bubbles pick up changes within a minute. `etl.js timetable`
+answers for a date or the whole week.
 
 **Course materials, on request.** Ask the chat to read or summarize a particular lecture file.
 The AI lists that course's files with `node etl.js files --course <course ID>`, then requests just
@@ -366,7 +386,10 @@ lets the chat look up that course, including its materials.
   data folder. If encryption isn't available, the pet refuses to save it. It never appears in
   the log, the bubbles, the chat folder or the answers.
 - The pet only reads from eTL (GET requests): it doesn't submit assignments or post anything.
-- The pipe takes a fixed list of read-only questions, each checked, and nothing else.
+- The pipe takes a fixed list of questions, each checked, and nothing else. One of them, `api`,
+  reads any `/api/v1/` path, so the chat can see whatever the token can read (your inbox and
+  course rosters included); the AI is told to treat it as data and keep others' details to what
+  you asked.
 - Text from eTL (titles, announcements, descriptions) is shown as plain text, and every answer
   to the AI is marked as outside data, not instructions.
 - Downloads follow HTTPS redirects only to eTL and `kr.object.gov-ncloudstorage.com`, the
@@ -472,7 +495,7 @@ src/transcript.js   Transcript entries → running / background / waiting / revi
 src/usage.js        Weekly limits: Claude's figures (the mod's, the app's), Codex's rate limits
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
-src/etl/            SNU eTL: API client, notices, token store, query bridge, chat folder
+src/etl/            SNU eTL: API client, notices, timetable, token store, query bridge, chat folder
 tools/make_clay.py  Generates Clay, the built-in pet
 claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
 etl-workspace/      What the eTL chat folder is made from: instructions, skills, etl.js

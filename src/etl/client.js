@@ -123,13 +123,17 @@ function createClient({ token, fetch = globalThis.fetch, base = BASE, timeoutMs 
     return (await request(urlOf(pathAndQuery))).data;
   }
 
-  // Every page of a list, following Link rel="next" up to MAX_PAGES pages.
-  async function getAll(pathAndQuery) {
+  // Every page of a list, following Link rel="next" up to MAX_PAGES pages. With `orObject`, an
+  // answer that isn't a list is returned as it is instead of failing (the `api` command).
+  async function getAll(pathAndQuery, { orObject = false } = {}) {
     const out = [];
     let url = urlOf(pathAndQuery);
     for (let page = 0; url && page < MAX_PAGES; page++) {
       const { data, link, path, status } = await request(url);
-      if (!Array.isArray(data)) throw new EtlError(`eTL 응답이 목록이 아닙니다: ${path}`, { status, path });
+      if (!Array.isArray(data)) {
+        if (orObject && page === 0) return data;
+        throw new EtlError(`eTL 응답이 목록이 아닙니다: ${path}`, { status, path });
+      }
       out.push(...data);
       const next = nextLink(link);
       const current = url;

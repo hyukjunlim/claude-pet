@@ -103,7 +103,37 @@ test('the default channel is a per-user named pipe on Windows and a socket under
 
 test('the whitelist holds exactly the read-only commands from the plan', () => {
   assert.deepEqual(Object.keys(COMMANDS).sort(),
-    ['announcements', 'assignment', 'assignments', 'briefing', 'check', 'courses', 'download', 'files', 'grades']);
+    ['announcements', 'api', 'assignment', 'assignments', 'briefing', 'check', 'courses', 'download', 'files', 'grades', 'timetable']);
+});
+
+test('api takes any /api/v1/ path with a query, and nothing that could leave the API', () => {
+  for (const p of [
+    '/api/v1/users/self/profile',
+    '/api/v1/courses/1/modules?include[]=items&per_page=50',
+    '/api/v1/calendar_events?type=event&start_date=2026-10-14&context_codes[]=course_1',
+    '/api/v1/courses/1/pages/week-1%20notes',
+  ]) {
+    assert.deepEqual(validateRequest({ cmd: 'api', args: { path: p } }), { cmd: 'api', args: { path: p, all: false } }, p);
+  }
+  assert.deepEqual(validateRequest({ cmd: 'api', args: { path: '/api/v1/courses', all: true } }).args.all, true);
+  for (const p of [
+    'https://evil.example/api/v1/x', '//evil.example/api/v1/x', '/api/v2/x', '/login', 'api/v1/x',
+    '/api/v1/../../login', '/api/v1/%2e%2e/x', '/api/v1/x\\y', '/api/v1/x#y', '/api/v1//x', '/api/v1/a b',
+    '/api/v1/users/self/tokens', '/api/v1/users/1/tokens/5', '/api/v1/x?' + 'a'.repeat(600), 42, null,
+  ]) {
+    assert.throws(() => validateRequest({ cmd: 'api', args: { path: p } }), /api 명령의 path 값이 올바르지 않습니다/, String(p));
+  }
+  assert.throws(() => validateRequest({ cmd: 'api', args: {} }), /path 인자가 필요/);
+  assert.throws(() => validateRequest({ cmd: 'api', args: { path: '/api/v1/x', all: 'yes' } }), /all/);
+});
+
+test('timetable takes an optional real date and a week flag', () => {
+  assert.deepEqual(validateRequest({ cmd: 'timetable' }), { cmd: 'timetable', args: { week: false } });
+  assert.deepEqual(validateRequest({ cmd: 'timetable', args: { date: '2026-10-14', week: true } }).args,
+    { date: '2026-10-14', week: true });
+  for (const date of ['2026-13-01', '2026-02-30', '10/14', 20261014]) {
+    assert.throws(() => validateRequest({ cmd: 'timetable', args: { date } }), /date/, String(date));
+  }
 });
 
 test('valid requests pass, with the same defaults as etl.py filled in', () => {
@@ -350,6 +380,33 @@ test('the CLI turns flags into a request and prints the answer, Korean intact', 
       ['announcements', { days: 3, course: 5 }],
       ['grades', {}],
     ]);
+  });
+});
+
+test('the CLI sends api paths as given, undoing Git Bash path conversion, with --all', async () => {
+  const { calls, handlers } = fakeHandlers({ api: async (args) => { calls.push({ cmd: 'api', args }); return { path: args.path, data: [] }; } });
+  await withBridge({ handlers }, async (bridge) => {
+    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    assert.equal((await runCli(['api', '/api/v1/courses/1/modules?include[]=items'], env)).code, 0);
+    assert.equal((await runCli(['api', 'C:/Program Files/Git/api/v1/users/self', '--all'], env)).code, 0);
+    assert.equal((await runCli(['api', 'api/v1/planner/items?start_date=2026-10-14'], env)).code, 0);
+    assert.equal((await runCli(['api', '/api/v1/a', '/api/v1/b'], env)).code, 2);
+    assert.deepEqual(calls.map((c) => c.args), [
+      { path: '/api/v1/courses/1/modules?include[]=items', all: false },
+      { path: '/api/v1/users/self', all: true },
+      { path: '/api/v1/planner/items?start_date=2026-10-14', all: false },
+    ]);
+  });
+});
+
+test('the CLI asks for a day timetable, a dated one, and the week', async () => {
+  const { calls, handlers } = fakeHandlers({ timetable: async (args) => { calls.push({ cmd: 'timetable', args }); return { classes: [] }; } });
+  await withBridge({ handlers }, async (bridge) => {
+    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    assert.equal((await runCli(['timetable'], env)).code, 0);
+    assert.equal((await runCli(['timetable', '--date', '2026-10-16', '--week'], env)).code, 0);
+    assert.equal((await runCli(['timetable', '--date', 'tomorrow'], env)).code, 1);
+    assert.deepEqual(calls.map((c) => c.args), [{ week: false }, { date: '2026-10-16', week: true }]);
   });
 });
 

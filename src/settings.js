@@ -21,6 +21,7 @@ const DEFAULTS = {
   etlWorkspace: null,      // the eTL chat folder; null: Documents\etl-assistant
   etlAssistantBubble: false, // keep an "eTL 비서" bubble that opens the eTL chat
   etlAssistantAsked: false,  // asked once, when the first token was saved
+  etlTimetableBubble: true,  // a bubble for each of the day's classes (while eTL is on)
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
   seen: {},                // sessions you saw in the app with its window in front, and when

@@ -8,6 +8,8 @@
 //   - Every template file is copied as is, except `todos.md.template`.
 //   - `todos.md` is the user's own file. It is created from `todos.md.template` only when absent
 //     and is never overwritten, not even when the template changes.
+//   - `timetable.md` (the user's 보강·휴강 list, read by timetable.js) is the user's too: the AI
+//     creates it when there's something to write, and the template never places one.
 //   - `.etl-workspace-version` records a hash of the template. When the pet is updated and the
 //     hash differs, every template file is rewritten. Between updates the user's copies are left
 //     alone, but a template file that has gone missing is put back.
@@ -24,6 +26,7 @@ const TEMPLATE_DIR = path.join(__dirname, '..', '..', 'etl-workspace');
 const VERSION_FILE = '.etl-workspace-version';
 const TODOS_FILE = 'todos.md';
 const TODOS_TEMPLATE = 'todos.md.template';
+const USER_FILES = [TODOS_FILE, 'timetable.md'];   // carried along when the folder moves
 const DEFAULT_TODOS = '# 할 일\n\n## 진행 중\n\n## 완료\n';   // if the template lacks its own
 
 function defaultWorkspaceDir() {
@@ -45,10 +48,10 @@ function templateFiles(templateDir) {
   return out.sort();
 }
 
-// Files the template must never place: the user's todo list (the template dir shouldn't hold
-// one, but if it did it would clobber theirs) and the version stamp.
+// Files the template must never place: the user's own files (the template dir shouldn't hold
+// them, but if it did it would clobber theirs) and the version stamp.
 function isSpecial(rel) {
-  return rel === TODOS_TEMPLATE || rel === TODOS_FILE || rel === VERSION_FILE;
+  return rel === TODOS_TEMPLATE || USER_FILES.includes(rel) || rel === VERSION_FILE;
 }
 
 function templateVersion(templateDir, files = templateFiles(templateDir)) {
@@ -130,26 +133,27 @@ function ensureWorkspace(dir, { templateDir = TEMPLATE_DIR } = {}) {
   return { dir, created, updated: !created && wrote };
 }
 
-// Points the chat folder at `toDir`: sets it up there and brings the user's `todos.md` along
-// when `toDir` has none. `fromDir` is never changed or deleted, since the user may keep other
-// files there. Returns ensureWorkspace's result plus `copiedTodos`.
+// Points the chat folder at `toDir`: sets it up there and brings the user's `todos.md` and
+// `timetable.md` along when `toDir` has none. `fromDir` is never changed or deleted, since the
+// user may keep other files there. Returns ensureWorkspace's result plus `copiedTodos`.
 function moveWorkspace(fromDir, toDir, options = {}) {
   toDir = path.resolve(toDir);
-  let copiedTodos = false;
+  const copied = new Set();
   if (fromDir && !samePath(fromDir, toDir)) {
-    const from = path.join(path.resolve(fromDir), TODOS_FILE);
-    const to = path.join(toDir, TODOS_FILE);
-    if (fs.existsSync(from) && !fs.existsSync(to)) {
+    for (const name of USER_FILES) {
+      const from = path.join(path.resolve(fromDir), name);
+      const to = path.join(toDir, name);
+      if (!fs.existsSync(from) || fs.existsSync(to)) continue;
       fs.mkdirSync(toDir, { recursive: true });
       try {
         fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL);
-        copiedTodos = true;
+        copied.add(name);
       } catch (err) {
         if (err.code !== 'EEXIST') throw err;
       }
     }
   }
-  return { ...ensureWorkspace(toDir, options), copiedTodos };
+  return { ...ensureWorkspace(toDir, options), copiedTodos: copied.has(TODOS_FILE) };
 }
 
 // The path with its existing part resolved through symlinks/junctions (and, on Windows, to its

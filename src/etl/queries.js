@@ -21,8 +21,47 @@ const MAX_ANNOUNCEMENT_DAYS = 60;
 const BRIEFING_DAYS = 7;
 const BRIEFING_ANNOUNCEMENT_DAYS = 3;
 
+const API_MAX_CHARS = 1_500_000;   // an `api` answer, as JSON
+const SIGNED_RE = /([?&](?:verifier|sf_verifier|download_frd_token)=)[^&#"\s]+/gi;
+const FEED_RE = /(\/feeds\/[a-z_]+\/)[^\s"?#]+/gi;   // calendar and other feeds open with their own secret
+
 // The KST calendar date of a moment, 'YYYY-MM-DD'.
 const kstDate = (ms) => formatKst(ms).slice(0, 10);
+
+// Signed links (a file's `url` carries a verifier that opens it without the token, a feed's path
+// a secret of its own) lose their signature before an `api` answer goes to the AI, as files.js
+// never hands them out either.
+function unsign(value) {
+  if (typeof value === 'string') return value.replace(SIGNED_RE, '$1***').replace(FEED_RE, '$1***');
+  if (Array.isArray(value)) return value.map(unsign);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, unsign(v)]));
+  }
+  return value;
+}
+
+// Reading a conversation marks it read unless told otherwise; looking shouldn't change eTL.
+function readOnlyPath(p) {
+  if (!/^\/api\/v1\/conversations\/\d+(\?|$)/.test(p) || /[?&]auto_mark_as_read=/.test(p)) return p;
+  return `${p}${p.includes('?') ? '&' : '?'}auto_mark_as_read=false`;
+}
+
+// An `api` answer within API_MAX_CHARS: a list keeps as many items as fit and says so.
+function capAnswer(path, data) {
+  const size = (v) => JSON.stringify(v).length;
+  if (size(data) <= API_MAX_CHARS) return { path, data };
+  if (!Array.isArray(data)) {
+    throw new Error('응답이 너무 큽니다. include[]를 줄이거나 더 좁은 경로로 다시 조회해 주세요.');
+  }
+  let lo = 0;
+  let hi = data.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (size(data.slice(0, mid)) <= API_MAX_CHARS) lo = mid;
+    else hi = mid - 1;
+  }
+  return { path, data: data.slice(0, lo), truncated: { shown: lo, total: data.length } };
+}
 
 function unknownCourse(course) {
   return new Error(`수강 중인 과목에서 ID ${course}를 찾을 수 없습니다. courses 명령으로 과목 ID를 확인해 주세요.`);
@@ -220,6 +259,14 @@ function createQueries({ client, now = Date.now } = {}) {
       };
       if (errors.length) result.errors = errors;
       return result;
+    },
+
+    // Any Canvas API path, read with GET, as eTL returns it (signed links aside). With `all`,
+    // a list's later pages are followed too.
+    async api({ path, all = false } = {}) {
+      const p = readOnlyPath(path);
+      const data = all ? await client.getAll(p, { orObject: true }) : await client.get(p);
+      return capAnswer(p, unsign(data));
     },
   };
 }

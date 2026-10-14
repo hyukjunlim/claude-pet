@@ -297,3 +297,14 @@ test('assignmentsByCourse of no courses is empty', async () => {
   assert.deepEqual(await api.assignmentsByCourse([]), { results: [], errors: [] });
   assert.equal(calls.length, 0);
 });
+
+test('getAll with orObject hands back an object answer as it is, and still pages lists', async () => {
+  const { api } = client({
+    '/api/v1/users/self/profile': { body: { id: 1 } },
+    '/api/v1/x': { body: [1, 2], link: '<https://myetl.snu.ac.kr/api/v1/x?page=2>; rel="next"' },
+    '/api/v1/x?page=2': { body: [3] },
+  });
+  assert.deepEqual(await api.getAll('/api/v1/users/self/profile', { orObject: true }), { id: 1 });
+  assert.deepEqual(await api.getAll('/api/v1/x', { orObject: true }), [1, 2, 3]);
+  await assert.rejects(api.getAll('/api/v1/users/self/profile'), /목록이 아닙니다/);
+});

@@ -147,6 +147,7 @@ body {
 .pill.status-failed { --c: var(--failed); }
 .pill.status-review { --c: var(--review); }
 .pill.status-background { --c: var(--background); }
+.pill.status-idle { --c: var(--background); }   /* the day's later classes (etl/timetable.js) */
 
 .icon {
   flex: none;

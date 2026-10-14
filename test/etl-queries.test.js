@@ -340,3 +340,69 @@ test('grades for one course, with a failed course in errors', async () => {
   assert.deepEqual(out.errors, ['알고리즘: eTL 요청 실패(403): /api/v1/courses/101/assignments']);
   assert.deepEqual(out.courses[0].graded_assignments, []);
 });
+
+// ---- api ------------------------------------------------------------------------------------
+
+function apiClient(answer) {
+  const calls = [];
+  const reply = (p) => (typeof answer === 'function' ? answer(p) : answer);
+  return {
+    calls,
+    async get(p) { calls.push(['get', p]); return reply(p); },
+    async getAll(p, opts) { calls.push(['getAll', p, opts]); return reply(p); },
+  };
+}
+
+test('api answers with what eTL returned, following pages only when asked', async () => {
+  const client = apiClient({ id: 7, name: '홍길동' });
+  const q = createQueries({ client, now: () => NOW });
+  assert.deepEqual(await q.api({ path: '/api/v1/users/self/profile' }),
+    { path: '/api/v1/users/self/profile', data: { id: 7, name: '홍길동' } });
+  await q.api({ path: '/api/v1/courses/1/modules', all: true });
+  assert.deepEqual(client.calls, [
+    ['get', '/api/v1/users/self/profile'],
+    ['getAll', '/api/v1/courses/1/modules', { orObject: true }],
+  ]);
+});
+
+test('api strips the secrets out of signed file links and feed addresses', async () => {
+  const q = createQueries({
+    client: apiClient({
+      url: 'https://myetl.snu.ac.kr/files/9/download?download_frd=1&verifier=abc123',
+      nested: [{ preview_url: '/courses/1/files/9/preview?verifier=zzz&x=1' }],
+      calendar: { ics: 'https://myetl.snu.ac.kr/feeds/calendars/user_SECRETfeed.ics' },
+    }),
+    now: () => NOW,
+  });
+  const { data } = await q.api({ path: '/api/v1/courses/1/files' });
+  assert.equal(data.url, 'https://myetl.snu.ac.kr/files/9/download?download_frd=1&verifier=***');
+  assert.equal(data.nested[0].preview_url, '/courses/1/files/9/preview?verifier=***&x=1');
+  assert.equal(data.calendar.ics, 'https://myetl.snu.ac.kr/feeds/calendars/***');
+  assert.ok(!JSON.stringify(data).includes('abc123') && !JSON.stringify(data).includes('SECRET'));
+});
+
+test('reading a conversation through api leaves it unread', async () => {
+  const client = apiClient({ id: 5 });
+  const q = createQueries({ client, now: () => NOW });
+  await q.api({ path: '/api/v1/conversations/5' });
+  await q.api({ path: '/api/v1/conversations/6?include[]=participant_avatars' });
+  await q.api({ path: '/api/v1/conversations/7?auto_mark_as_read=true' });
+  await q.api({ path: '/api/v1/conversations?scope=unread' });
+  assert.deepEqual(client.calls.map((c) => c[1]), [
+    '/api/v1/conversations/5?auto_mark_as_read=false',
+    '/api/v1/conversations/6?include[]=participant_avatars&auto_mark_as_read=false',
+    '/api/v1/conversations/7?auto_mark_as_read=true',
+    '/api/v1/conversations?scope=unread',
+  ]);
+});
+
+test('a huge api list is cut to what fits, and says so; a huge object is an error', async () => {
+  const big = Array.from({ length: 400 }, (_, i) => ({ id: i, body: 'x'.repeat(10000) }));
+  const q = createQueries({ client: apiClient(big), now: () => NOW });
+  const r = await q.api({ path: '/api/v1/courses/1/pages', all: true });
+  assert.ok(r.data.length > 0 && r.data.length < 400);
+  assert.deepEqual(r.truncated, { shown: r.data.length, total: 400 });
+  assert.ok(JSON.stringify(r.data).length <= 1_500_000);
+  const q2 = createQueries({ client: apiClient({ body: 'x'.repeat(2_000_000) }), now: () => NOW });
+  await assert.rejects(q2.api({ path: '/api/v1/courses/1' }), /너무 큽니다/);
+});
