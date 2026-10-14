@@ -157,6 +157,7 @@ test('each class gets its own bubble from 6:00 until it ends; the current or nex
   assert.equal(morning[0].url, 'https://myetl.snu.ac.kr/courses/11');
   assert.equal(morning[0].expiresAt, kst('2026-10-14T12:15:00'));
   assert.equal(morning[0].since, undefined, 'no "5m ago" on a class');
+  assert.ok(morning.every((it) => it.keepOnOpen), 'opening a class keeps its bubble');
   assert.equal(new Set(morning.map((it) => it.id)).size, 4);
 
   const during = timetableItems(today, kst('2026-10-14T11:30:00'));

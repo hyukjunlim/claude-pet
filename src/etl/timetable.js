@@ -400,6 +400,7 @@ function timetableItems(today, nowMs, dismissed = []) {
       project: clip(project, PROJECT_LIMIT),
       detail: clip(`${c.start}~${c.end} ${c.course}${c.room ? ` · ${c.room}` : ''}${c.note ? ` · ${c.note}` : ''}`, 300),
       url: c.course_id ? `${ETL_URL}courses/${c.course_id}` : ETL_URL,
+      keepOnOpen: true,              // clicking opens the course; only × closes it (main.js)
       expiresAt: atKst(date, c.end),
     }))
     .filter((it) => !dismissed.includes(it.id));
