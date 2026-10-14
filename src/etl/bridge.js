@@ -50,7 +50,41 @@ const oneOf = (values, extra = {}) => ({
   ...extra,
 });
 
-// The whitelist: command -> { argument -> rule }. Nothing else gets through.
+function isDateString(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+const dateArg = (extra = {}) => ({ test: isDateString, rule: 'YYYY-MM-DD 형식의 날짜여야 합니다.', ...extra });
+
+const flag = (extra = {}) => ({ test: (v) => typeof v === 'boolean', rule: 'true 또는 false여야 합니다.', ...extra });
+
+// A Canvas API path for the `api` command: /api/v1/… with an optional query, nothing that could
+// leave the API (no scheme, host, '..', '//', backslash or fragment), printable ASCII only. Paths
+// about access tokens are refused outright, and so is /api/v1/login/…: its session_token answers
+// with a link that signs in to eTL as the user.
+const API_PATH_RE = /^\/api\/v1\/[\x21-\x7e]*$/;
+const MAX_API_PATH = 600;
+function isApiPath(v) {
+  if (typeof v !== 'string' || v.length > MAX_API_PATH || !API_PATH_RE.test(v)) return false;
+  const [pathPart] = v.split('?');
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathPart);
+  } catch {
+    return false;
+  }
+  if (/[\\#]/.test(v) || /\/\/|(^|\/)\.\.?(\/|$)/.test(decoded)) return false;
+  return !/(^|\/)tokens?(\/|$)/i.test(decoded) && !/^\/api\/v1\/login(\/|$)/i.test(decoded);
+}
+const apiPath = (extra = {}) => ({
+  test: isApiPath,
+  rule: '/api/v1/로 시작하는 eTL API 경로여야 합니다(쿼리 가능, 600자 이내, 토큰·로그인 관련 경로 제외).',
+  ...extra,
+});
+
+// The whitelist: command -> { argument -> rule }. Nothing else gets through. `api` reads any
+// /api/v1/ path with GET (the client never sends anything else); the rest are the fixed lookups.
 const COMMANDS = {
   check: {},
   briefing: {},
@@ -61,6 +95,8 @@ const COMMANDS = {
   grades: { course: positiveInt() },
   files: { course: positiveInt({ required: true }) },
   download: { course: positiveInt({ required: true }), id: positiveInt({ required: true }) },
+  timetable: { date: dateArg(), week: flag({ default: false }) },
+  api: { path: apiPath({ required: true }), all: flag({ default: false }) },
 };
 
 // Commands that may run longer than the usual timeout: a download of up to 100MB.

@@ -8,7 +8,8 @@
 //     and hands its notices to the pet as bubbles (kind 'etl');
 //   - the query bridge (bridge.js), so the AI in the chat folder can ask the pet for eTL data
 //     without ever seeing the token;
-//   - the chat folder (workspace.js), created or brought up to date from etl-workspace/.
+//   - the chat folder (workspace.js), created or brought up to date from etl-workspace/;
+//   - the TimetableNotifier (timetable.js), with a bubble for each of the day's classes.
 //
 // Course files are downloaded only when the AI asks with the `download` command (files.js), never
 // by the tracker or on turning eTL on.
@@ -27,10 +28,13 @@ const { createQueries } = require('./queries');
 const { createFiles } = require('./files');
 const { defaultWorkspaceDir, ensureWorkspace, moveWorkspace, isInside } = require('./workspace');
 const { ASSISTANT_ID, assistantItem, assistantLinks } = require('./assistant');
+const { TimetableNotifier, createTimetable, kstParts } = require('./timetable');
+const { formatKst } = require('./model');
 
 const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 eTL에서 토큰을 등록해 주세요.';
 const CODEX_PROMPT = '오늘 브리핑해 줘';
-const FILE_COMMANDS = new Set(['files', 'download']);   // answered by files.js, the rest by queries.js
+const FILE_COMMANDS = new Set(['files', 'download']);   // answered by files.js, timetable by
+                                                        // timetable.js, the rest by queries.js
 const ASSISTANT_LINK_GAP_MS = 1200;   // between the eTL 비서 bubble's links (see openAssistant)
 
 class EtlFeature extends EventEmitter {
@@ -48,11 +52,17 @@ class EtlFeature extends EventEmitter {
     this.codexInstalled = codexInstalled;
     this.codexSessionsRoot = codexSessionsRoot;
     this.trackerItems = [];           // the tracker's bubbles; the eTL 비서 bubble goes with them
+    this.timetableItems = [];         // a bubble for each of today's classes (timetable.js)
     this.assistantSince = Date.now();
     const userData = electron.app.getPath('userData');
     this.token = createTokenStore({ safeStorage: electron.safeStorage, file: path.join(userData, 'etl-token.bin') });
     this.stateFile = path.join(userData, 'etl-state.json');
     this.downloadsFile = path.join(userData, 'etl-downloads.json');   // files.js's own records
+    this.timetable = createTimetable({
+      cacheFile: path.join(userData, 'etl-timetable.json'),
+      workspaceDir: () => this.workspaceDir(),
+    });
+    this.notifier = null;
     this.tracker = null;
     this.bridge = null;
     this.fileBridge = null;           // the same, through files in the chat folder (Codex's sandbox)
@@ -72,12 +82,14 @@ class EtlFeature extends EventEmitter {
     this.electron.powerMonitor.off('resume', this.onResume);
     this.tracker?.stop();
     this.tracker = null;
+    this.#stopNotifier();
     const bridge = this.bridge;
     this.bridge = null;
     bridge?.stop().catch((err) => this.log('etl bridge stop:', err.message));
     this.fileBridge?.stop();
     this.fileBridge = null;
     this.trackerItems = [];
+    this.timetableItems = [];
     this.emit('change', []);
   }
 
@@ -100,6 +112,14 @@ class EtlFeature extends EventEmitter {
     if (saved) this.tracker?.tokenChanged();
     if (saved && !this.settings.get('etlAssistantAsked')) await this.#offerAssistant();
     return saved;
+  }
+
+  setTimetableBubble(on) {
+    this.settings.set({ etlTimetableBubble: on });
+    if (!this.enabled) return;
+    if (on) this.#startNotifier();
+    else this.#stopNotifier();
+    this.#emitItems();
   }
 
   setAssistantBubble(on) {
@@ -126,12 +146,14 @@ class EtlFeature extends EventEmitter {
   }
 
   checkNow() {
+    this.notifier?.refresh();
     return this.tracker?.checkNow().catch((err) => this.log('etl check:', err.message));
   }
 
   dismiss(id) {
     if (id === ASSISTANT_ID) return;    // it has no ×; the menu turns it off
-    this.tracker?.dismiss(id);
+    if (String(id).startsWith('etl:timetable:')) this.notifier?.dismiss(id);   // until tomorrow
+    else this.tracker?.dismiss(id);
   }
 
   // The tracker keeps its own dismissals (until each notice expires), not in settings.dismissed.
@@ -210,6 +232,12 @@ class EtlFeature extends EventEmitter {
       items.push({ label: 'Codex에서 eTL 비서 열기', enabled: on, click: () => this.#later(this.openInCodex()) });
     }
     items.push({
+      label: '오늘 수업 알림',
+      type: 'checkbox',
+      checked: this.settings.get('etlTimetableBubble') !== false,
+      click: (mi) => this.setTimetableBubble(mi.checked),
+    });
+    items.push({
       label: 'eTL 비서 말풍선 보이기',
       type: 'checkbox',
       checked: this.settings.get('etlAssistantBubble') === true,
@@ -239,7 +267,25 @@ class EtlFeature extends EventEmitter {
       });
     }
     this.#startFileBridge();
+    if (this.settings.get('etlTimetableBubble') !== false) this.#startNotifier();
     this.#emitItems();
+  }
+
+  #startNotifier() {
+    if (this.notifier) return;
+    this.notifier = new TimetableNotifier({ timetable: this.timetable, createClient: () => this.#client() });
+    this.notifier.on('change', (list) => {
+      this.timetableItems = list;
+      this.#emitItems();
+    });
+    this.notifier.on('error', (err) => this.log('etl timetable:', err?.message || err));
+    this.notifier.start();
+  }
+
+  #stopNotifier() {
+    this.notifier?.stop();
+    this.notifier = null;
+    this.timetableItems = [];
   }
 
   // The tracker's bubbles, and the eTL 비서 bubble when it's turned on.
@@ -247,7 +293,7 @@ class EtlFeature extends EventEmitter {
     const extra = this.settings.get('etlAssistantBubble') === true
       ? [assistantItem({ since: this.assistantSince, codexInstalled: this.codexInstalled() })]
       : [];
-    this.emit('change', [...this.trackerItems, ...extra]);
+    this.emit('change', [...this.trackerItems, ...this.timetableItems, ...extra]);
   }
 
   async #offerAssistant() {
@@ -293,6 +339,7 @@ class EtlFeature extends EventEmitter {
         const token = this.token.load();
         if (!token) throw new Error(NO_TOKEN);
         const client = createClient({ token });
+        if (cmd === 'timetable') return this.#timetableAnswer(client, args);
         if (!FILE_COMMANDS.has(cmd)) return createQueries({ client })[cmd](args);
         return createFiles({
           client, token, workspaceDir: this.workspaceDir(), recordsFile: this.downloadsFile,
@@ -300,6 +347,27 @@ class EtlFeature extends EventEmitter {
       };
     }
     return handlers;
+  }
+
+  // The bridge's timetable command: one day (today unless `date`), and with `week` the weekly
+  // classes too. The day's 보강·휴강 come from timetable.md in the chat folder.
+  async #timetableAnswer(client, { date, week = false } = {}) {
+    const day = date || kstParts(Date.now()).date;
+    const result = await this.timetable.day(client, day);
+    const answer = {
+      now: formatKst(Date.now()),
+      date: result.date,
+      weekday: result.weekday,
+      classes: result.classes,
+      cancelled: result.cancelled,
+      changes_file: 'timetable.md',
+    };
+    if (week) {
+      const w = await this.timetable.weekly(client);
+      answer.weekly = w.courses.map((c) => ({ course: c.name, course_id: c.course_id, meetings: c.meetings }));
+    }
+    if (result.errors.length) answer.errors = result.errors;
+    return answer;
   }
 
   async #verify(token) {

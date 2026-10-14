@@ -40,6 +40,11 @@ const HELP = `SNU eTL 조회 CLI (읽기 전용, Claude Pet을 통해 조회)
   files --course ID                       과목 강의자료·내 제출 파일 목록 (받지 않음)
   download <과목ID> <파일ID>              파일 하나를 강의자료/<과목명>/에 받기
                                           (--course ID --id ID 형식도 가능)
+  timetable [--date YYYY-MM-DD] [--week]  그날(기본 오늘) 수업, 보강·휴강 반영
+                                          --week: 과목별 주간 시간표도 함께
+  api "<경로>" [--all]                     eTL(Canvas) API를 GET으로 그대로 조회
+                                          경로는 /api/v1/로 시작, 따옴표로 감싸기
+                                          --all: 목록의 다음 페이지까지 모두
 
 공통 옵션:
   --ascii    한글 등을 \\uXXXX로 바꿔 출력 (터미널에서 글자가 깨질 때)
@@ -79,6 +84,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '-h' || a === '--help') { help = true; continue; }
     if (a === '--ascii') { ascii = true; continue; }
+    if (a === '--all' || a === '--week') { args[a.slice(2)] = true; continue; }
     if (a.startsWith('--')) {
       const eq = a.indexOf('=');
       const key = eq === -1 ? a.slice(2) : a.slice(2, eq);
@@ -103,10 +109,20 @@ function parseArgs(argv) {
     }
     args.course = toValue(rest[0]);
     args.id = toValue(rest[1]);
+  } else if (cmd === 'api' && rest.length > 0) {
+    if (rest.length !== 1) return { error: '사용법: node etl.js api "/api/v1/<경로>" [--all]', ascii };
+    args.path = apiPath(rest[0]);
   } else if (rest.length > 0) {
     return { error: `알 수 없는 인자입니다: ${rest.join(' ')}`, ascii };
   }
   return { request: { cmd, args }, ascii };
+}
+
+// Git Bash on Windows turns an argument like /api/v1/x into C:/Program Files/Git/api/v1/x before
+// node sees it, so that prefix is dropped again; "api/v1/x" without the slash is fine too.
+function apiPath(s) {
+  const m = /^(?:[A-Za-z]:[\\/][^?]*?)?\/?(api\/v1\/.*)$/s.exec(s.replace(/\\/g, '/'));
+  return m ? `/${m[1]}` : s;
 }
 
 const toValue = (s) => (/^-?\d+$/.test(s) && Number.isSafeInteger(Number(s)) ? Number(s) : s);

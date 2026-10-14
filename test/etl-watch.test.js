@@ -213,7 +213,7 @@ test('a new announcement from the last 14 days is shown once', () => {
   let alerts;
   ({ state, alerts } = diff(state, snap([], { announcements: [announcement(1), announcement(2)] }), T0));
   assert.deepEqual(ids(alerts), ['etl:ann:2']);
-  assert.equal(alerts[0].badge, '새 공지');
+  assert.equal(alerts[0].badge, '휴강 공지');           // the body says 휴강
   assert.equal(alerts[0].title, '공지 2');
   assert.equal(alerts[0].project, '공학 세미나');
   assert.equal(alerts[0].detail, '공학 세미나 · 다음 주 휴강입니다.');
@@ -221,6 +221,18 @@ test('a new announcement from the last 14 days is shown once', () => {
   assert.deepEqual(state.announcementsSeen, ['1', '2']);
   ({ alerts } = diff(state, snap([], { announcements: [announcement(1), announcement(2)] }), T0));
   assert.deepEqual(alerts, []);
+});
+
+test('a notice about a makeup or cancelled class gets its own badge, others are 새 공지', () => {
+  const state = baseline([]);
+  const list = [
+    announcement(11, { title: '보강 안내', message: '<p>10/20(월) 18:00 보강합니다.</p>' }),
+    announcement(12, { title: '중간고사 범위', message: '<p>1~5장</p>' }),
+    announcement(13, { title: '수업 공지', message: '<p>이번 주 목요일은 결강입니다.</p>' }),
+  ];
+  const { alerts } = diff(state, snap([], { announcements: list }), T0);
+  assert.deepEqual(alerts.map((a) => [a.id, a.badge]),
+    [['etl:ann:11', '보강 공지'], ['etl:ann:12', '새 공지'], ['etl:ann:13', '휴강 공지']]);
 });
 
 test('an announcement older than 14 days is recorded but not shown', () => {

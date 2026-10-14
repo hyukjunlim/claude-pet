@@ -62,3 +62,20 @@ test('clicking the bubble opens its links in order, a moment apart', async (t) =
   const [link] = f.assistantLinks();
   assert.equal(new URL(link).searchParams.get('path'), data.etlWorkspace);
 });
+
+test('the 오늘 수업 bubble has its own menu item, on by default, that turns its notifier on and off', (t) => {
+  const { f, data } = feature(t);
+  f.start();
+  const item = () => f.menu().submenu.find((m) => m.label === '오늘 수업 알림');
+  assert.equal(item().type, 'checkbox');
+  assert.equal(item().checked, true);
+  assert.ok(f.notifier, 'running while eTL is on');
+  item().click({ checked: false });
+  assert.equal(data.etlTimetableBubble, false);
+  assert.equal(f.notifier, null);
+  assert.equal(item().checked, false);
+  item().click({ checked: true });
+  assert.ok(f.notifier);
+  f.stop();
+  assert.equal(f.notifier, null);
+});

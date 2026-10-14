@@ -95,6 +95,14 @@ function resetTokenExpired(state) {
   return state ? { ...state, tokenExpiredNotified: false } : state;
 }
 
+// A notice about a class moving gets its own badge: the AI can then put it in timetable.md.
+function announcementBadge(n) {
+  const text = `${n?.title ?? ''} ${htmlToText(n?.message, 2000)}`;
+  if (/보강/.test(text)) return '보강 공지';
+  if (/휴강|결강/.test(text)) return '휴강 공지';
+  return '새 공지';
+}
+
 const scoreText = (n) => (typeof n === 'number' ? String(Math.round(n * 100) / 100) : String(n));
 
 // The reminder stage due now, if it hasn't been sent: the shortest stage the time left fits in.
@@ -231,7 +239,7 @@ function diff(prevState, snapshot, now) {
       const cid = String(n.context_code || '').replace(/^course_/, '');
       const courseName = courseNames.get(cid) || '';
       alerts.push(item({
-        id: `etl:ann:${id}`, badge: '새 공지', title: n.title || '(제목 없음)', now,
+        id: `etl:ann:${id}`, badge: announcementBadge(n), title: n.title || '(제목 없음)', now,
         url: n.html_url || n.url,
         project: courseName,
         detail: [courseName, htmlToText(n.message, ANNOUNCEMENT_SNIPPET)].filter(Boolean).join(' · '),
