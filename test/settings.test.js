@@ -55,3 +55,26 @@ test('an unreadable file keeps the defaults and is left as it is', (t) => {
   assert.deepEqual(s.data, DEFAULTS);
   assert.equal(fs.readFileSync(file, 'utf8'), '{ not json');
 });
+
+test('eTL starts off, with the chat folder in its default place', (t) => {
+  const s = new Settings(settingsFile(t));
+  assert.equal(s.get('etlEnabled'), false);
+  assert.equal(s.get('etlWorkspace'), null);
+  assert.equal(s.get('etlAssistantBubble'), false);
+  assert.equal(s.get('etlAssistantAsked'), false);
+});
+
+test('the eTL settings survive a save and a reload', (t) => {
+  const file = settingsFile(t);
+  const s = new Settings(file);
+  s.save();
+  assert.equal(new Settings(file).get('etlEnabled'), false);
+  assert.equal(new Settings(file).get('etlWorkspace'), null);
+
+  s.set({ etlEnabled: true, etlWorkspace: 'D:\notes\etl' });
+  s.save();
+  const again = new Settings(file);
+  assert.equal(again.get('etlEnabled'), true);
+  assert.equal(again.get('etlWorkspace'), 'D:\notes\etl');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).etlEnabled, true);
+});
