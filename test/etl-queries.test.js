@@ -371,6 +371,7 @@ test('api strips the secrets out of signed file links and feed addresses', async
       url: 'https://myetl.snu.ac.kr/files/9/download?download_frd=1&verifier=abc123',
       nested: [{ preview_url: '/courses/1/files/9/preview?verifier=zzz&x=1' }],
       calendar: { ics: 'https://myetl.snu.ac.kr/feeds/calendars/user_SECRETfeed.ics' },
+      session_url: 'https://myetl.snu.ac.kr/login/session_token?session_token=SECRETlogin',
     }),
     now: () => NOW,
   });
@@ -378,6 +379,7 @@ test('api strips the secrets out of signed file links and feed addresses', async
   assert.equal(data.url, 'https://myetl.snu.ac.kr/files/9/download?download_frd=1&verifier=***');
   assert.equal(data.nested[0].preview_url, '/courses/1/files/9/preview?verifier=***&x=1');
   assert.equal(data.calendar.ics, 'https://myetl.snu.ac.kr/feeds/calendars/***');
+  assert.equal(data.session_url, 'https://myetl.snu.ac.kr/login/session_token?session_token=***');
   assert.ok(!JSON.stringify(data).includes('abc123') && !JSON.stringify(data).includes('SECRET'));
 });
 

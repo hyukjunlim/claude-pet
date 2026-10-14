@@ -10,8 +10,8 @@
 //
 // On top of the weekly classes, a day gets:
 //   - the user's own changes in the chat folder's timetable.md (보강 adds a class, 휴강 drops one):
-//       - 2026-10-20 보강 18:00~19:15 | 전기에너지변환 | 301-103 | 메모
-//       - 2026-10-21 휴강 | 제어공학개론 | 메모
+//       - 2026-10-20 보강 18:00~19:15 | 가상현실공학 | 000-101 | 메모
+//       - 2026-10-21 휴강 | 나노소자개론 | 메모
 //   - eTL calendar events on that day in this term's courses (some instructors post 보강 there).
 //
 // TimetableNotifier turns today into one bubble per class, from SHOW_FROM_HOUR until that class
@@ -71,7 +71,7 @@ function isDate(s) {
 
 const weekdayOf = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 
-// "2026-2 전기에너지변환 (001)" -> "전기에너지변환".
+// "2026-2 가상현실공학 (001)" -> "가상현실공학".
 function shortName(name) {
   return String(name ?? '').replace(/^\s*\d{4}-\d\s+/, '').replace(/\s*\(\d{3}\)\s*$/, '').trim() || String(name ?? '');
 }
@@ -79,7 +79,7 @@ function shortName(name) {
 const squash = (s) => String(s ?? '').toLowerCase().replace(/[\s·.:()\-_]/g, '');
 
 // Whether a name the user wrote means this course: either contains the other, ignoring spaces
-// and punctuation ("전에변" won't match, "전기에너지변환" and "에너지변환" will).
+// and punctuation ("가현공" won't match, "가상현실공학" and "현실공학" will).
 function sameCourse(written, course) {
   const a = squash(written);
   const b = squash(shortName(course));

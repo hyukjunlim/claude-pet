@@ -112,6 +112,7 @@ test('api takes any /api/v1/ path with a query, and nothing that could leave the
     '/api/v1/courses/1/modules?include[]=items&per_page=50',
     '/api/v1/calendar_events?type=event&start_date=2026-10-14&context_codes[]=course_1',
     '/api/v1/courses/1/pages/week-1%20notes',
+    '/api/v1/users/self/logins',
   ]) {
     assert.deepEqual(validateRequest({ cmd: 'api', args: { path: p } }), { cmd: 'api', args: { path: p, all: false } }, p);
   }
@@ -119,7 +120,9 @@ test('api takes any /api/v1/ path with a query, and nothing that could leave the
   for (const p of [
     'https://evil.example/api/v1/x', '//evil.example/api/v1/x', '/api/v2/x', '/login', 'api/v1/x',
     '/api/v1/../../login', '/api/v1/%2e%2e/x', '/api/v1/x\\y', '/api/v1/x#y', '/api/v1//x', '/api/v1/a b',
-    '/api/v1/users/self/tokens', '/api/v1/users/1/tokens/5', '/api/v1/x?' + 'a'.repeat(600), 42, null,
+    '/api/v1/users/self/tokens', '/api/v1/users/1/tokens/5', '/api/v1/login/session_token',
+    '/api/v1/login/session_token?return_to=/', '/api/v1/LOGIN/session_token', '/api/v1/%6Cogin/session_token',
+    '/api/v1/x?' + 'a'.repeat(600), 42, null,
   ]) {
     assert.throws(() => validateRequest({ cmd: 'api', args: { path: p } }), /api 명령의 path 값이 올바르지 않습니다/, String(p));
   }

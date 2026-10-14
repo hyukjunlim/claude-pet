@@ -22,15 +22,15 @@ const BRIEFING_DAYS = 7;
 const BRIEFING_ANNOUNCEMENT_DAYS = 3;
 
 const API_MAX_CHARS = 1_500_000;   // an `api` answer, as JSON
-const SIGNED_RE = /([?&](?:verifier|sf_verifier|download_frd_token)=)[^&#"\s]+/gi;
+const SIGNED_RE = /([?&](?:verifier|sf_verifier|download_frd_token|session_token)=)[^&#"\s]+/gi;
 const FEED_RE = /(\/feeds\/[a-z_]+\/)[^\s"?#]+/gi;   // calendar and other feeds open with their own secret
 
 // The KST calendar date of a moment, 'YYYY-MM-DD'.
 const kstDate = (ms) => formatKst(ms).slice(0, 10);
 
 // Signed links (a file's `url` carries a verifier that opens it without the token, a feed's path
-// a secret of its own) lose their signature before an `api` answer goes to the AI, as files.js
-// never hands them out either.
+// a secret of its own, a session_token link signs in) lose their signature before an `api` answer
+// goes to the AI, as files.js never hands them out either.
 function unsign(value) {
   if (typeof value === 'string') return value.replace(SIGNED_RE, '$1***').replace(FEED_RE, '$1***');
   if (Array.isArray(value)) return value.map(unsign);

@@ -61,7 +61,8 @@ const flag = (extra = {}) => ({ test: (v) => typeof v === 'boolean', rule: 'true
 
 // A Canvas API path for the `api` command: /api/v1/… with an optional query, nothing that could
 // leave the API (no scheme, host, '..', '//', backslash or fragment), printable ASCII only. Paths
-// about access tokens are refused outright.
+// about access tokens are refused outright, and so is /api/v1/login/…: its session_token answers
+// with a link that signs in to eTL as the user.
 const API_PATH_RE = /^\/api\/v1\/[\x21-\x7e]*$/;
 const MAX_API_PATH = 600;
 function isApiPath(v) {
@@ -74,11 +75,11 @@ function isApiPath(v) {
     return false;
   }
   if (/[\\#]/.test(v) || /\/\/|(^|\/)\.\.?(\/|$)/.test(decoded)) return false;
-  return !/(^|\/)tokens?(\/|$)/i.test(decoded);
+  return !/(^|\/)tokens?(\/|$)/i.test(decoded) && !/^\/api\/v1\/login(\/|$)/i.test(decoded);
 }
 const apiPath = (extra = {}) => ({
   test: isApiPath,
-  rule: '/api/v1/로 시작하는 eTL API 경로여야 합니다(쿼리 가능, 600자 이내, 토큰 관련 경로 제외).',
+  rule: '/api/v1/로 시작하는 eTL API 경로여야 합니다(쿼리 가능, 600자 이내, 토큰·로그인 관련 경로 제외).',
   ...extra,
 });
 

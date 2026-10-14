@@ -359,8 +359,8 @@ opening a conversation doesn't mark it read.
 catalog (`sugang.snu.ac.kr`), which has them. The pet looks each of this term's courses up there
 (no login, and the eTL token is never sent there), keeps the weekly timetable for a day, and adds
 the day's eTL calendar events. Makeup and cancelled classes go in `timetable.md` in the chat folder,
-one per line (`- 2026-10-20 보강 18:00~19:15 | 전기에너지변환 | 301-103`,
-`- 2026-10-21 휴강 | 제어공학개론`); the `/timetable` skill offers to add the ones it finds in
+one per line (`- 2026-10-20 보강 18:00~19:15 | 가상현실공학 | 000-101`,
+`- 2026-10-21 휴강 | 나노소자개론`); the `/timetable` skill offers to add the ones it finds in
 announcements, and the class bubbles pick up changes within a minute. `etl.js timetable`
 answers for a date or the whole week.
 
