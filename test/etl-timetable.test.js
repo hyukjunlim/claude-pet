@@ -213,7 +213,7 @@ test('a day reads timetable.md and eTL events for this term, ten courses per req
   assert.equal((ev.match(/context_codes\[\]=/g) || []).length, 4);
 });
 
-test('the notifier shows today, keeps it current, and × hides one class until tomorrow', async (t) => {
+test('the notifier shows today, keeps it current, and × hides one class until tomorrow or a restart', async (t) => {
   const dir = tmp(t);
   let now = kst('2026-10-14T09:00:00');
   const tt = createTimetable({ cacheFile: path.join(dir, 'cache.json'), fetch: fakeCatalog().fetch, now: () => now, workspaceDir: () => dir });
@@ -236,6 +236,16 @@ test('the notifier shows today, keeps it current, and × hides one class until t
   assert.deepEqual(titles(), ['휴강 나노소자개론']);
   n.dismiss(seen.at(-1)[0].id);
   assert.deepEqual(seen.at(-1), []);
+
+  // A restart brings back what was closed by mistake.
+  const restarted = new TimetableNotifier({ timetable: tt, createClient: () => fakeClient(), now: () => now, timers });
+  const again = [];
+  restarted.on('change', (list) => again.push(list));
+  restarted.start();
+  await restarted.refresh();
+  assert.deepEqual(again.at(-1).map((it) => it.badge), ['휴강', '17:00']);
+  restarted.stop();
+
   now = kst('2026-10-16T08:00:00');                              // Friday: 다이빙, nothing closed
   n.tick();
   await n.refresh();

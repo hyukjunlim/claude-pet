@@ -219,10 +219,11 @@ body {
   font: 15px/19px system-ui, sans-serif;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;           /* an unseen × takes no clicks (it overlaps the bubble above) */
   transition: opacity 120ms;
 }
 
-.pill:hover .close { opacity: 1; }
+.pill:hover .close { opacity: 1; pointer-events: auto; }
 .close:hover { color: var(--text); }
 
 /* ------------------------------------------------------------------ weekly limits */
