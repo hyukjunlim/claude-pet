@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; form-action 'none'; base-uri 'none'">
+  <title>eTL 토큰 등록</title>
+  <link rel="stylesheet" href="etl-token.css">
+</head>
+<body>
+  <form id="form" autocomplete="off" novalidate>
+    <h1>eTL 액세스 토큰</h1>
+    <p>펫이 eTL의 과제와 공지를 읽으려면 액세스 토큰이 필요합니다. 토큰은 이 컴퓨터에 암호화해 저장하고 eTL 조회에만 씁니다. 채팅 AI에게는 보여 주지 않습니다.</p>
+    <p class="guide">
+      <a id="guide" href="https://myetl.snu.ac.kr/profile/settings">eTL 설정 페이지</a>에서
+      <strong>새 액세스 토큰</strong>을 눌러 발급한 뒤 아래에 붙여 넣어 주세요.
+    </p>
+    <label for="token">토큰</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" required>
+    <p id="status" role="status" aria-live="polite"></p>
+    <div class="buttons">
+      <button type="button" id="cancel">취소</button>
+      <button type="submit" id="ok" class="primary">확인</button>
+    </div>
+  </form>
+  <script src="etl-token.js"></script>
+</body>
+</html>

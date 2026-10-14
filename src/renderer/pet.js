@@ -18,6 +18,7 @@
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
   const BUSY = new Set(['running', 'background']);   // still going: nothing to dismiss
   const ATTENTION = new Set(['waiting', 'failed', 'review']);
+  const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;
   const SHADOW_ROOM = 16;          // px kept around the bubbles so their shadows aren't cut off
 
   let sessions = [];
@@ -141,9 +142,14 @@
     el.className = `pill status-${s.status}`;
     el.setAttribute('role', 'listitem');
     const codex = s.kind === 'codex';
+    const etl = s.kind === 'etl';
+    const source = etl ? 'eTL' : codex ? 'Codex' : 'Claude';
     // No hover tooltip (it pops up over the other bubbles); screen readers still get the details.
     const where = s.remote ? (codex ? `on ${s.remote}` : `SSH · ${s.remote}`) : '';
-    const action = s.kind === 'cli' ? 'Terminal session (no link)' : `Click to open in ${codex ? 'Codex' : 'Claude'}`;
+    // The main process opens an eTL link only on eTL's own site (see sessionUrl there).
+    const action = s.kind === 'cli' ? 'Terminal session (no link)'
+      : etl && !s.assistant && !ETL_LINK.test(s.url || '') ? 'eTL notice (no link)'
+        : `Click to open in ${source}`;
     el.setAttribute('aria-label', [s.title, s.detail, where, action].filter(Boolean).join(', '));
 
     const icon = document.createElement('span');
@@ -156,7 +162,7 @@
     line.className = 'line1';
     const label = document.createElement('span');
     label.className = 'label';
-    label.textContent = LABELS[s.status] || s.status;
+    label.textContent = s.badge || LABELS[s.status] || s.status;
     const title = document.createElement('span');
     title.className = 'title';
     title.textContent = s.title;
@@ -166,7 +172,7 @@
     const detail = document.createElement('span');
     detail.className = 'detail';
     const ago = formatAgo(s.since);
-    detail.append(span('what', [codex ? 'Codex' : 'Claude', s.project].filter(Boolean).join(' · ')));
+    detail.append(span('what', [source, s.project].filter(Boolean).join(' · ')));
     if (ago) detail.append(span('ago', `· ${ago}`));
     text.append(line, detail);
     el.append(text);

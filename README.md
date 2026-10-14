@@ -30,6 +30,9 @@ On its first start, the pet offers to set up a small mod for Claude Code, which 
 Claude's weekly limit from ([Live Claude usage](#live-claude-usage)). Say *Set it up*, and that's
 all.
 
+It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* to open the token
+form, or *나중에* to skip it; you can connect later from the tray menu's *eTL* item.
+
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
@@ -251,7 +254,7 @@ shows how much of that plan's weekly limit you've used against how far into the 
 The tray menu lists the same figures, with how far into the week you are, the time until each
 reset, and how old the figures are once they're over an hour old. Tray menu → *Show weekly
 limits* turns the meter off. The pet reads the figures from files; it contacts no server itself
-(apart from the SSH hosts above, and below).
+(apart from the SSH hosts above, and below, and SNU eTL once you turn [that](#etl-snu) on).
 
 - **Claude:** the pet's mod for Claude Code saves the figures after each reply of every session,
   with when the week resets ([Live Claude usage](#live-claude-usage)). The pet shows the newest,
@@ -301,6 +304,77 @@ the meter follows within a few seconds.
 Claude Code's mods are an early-access feature and can change between releases. If the mod stops
 working, the meter keeps its last figures, and the tray menu says how old they are. The figures
 are the account's, so the pet assumes every machine uses the same Claude account.
+
+## eTL (SNU)
+
+For students at Seoul National University, the pet can also watch [eTL](https://myetl.snu.ac.kr)
+(SNU's Canvas LMS) and answer questions about it in a chat folder. It's **off** until you turn it
+on, and while it's off the pet makes no request to eTL and creates no file for it.
+
+**Turning it on.** On first start, choose *eTL 연결* when offered, or use tray menu → *eTL* → *켜기*
+later. A small window asks for an eTL access token: on eTL, open *계정 → 설정*
+(https://myetl.snu.ac.kr/profile/settings) → *새 액세스 토큰*, and paste it there. The pet checks
+the token with eTL before saving it. *토큰 등록/변경…* replaces it.
+
+**Bubbles.** The pet checks eTL when it starts, every 30 minutes, when the PC wakes from sleep,
+and on *지금 확인*. The first check only notes what's there and says how many assignments are due.
+After that, a bubble appears for:
+
+- **마감 임박:** 24 hours, 3 hours and 1 hour before an assignment you haven't submitted is due
+  (online submissions only). It shows the time left, kept current, and stays until the deadline
+  or until you submit.
+- **마감 변경**, **새 과제**, **성적** (a new or changed grade) and **새 공지** (announcements of the
+  last 14 days).
+- **토큰 만료:** once, when eTL stops accepting the token.
+
+Clicking a bubble opens that eTL page in your browser; × dismisses it for good. Other bubbles go
+away after 3 days, and at most 30 are kept. Changes made while the pet wasn't running show up at
+the next check.
+
+**Chat folder.** Turning eTL on also creates a chat folder, `Documents\etl-assistant` by default
+(*채팅 폴더 위치 변경…* moves it; your `todos.md` is copied and the old folder is left alone). Open
+it in the Claude desktop app's Code tab or in Codex, and ask things like "이번 주 마감 알려줘".
+With Codex installed, turning eTL on opens a new chat there in this folder, and *Codex에서 eTL
+비서 열기* does it again later. *eTL 비서 말풍선 보이기* (offered when you first save a token) keeps
+an **eTL 비서** bubble at the end of the others: clicking it goes back to the newest Codex chat in
+the folder, or starts one (without Codex, it opens the folder). The folder holds instructions for Claude and Codex
+(`AGENTS.md`, `CLAUDE.md`), a few skills (`/briefing`, `/deadlines`, `/todo`) and `etl.js`, a small
+command the AI runs to ask the pet. The AI never sees the token: `etl.js` sends the question to
+the running pet over a local named pipe (`~/.claude-pet/etl.sock` on macOS and Linux), the pet
+asks eTL, and only the answer goes back. With the pet closed or eTL off, the AI says so. When
+the pet updates, the folder's files are updated too, except `todos.md`.
+
+**Course materials, on request.** Ask the chat to read or summarize a particular lecture file.
+The AI lists that course's files with `node etl.js files --course <course ID>`, then requests just
+the selected file with `node etl.js download <course ID> <file ID>`. Lists combine the Files tab,
+module File items, announcement and assignment attachments and file links, and your own submitted
+files. A hidden Files tab does not prevent the other sources from working.
+
+Files are saved under `강의자료/<course name>/` in the chat folder. A saved copy with the same
+modification time and size is reused; a changed or deleted file is downloaded again. The pet
+downloads nothing during periodic checks or when eTL is turned on. Videos, files over 100MB,
+and locked or hidden files are left as eTL links. Materials available only through LearningX's
+weekly lessons cannot be retrieved this way.
+
+Default briefings, assignment lists, announcements and grades cover the latest term. The
+`courses` command also lists older courses, marked `current: false`; specifying a course ID
+lets the chat look up that course, including its materials.
+
+**Security.**
+
+- The token is encrypted with Electron's `safeStorage` (DPAPI on Windows) in the pet's own app
+  data folder. If encryption isn't available, the pet refuses to save it. It never appears in
+  the log, the bubbles, the chat folder or the answers.
+- The pet only reads from eTL (GET requests): it doesn't submit assignments or post anything.
+- The pipe takes a fixed list of read-only questions, each checked, and nothing else.
+- Text from eTL (titles, announcements, descriptions) is shown as plain text, and every answer
+  to the AI is marked as outside data, not instructions.
+- Downloads follow HTTPS redirects only to eTL and `kr.object.gov-ncloudstorage.com`, the
+  storage host used by SNU eTL. The token goes only to eTL; signed download URLs are not saved
+  in the download records or returned to the AI. Filenames are cleaned and saved paths are
+  checked to stay inside the chat folder.
+
+eTL's API can change; if checks start failing, the tray menu's eTL submenu shows the error.
 
 ## Pets
 
@@ -398,6 +472,8 @@ src/transcript.js   Transcript entries → running / background / waiting / revi
 src/usage.js        Weekly limits: Claude's figures (the mod's, the app's), Codex's rate limits
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
+src/etl/            SNU eTL: API client, notices, token store, query bridge, chat folder
 tools/make_clay.py  Generates Clay, the built-in pet
 claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
+etl-workspace/      What the eTL chat folder is made from: instructions, skills, etl.js
 ```
