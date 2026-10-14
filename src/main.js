@@ -19,6 +19,7 @@ const { LocalMod, bundledVersion, modFiles, runningWslDistros, sshInstaller, wsl
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForUpdate, startUpdate } = require('./updater');
+const { raiseCodexWindow } = require('./raise');
 
 const DEMO = process.argv.includes('--demo');
 const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
@@ -732,6 +733,7 @@ function openApp(url) {
     }, FOREGROUND_HANDOFF_MS);
   }
   shell.openExternal(url).catch((err) => log(`could not open ${url.split(':')[0]}:`, err.message));
+  if (url.startsWith('codex:')) raiseCodexWindow();   // a reopened Codex window stays behind otherwise
 }
 
 function openSession(id) {

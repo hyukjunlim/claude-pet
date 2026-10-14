@@ -386,6 +386,7 @@ src/preload.js      Minimal API exposed to the page (context isolation, sandboxe
 src/renderer/       Pet page: sprite engine, activity bubbles
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
+src/raise.js        Brings Codex's window to the front after a codex:// link (Windows)
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
 src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
