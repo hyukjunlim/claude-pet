@@ -793,7 +793,9 @@ function openSession(id) {
   const url = s && sessionUrl(s);
   if (!url) return false;
   openApp(url);
-  if (s.status !== 'running' && s.status !== 'background') {
+  // A finished session or a one-off notice is done with once opened; a class bubble
+  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked.
+  if (s.status !== 'running' && s.status !== 'background' && !s.keepOnOpen) {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }

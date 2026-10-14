@@ -400,6 +400,7 @@ function timetableItems(today, nowMs, dismissed = []) {
       project: clip(project, PROJECT_LIMIT),
       detail: clip(`${c.start}~${c.end} ${c.course}${c.room ? ` · ${c.room}` : ''}${c.note ? ` · ${c.note}` : ''}`, 300),
       url: c.course_id ? `${ETL_URL}courses/${c.course_id}` : ETL_URL,
+      keepOnOpen: true,              // clicking opens the course; only × closes it (main.js)
       expiresAt: atKst(date, c.end),
     }))
     .filter((it) => !dismissed.includes(it.id));
@@ -418,6 +419,7 @@ class TimetableNotifier extends EventEmitter {
     this.now = now;
     this.timers = timers;
     this.parts = null;            // fetchDay() result for the current KST date
+    this.closed = null;           // { date, ids } closed with × today, in memory only
     this.loadedAt = 0;
     this.interval = null;
     this.inflight = null;
@@ -468,19 +470,17 @@ class TimetableNotifier extends EventEmitter {
     this.tick();
   }
 
-  // Ids closed today; yesterday's are forgotten.
+  // Ids closed today; yesterday's are forgotten. They're kept in memory only, so a class closed
+  // by mistake comes back when the pet restarts.
   dismissedToday() {
-    const d = this.timetable.readCache()?.dismissed;
     const today = kstParts(this.now()).date;
-    return d && d.date === today && Array.isArray(d.ids) ? d.ids : [];
+    return this.closed?.date === today ? this.closed.ids : [];
   }
 
   dismiss(id) {
     if (!String(id).startsWith('etl:timetable:')) return;
     const ids = this.dismissedToday();
-    if (!ids.includes(id)) {
-      this.timetable.writeCache({ dismissed: { date: kstParts(this.now()).date, ids: [...ids, id] } });
-    }
+    if (!ids.includes(id)) this.closed = { date: kstParts(this.now()).date, ids: [...ids, id] };
     this.tick(true);
   }
 

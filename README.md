@@ -327,8 +327,8 @@ After that, a bubble appears for:
   last 14 days; one that mentions a makeup or cancelled class says **보강 공지** or **휴강 공지**).
 - **Today's classes:** from 6:00, one bubble per class (start time, course, room and how soon it
   starts, kept current), each until that class ends. The class under way or next stands out; 보강
-  and 휴강 get their own badge. × closes one for the day; tray menu → *eTL* → *오늘 수업 알림* turns
-  them off.
+  and 휴강 get their own badge. Clicking one opens the course; × hides it until the pet restarts or
+  the day ends; tray menu → *eTL* → *오늘 수업 알림* turns them off.
 - **토큰 만료:** once, when eTL stops accepting the token.
 
 Clicking a bubble opens that eTL page in your browser; × dismisses it for good. Other bubbles go
