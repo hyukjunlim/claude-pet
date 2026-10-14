@@ -471,6 +471,7 @@ function startEtl() {
     appRoot: APP_ROOT,
     log,
     codexInstalled,
+    codexSessionsRoot: codexPaths().sessionsRoot,
   });
   etl.on('change', (list) => {
     etlSessions = list;
@@ -732,6 +733,7 @@ function trayTooltip() {
 // sessions that are still in the desktop index get a link, so resume never imports a copy.
 function sessionUrl(s) {
   if (s?.kind === 'codex') return s.url || null;   // codex://threads/<id>?hostId=…
+  if (s?.kind === 'etl' && s.assistant) return etl?.assistantLinks().at(-1) || null;   // the eTL chat
   if (s?.kind === 'etl') return ETL_LINK.test(s.url || '') ? s.url : null;
   const m = DESKTOP_SESSION_RE.exec(s?.hostSessionId || '');
   if (!m || !tracker.desktop?.has(s.hostSessionId)) return null;
@@ -785,6 +787,7 @@ function openApp(url) {
 
 function openSession(id) {
   const s = sessions.find((x) => x.id === id);
+  if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(openApp));   // the eTL chat
   const url = s && sessionUrl(s);
   if (!url) return false;
   openApp(url);

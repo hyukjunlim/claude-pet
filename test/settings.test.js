@@ -60,6 +60,8 @@ test('eTL starts off, with the chat folder in its default place', (t) => {
   const s = new Settings(settingsFile(t));
   assert.equal(s.get('etlEnabled'), false);
   assert.equal(s.get('etlWorkspace'), null);
+  assert.equal(s.get('etlAssistantBubble'), false);
+  assert.equal(s.get('etlAssistantAsked'), false);
 });
 
 test('the eTL settings survive a save and a reload', (t) => {

@@ -15,6 +15,7 @@
 //
 // The token lives only in userData, encrypted with safeStorage (token.js).
 
+const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { createClient, EtlAuthError } = require('./client');
@@ -25,20 +26,29 @@ const { createBridge, createFileBridge, COMMANDS } = require('./bridge');
 const { createQueries } = require('./queries');
 const { createFiles } = require('./files');
 const { defaultWorkspaceDir, ensureWorkspace, moveWorkspace, isInside } = require('./workspace');
+const { ASSISTANT_ID, assistantItem, assistantLinks } = require('./assistant');
 
 const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 eTL에서 토큰을 등록해 주세요.';
 const CODEX_PROMPT = '오늘 브리핑해 줘';
 const FILE_COMMANDS = new Set(['files', 'download']);   // answered by files.js, the rest by queries.js
+const ASSISTANT_LINK_GAP_MS = 1200;   // between the eTL 비서 bubble's links (see openAssistant)
 
 class EtlFeature extends EventEmitter {
-  // electron: { app, dialog, powerMonitor, safeStorage, shell }; settings: the pet's Settings.
-  constructor({ electron, settings, appRoot, log = () => {}, codexInstalled = () => false }) {
+  // electron: { app, dialog, powerMonitor, safeStorage, shell }; settings: the pet's Settings;
+  // codexSessionsRoot: where Codex keeps its rollouts (for the eTL 비서 bubble's link).
+  constructor({
+    electron, settings, appRoot, log = () => {}, codexInstalled = () => false,
+    codexSessionsRoot = path.join(os.homedir(), '.codex', 'sessions'),
+  }) {
     super();
     this.electron = electron;
     this.settings = settings;
     this.appRoot = appRoot;
     this.log = log;
     this.codexInstalled = codexInstalled;
+    this.codexSessionsRoot = codexSessionsRoot;
+    this.trackerItems = [];           // the tracker's bubbles; the eTL 비서 bubble goes with them
+    this.assistantSince = Date.now();
     const userData = electron.app.getPath('userData');
     this.token = createTokenStore({ safeStorage: electron.safeStorage, file: path.join(userData, 'etl-token.bin') });
     this.stateFile = path.join(userData, 'etl-state.json');
@@ -67,6 +77,7 @@ class EtlFeature extends EventEmitter {
     bridge?.stop().catch((err) => this.log('etl bridge stop:', err.message));
     this.fileBridge?.stop();
     this.fileBridge = null;
+    this.trackerItems = [];
     this.emit('change', []);
   }
 
@@ -82,11 +93,36 @@ class EtlFeature extends EventEmitter {
     if (this.codexInstalled()) await this.openInCodex();   // straight into the eTL chat
   }
 
-  // Opens the token window; true once a token that eTL accepted is saved.
+  // Opens the token window; true once a token that eTL accepted is saved. The first time, it
+  // also asks whether to keep the eTL 비서 bubble.
   async registerToken() {
     const { saved } = await openTokenWindow({ verify: (token) => this.#verify(token) });
     if (saved) this.tracker?.tokenChanged();
+    if (saved && !this.settings.get('etlAssistantAsked')) await this.#offerAssistant();
     return saved;
+  }
+
+  setAssistantBubble(on) {
+    this.settings.set({ etlAssistantBubble: on });
+    if (this.enabled) this.#emitItems();
+  }
+
+  // The links the eTL 비서 bubble opens, in order (see assistant.js); [] without a chat folder.
+  assistantLinks() {
+    const dir = this.#ensureWorkspace();
+    if (!dir) return [];
+    return assistantLinks(dir, { codexInstalled: this.codexInstalled(), sessionsRoot: this.codexSessionsRoot });
+  }
+
+  // Opens them with `open` (main.js's openApp), giving Codex a moment between them to take the
+  // first: selecting the project switches its view, and a thread opened meanwhile is lost.
+  openAssistant(open, { gapMs = ASSISTANT_LINK_GAP_MS } = {}) {
+    const links = this.assistantLinks();
+    links.forEach((url, i) => {
+      if (i === 0) open(url);
+      else setTimeout(() => open(url), gapMs * i);
+    });
+    return links.length > 0;
   }
 
   checkNow() {
@@ -94,6 +130,7 @@ class EtlFeature extends EventEmitter {
   }
 
   dismiss(id) {
+    if (id === ASSISTANT_ID) return;    // it has no ×; the menu turns it off
     this.tracker?.dismiss(id);
   }
 
@@ -172,6 +209,12 @@ class EtlFeature extends EventEmitter {
     if (this.codexInstalled()) {
       items.push({ label: 'Codex에서 eTL 비서 열기', enabled: on, click: () => this.#later(this.openInCodex()) });
     }
+    items.push({
+      label: 'eTL 비서 말풍선 보이기',
+      type: 'checkbox',
+      checked: this.settings.get('etlAssistantBubble') === true,
+      click: (mi) => this.setAssistantBubble(mi.checked),
+    });
     if (on) items.push({ type: 'separator' }, { label: this.#statusLine(), enabled: false });
     return { label: 'eTL', submenu: items };
   }
@@ -180,7 +223,10 @@ class EtlFeature extends EventEmitter {
     this.#ensureWorkspace();
     if (!this.tracker) {
       this.tracker = new EtlTracker({ createClient: () => this.#client(), stateFile: this.stateFile });
-      this.tracker.on('change', (list) => this.emit('change', list));
+      this.tracker.on('change', (list) => {
+        this.trackerItems = list;
+        this.#emitItems();
+      });
       this.tracker.on('error', (err) => this.log('etl tracker:', err?.message || err));
       this.tracker.start();
       this.electron.powerMonitor.on('resume', this.onResume);
@@ -193,6 +239,30 @@ class EtlFeature extends EventEmitter {
       });
     }
     this.#startFileBridge();
+    this.#emitItems();
+  }
+
+  // The tracker's bubbles, and the eTL 비서 bubble when it's turned on.
+  #emitItems() {
+    const extra = this.settings.get('etlAssistantBubble') === true
+      ? [assistantItem({ since: this.assistantSince, codexInstalled: this.codexInstalled() })]
+      : [];
+    this.emit('change', [...this.trackerItems, ...extra]);
+  }
+
+  async #offerAssistant() {
+    const where = this.codexInstalled() ? 'Codex의 eTL 비서 대화' : 'eTL 채팅 폴더';
+    const { response } = await this.electron.dialog.showMessageBox({
+      type: 'question',
+      title: 'Claude Pet',
+      message: 'eTL 비서 말풍선을 켤까요?',
+      detail: `펫 위에 "eTL 비서" 말풍선을 늘 띄워 두고, 누르면 ${where}로 바로 갑니다. 나중에 트레이 메뉴의 eTL에서 바꿀 수 있습니다.`,
+      buttons: ['켜기', '나중에'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    this.settings.set({ etlAssistantAsked: true, etlAssistantBubble: response === 0 });
+    if (this.enabled) this.#emitItems();
   }
 
   // The file bridge lives in the chat folder, so it moves when the folder does.

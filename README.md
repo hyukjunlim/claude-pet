@@ -335,7 +335,9 @@ the next check.
 (*채팅 폴더 위치 변경…* moves it; your `todos.md` is copied and the old folder is left alone). Open
 it in the Claude desktop app's Code tab or in Codex, and ask things like "이번 주 마감 알려줘".
 With Codex installed, turning eTL on opens a new chat there in this folder, and *Codex에서 eTL
-비서 열기* does it again later. The folder holds instructions for Claude and Codex
+비서 열기* does it again later. *eTL 비서 말풍선 보이기* (offered when you first save a token) keeps
+an **eTL 비서** bubble at the end of the others: clicking it goes back to the newest Codex chat in
+the folder, or starts one (without Codex, it opens the folder). The folder holds instructions for Claude and Codex
 (`AGENTS.md`, `CLAUDE.md`), a few skills (`/briefing`, `/deadlines`, `/todo`) and `etl.js`, a small
 command the AI runs to ask the pet. The AI never sees the token: `etl.js` sends the question to
 the running pet over a local named pipe (`~/.claude-pet/etl.sock` on macOS and Linux), the pet
