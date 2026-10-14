@@ -6,6 +6,8 @@
 //     session on this PC or in WSL.
 //   - 'ssh:<host>:<port>': the same file on each SSH host the desktop app works on, sent by a
 //     ClaudeRemote watcher, which also says whether the mod is set up there.
+//   - 'ssh-config:<name>': the same, for each host from ~/.ssh/config you picked in the tray menu
+//     (for Claude Code run over SSH from a terminal; see ssh-config.js).
 //
 // Emits 'change' with the list of readings when one changes, and 'hosts' when what's known about
 // the SSH hosts changes.
@@ -35,14 +37,22 @@ function parseSshHosts(j) {
   return hosts;
 }
 
+// A host from ~/.ssh/config, by its name there: ssh takes the rest from the config.
+function configHost(alias) {
+  return { key: `ssh-config:${alias}`, name: alias, target: alias, port: null, identity: null, fromConfig: true };
+}
+
 class ClaudeUsage extends EventEmitter {
+  // configHosts: the names of the hosts from ~/.ssh/config to read too
   constructor({
-    usageFile, sshConnections = null, watchHosts = true, remoteFactory = (o) => new ClaudeRemote(o), pollMs = POLL_MS,
+    usageFile, sshConnections = null, configHosts = [], watchHosts = true, remoteFactory = (o) => new ClaudeRemote(o), pollMs = POLL_MS,
   }) {
     super();
     Object.assign(this, { usageFile, sshConnections, watchHosts, remoteFactory, pollMs });
     this.readings = new Map();   // source -> { weekly, fiveHour, at } on our clock
-    this.hosts = [];
+    this.desktopHosts = [];      // the desktop app's saved connections
+    this.configHosts = configHosts.map(configHost);
+    this.hosts = [...this.configHosts];
     this.remotes = new Map();    // host key -> ClaudeRemote
     this.stamps = { usage: null, hosts: null };
     this.timer = null;
@@ -53,6 +63,7 @@ class ClaudeUsage extends EventEmitter {
   start() {
     if (this.running) return;
     this.running = true;
+    this.syncRemotes();
     this.poll();
     this.timer = setInterval(() => this.poll(), this.pollMs);
   }
@@ -74,8 +85,14 @@ class ClaudeUsage extends EventEmitter {
     return [...this.readings.values()];
   }
 
-  // [{ key, name, target, port, identity, mod }]: each SSH host, with { version, enabled } once its
-  // watcher has said whether the mod is set up there.
+  // The hosts from ~/.ssh/config to read, by their names there.
+  setConfigHosts(aliases) {
+    this.configHosts = aliases.map(configHost);
+    this.mergeHosts();
+  }
+
+  // [{ key, name, target, port, identity, fromConfig?, mod }]: each SSH host, the desktop app's
+  // first, with { version, enabled } once its watcher has said whether the mod is set up there.
   hostStates() {
     return this.hosts.map((h) => ({ ...h, mod: this.remotes.get(h.key)?.mod ?? null }));
   }
@@ -129,7 +146,12 @@ class ClaudeUsage extends EventEmitter {
       }
     }
     this.stamps.hosts = stamp;
-    this.hosts = hosts;
+    this.desktopHosts = hosts;
+    this.mergeHosts();
+  }
+
+  mergeHosts() {
+    this.hosts = [...this.desktopHosts, ...this.configHosts];
     this.syncRemotes();
     this.emit('hosts');
   }
@@ -168,4 +190,4 @@ async function stampOf(file) {
   }
 }
 
-module.exports = { ClaudeUsage, parseSshHosts };
+module.exports = { ClaudeUsage, configHost, parseSshHosts };

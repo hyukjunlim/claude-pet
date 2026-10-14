@@ -138,6 +138,47 @@ test("Claude's readings come from the mod's file here and on each SSH host", asy
   }
 });
 
+test('hosts picked from ~/.ssh/config are read next to the desktop app\'s', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-usage-'));
+  const sshConnections = path.join(dir, 'ssh_configs.json');
+  const remotes = [];
+  const usage = new ClaudeUsage({
+    usageFile: path.join(dir, 'usage.json'),
+    sshConnections,
+    configHosts: ['gpu'],
+    pollMs: 20,
+    remoteFactory: (o) => {
+      const r = Object.assign(new EventEmitter(), o, { usage: null, mod: null, skew: 0, started: false });
+      r.start = () => { r.started = true; };
+      r.stop = () => { r.started = false; };
+      remotes.push(r);
+      return r;
+    },
+  });
+  let readings = [];
+  usage.on('change', (list) => { readings = list; });
+  usage.on('error', (err) => { throw err; });
+  try {
+    usage.start();
+    assert.deepEqual(remotes.map((r) => [r.key, r.target, r.started]), [['ssh-config:gpu', 'gpu', true]], 'without the desktop app');
+    fs.writeFileSync(sshConnections, JSON.stringify({ configs: [{ name: 'Lab', sshHost: 'lab-server' }] }));
+    assert.ok(await waitFor(() => usage.hostStates().length === 2));
+    assert.deepEqual(usage.hostStates().map((h) => [h.key, h.fromConfig ?? false]), [['ssh:lab-server:22', false], ['ssh-config:gpu', true]]);
+
+    remotes[0].usage = { weekly: { percent: 30, resetsAt: RESET, windowMs: WEEK }, fiveHour: null, at: T0 };
+    remotes[0].emit('change');
+    assert.deepEqual(readings.map((r) => r.weekly.percent), [30]);
+
+    usage.setConfigHosts([]);   // unpicked
+    assert.equal(remotes[0].started, false);
+    assert.deepEqual(readings, []);
+    assert.deepEqual(usage.hostStates().map((h) => h.key), ['ssh:lab-server:22']);
+  } finally {
+    usage.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // The watcher is plain Python 3; run it here against a fake home if Python is installed.
 const python = ['python3', 'python'].find((cmd) => spawnSync(cmd, ['-c', 'import sys; sys.exit(sys.version_info[0] != 3)']).status === 0);
 

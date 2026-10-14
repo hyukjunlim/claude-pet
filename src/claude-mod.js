@@ -14,9 +14,10 @@
 // Taking it away removes those again (function hooks only if they were off before), with the
 // mod's folder and its usage file.
 //
-// The desktop app doesn't pass mods on to the sessions it runs in WSL or over SSH (it leaves a
-// plugin's hooks/ out when it copies the plugin there), so each of those machines gets its own
-// entries. There a small Python script makes the same changes (INSTALLER).
+// Claude Code in WSL or on an SSH host reads that machine's settings, whether you start it there
+// from a terminal or the desktop app runs it (the app doesn't pass mods on: it leaves a plugin's
+// hooks/ out when it copies the plugin there), so each of those machines gets its own entries.
+// There a small Python script makes the same changes (INSTALLER).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -30,6 +31,7 @@ const MOD_FILES = ['.claude-plugin/plugin.json', 'hooks/hooks.json', 'hooks/regi
 const OURS_RE = /[\\/]\.claude-pet[\\/]mod[\\/]pet-usage[\\/]*$/;   // the mod's folder, on any machine
 const BACKUP_SUFFIX = '.claude-pet.bak';
 const INSTALLER_TIMEOUT_MS = 60_000;
+const TOOL_DISTRO_RE = /^(docker-desktop|rancher-desktop|podman-machine)/i;   // WSL distros that aren't for people
 
 function bundledVersion() {
   return JSON.parse(fs.readFileSync(path.join(MOD_SOURCE, '.claude-plugin', 'plugin.json'), 'utf8')).version;
@@ -184,7 +186,8 @@ function writeFileAtomic(file, text) {
 
 // The same changes on another machine (WSL, or an SSH host), in Python 3. It reads one request,
 //   { action: 'install' | 'update' | 'uninstall' | 'status', files?: { <path>: <text> }, windowsDir?: <path> }
-// and answers with one line, { ok: true, version, enabled } or { ok: false, error }. `files` are
+// and answers with one line, { ok: true, version, enabled, claude } or { ok: false, error }, where
+// `claude` says whether Claude Code is set up there at all (its ~/.claude). `files` are
 // the mod's, copied to ~/.claude-pet/mod/pet-usage; 'update' copies them and leaves the settings be. In WSL there are none: `windowsDir` names
 // the copy on the Windows side, which WSL reaches through its path under /mnt (wslpath).
 const INSTALLER = String.raw`
@@ -195,7 +198,8 @@ HOME = os.path.expanduser('~')
 PET = os.path.join(HOME, '.claude-pet')
 MOD = os.path.join(PET, 'mod', 'pet-usage')
 STATE = os.path.join(PET, 'install.json')
-SETTINGS = os.path.join(os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude'), 'settings.json')
+CLAUDE = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude')
+SETTINGS = os.path.join(CLAUDE, 'settings.json')
 
 def is_ours(d):
     return d.replace(chr(92), '/').rstrip('/').endswith('/.claude-pet/mod/pet-usage')
@@ -234,7 +238,7 @@ def answer(settings):
     except (OSError, ValueError, subprocess.CalledProcessError):
         manifest = {}
     enabled = any(is_ours(d) for d in dirs) and env.get('CLAUDE_CODE_ENABLE_FUNCTION_HOOKS') == '1'
-    return {'ok': True, 'version': manifest.get('version'), 'enabled': enabled}
+    return {'ok': True, 'version': manifest.get('version'), 'enabled': enabled, 'claude': os.path.isdir(CLAUDE)}
 
 def main():
     action = req.get('action')
@@ -341,7 +345,8 @@ function runInstaller({ command, args, spawnFn = spawn, timeoutMs = INSTALLER_TI
   });
 }
 
-// The WSL distros running now. (Asking a distro that isn't would start it.)
+// The WSL distros running now, leaving out the ones Docker and the like keep for themselves.
+// (Asking a distro that isn't running would start it.)
 function runningWslDistros(spawnFn = spawn) {
   return new Promise((resolve) => {
     let child;
@@ -357,7 +362,7 @@ function runningWslDistros(spawnFn = spawn) {
     child.on('close', () => {
       // wsl.exe writes its own output in UTF-16
       const text = Buffer.concat(chunks).toString('utf16le').replace(/\0/g, '');
-      resolve(new Set(text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)));
+      resolve(new Set(text.split(/\r?\n/).map((l) => l.trim()).filter((d) => d && !TOOL_DISTRO_RE.test(d))));
     });
   });
 }

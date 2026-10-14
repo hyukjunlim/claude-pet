@@ -1,8 +1,8 @@
 'use strict';
 
-// Reads Claude's plan usage on an SSH host. A Claude Code session the desktop app runs over SSH
-// runs on the host, so Claude Pet's mod (claude-mod/, set up there from the tray menu) saves the
-// usage there, to ~/.claude-pet/usage.json. The pet keeps a small read-only watcher running on the
+// Reads Claude's plan usage on an SSH host. A Claude Code session the desktop app runs over SSH,
+// or that you start there from a terminal, runs on the host, so Claude Pet's mod (claude-mod/, set
+// up there from the tray menu) saves the usage there, to ~/.claude-pet/usage.json. The pet keeps a small read-only watcher running on the
 // host (see ssh-watcher.js) that sends the file whenever it changes, and whether the mod is set up.
 
 const { SshWatcher } = require('./ssh-watcher');
@@ -73,7 +73,8 @@ while True:
 `;
 
 class ClaudeRemote extends SshWatcher {
-  // key: the host as the desktop app's sessions name it (see sshKey in sessions.js)
+  // key: the host as the desktop app's sessions name it (see sshKey in sessions.js), or
+  // ssh-config:<name> for a host from ~/.ssh/config
   constructor({ key, name, target, port = null, identity = null, spawnFn, now }) {
     super({ target, port, identity, spawnFn, now, script: WATCHER, label: 'Claude usage' });
     Object.assign(this, { key, name });

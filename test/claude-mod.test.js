@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const {
-  INSTALLER, LocalMod, bundledVersion, hasMod, modFiles, runInstaller, withMod, withoutMod,
+  INSTALLER, LocalMod, bundledVersion, hasMod, modFiles, runInstaller, runningWslDistros, withMod, withoutMod,
 } = require('../src/claude-mod');
 const { LOADER } = require('../src/ssh-watcher');
 
@@ -172,6 +172,23 @@ test("the installer runs over ssh or wsl.exe, and a failure says why without ssh
   assert.deepEqual(thrown, { ok: false, error: 'ENOENT' });
 });
 
+test("the running WSL distros leave out Docker's own", async () => {
+  let spawned;
+  const running = await runningWslDistros((cmd, args) => {
+    spawned = [cmd, ...args];
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    setImmediate(() => {
+      child.stdout.write(Buffer.from('Ubuntu\r\ndocker-desktop\r\nDebian\r\n', 'utf16le'));   // wsl.exe writes UTF-16
+      child.emit('close', 0);
+    });
+    return child;
+  });
+  assert.deepEqual(spawned, ['wsl.exe', '--list', '--running', '--quiet']);
+  assert.deepEqual([...running], ['Ubuntu', 'Debian']);
+  assert.deepEqual([...await runningWslDistros(() => { throw new Error('ENOENT'); })], [], 'no WSL');
+});
+
 // The installer is plain Python 3; run it here against a fake home if Python is installed.
 const python = ['python3', 'python'].find((cmd) => spawnSync(cmd, ['-c', 'import sys; sys.exit(sys.version_info[0] != 3)']).status === 0);
 
@@ -187,12 +204,13 @@ test('the installer script sets the mod up on a host and takes it away again', {
   const settingsFile = path.join(home, '.claude', 'settings.json');
   const modDir = path.join(home, '.claude-pet', 'mod', 'pet-usage');
   try {
+    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false, claude: false }, 'no Claude Code there');
     fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
     const original = { model: 'opus', env: { CLAUDE_CODE_PLUGIN_DIRS: path.join(home, 'mine'), LANG: '한국어' } };
     fs.writeFileSync(settingsFile, JSON.stringify(original));
-    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false });
+    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false, claude: true });
 
-    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true });
+    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true });
     for (const [rel, text] of Object.entries(modFiles())) {
       assert.equal(fs.readFileSync(path.join(modDir, ...rel.split('/')), 'utf8'), text);
     }
@@ -202,11 +220,11 @@ test('the installer script sets the mod up on a host and takes it away again', {
     assert.equal(after.env.LANG, '한국어');
     assert.deepEqual(readJson(`${settingsFile}.claude-pet.bak`), original);
 
-    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true });
+    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true });
     assert.equal(readJson(settingsFile).env.CLAUDE_CODE_PLUGIN_DIRS.split(path.delimiter).length, 2, 'set up once');
 
     fs.writeFileSync(path.join(home, '.claude-pet', 'usage.json'), '{}');
-    assert.deepEqual(await run({ action: 'uninstall' }), { ok: true, version: null, enabled: false });
+    assert.deepEqual(await run({ action: 'uninstall' }), { ok: true, version: null, enabled: false, claude: true });
     assert.deepEqual(readJson(settingsFile), original);
     assert.equal(fs.existsSync(path.join(home, '.claude-pet', 'mod')), false);
     assert.equal(fs.existsSync(path.join(home, '.claude-pet', 'usage.json')), false);

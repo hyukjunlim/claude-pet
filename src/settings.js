@@ -11,9 +11,11 @@ const DEFAULTS = {
   showActivity: true,
   alwaysAnimate: true,     // animate even when Windows' Animation effects are off
   showUsage: true,         // the weekly-limit meter next to the pet
-  claudeUsageOverSsh: true,  // read Claude's usage from the mod on the desktop app's SSH hosts
+  claudeUsageOverSsh: true,  // read Claude's usage from the mod on SSH hosts
+  claudeSshHosts: [],        // the hosts from ~/.ssh/config picked for the mod (the desktop app's come on their own)
   claudeModOffered: false,   // the pet has asked once whether to set up its Claude Code mod
   claudeModWsl: {},          // distro -> whether the mod is set up there, as last seen
+  claudeCodeWsl: {},         // distro -> whether Claude Code is there, as last seen
   showCodex: true,         // also show Codex threads, when Codex is installed
   codexOverSsh: true,      // and follow the ones running on Codex's SSH hosts
   etlEnabled: false,       // watch SNU eTL for deadlines and notices (needs a token)

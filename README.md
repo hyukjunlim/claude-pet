@@ -14,7 +14,9 @@ Windows.
 
 - **The Claude desktop app** (with Code sessions), **Codex** ([Codex](#codex)), or both. That's
   what the pet watches. With only one of them, the tray menu leaves out the other's items, and
-  clicking the pet opens the one you have.
+  clicking the pet opens the one you have. If you run Claude Code from a terminal instead (the
+  `claude` CLI, here, in WSL or over SSH), there are no session bubbles for it, but the weekly
+  limit still works ([Live Claude usage](#live-claude-usage)).
 - **Git** and **Node.js 22.12 or newer** (the current LTS is fine). `npm install` downloads
   Electron itself.
 - **Optional:** Python, only to rebuild the built-in pet.
@@ -272,8 +274,9 @@ Code knows how much of your plan's limits the account has used, and when they re
 saves those figures to `~/.claude-pet/usage.json`, and does nothing else. The weekly-limit meter
 then follows your usage as it happens, from any session, whether you're at the PC or not.
 
-**Setting it up.** The pet asks once, on its first start. Later, use tray menu → *Live Claude
-usage*, which has a checkbox per machine:
+**Setting it up.** The pet asks once, on its first start, or as soon as it finds Claude Code in WSL.
+Later, use tray menu → *Live Claude usage*, which has a checkbox per machine. The desktop app isn't
+needed: Claude Code reads the same settings whether you start it from a terminal or the app does.
 
 - **This PC:** the pet copies the mod to `~/.claude-pet/mod/pet-usage` and adds two entries to
   the `env` of Claude Code's settings (`~/.claude/settings.json`, backed up first to
@@ -281,17 +284,24 @@ usage*, which has a checkbox per machine:
   - `CLAUDE_CODE_PLUGIN_DIRS`: the mod's folder, after any folders you already list there.
   - `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`: `1`, which mods need. This turns function hooks on for
     every Claude Code session on the machine.
-- **WSL:** the desktop app runs WSL sessions inside the distro, with the distro's own settings,
-  so each distro you've used gets the same two entries in its own `~/.claude/settings.json`.
+- **WSL:** Claude Code in WSL, from a terminal there or run by the desktop app, uses the distro's
+  own settings, so each distro gets the same two entries in its own `~/.claude/settings.json`.
   They point at this PC's copy through `/mnt/c`, so WSL sessions write the same file the pet
-  reads here. The distro needs `python3` for the setup.
-- **SSH hosts:** the desktop app's SSH sessions run on the host, and the app leaves a plugin's
-  hooks out when it copies plugins there, so the mod has to be set up on the host itself: the pet
-  copies it there over SSH and adds the same entries to the host's settings. To read the host's
-  figures, the pet keeps one SSH connection per host (the desktop app's saved connections) with a
-  small read-only Python watcher that sends the file when it changes; tray menu → *Live Claude
-  usage* → *Read usage on SSH hosts* turns that off. As for Codex, the host needs `python3` and a
-  key that works without a prompt.
+  reads here. The menu lists the distros the desktop app has run sessions in, and those where the
+  pet found a `~/.claude`: every 5 minutes it asks the distros that are running (never starting
+  one), each once a run, so one you start Claude Code in shows up soon after. Docker's own distros
+  are left alone. The distro needs `python3`, for the setup and for being asked. Without Claude
+  Code on this PC, the PC gets only the copy of the mod, not the settings entries.
+- **SSH hosts:** Claude Code on a host runs there (and the desktop app leaves a plugin's hooks out
+  when it copies plugins there), so the mod has to be set up on the host itself: the pet copies it
+  there over SSH and adds the same entries to the host's settings. The desktop app's saved
+  connections are listed on their own. For a host you reach from a terminal, pick it under *More
+  SSH hosts (~/.ssh/config)*: the `Host` names in your `~/.ssh/config` (and the files it
+  `Include`s), without wildcards and git hosting like github.com. Picking one sets the mod up there;
+  unticking it removes the mod and forgets the host. To read the hosts' figures, the pet keeps one
+  SSH connection per host with a small read-only Python watcher that sends the file when it
+  changes; tray menu → *Live Claude usage* → *Read usage on SSH hosts* turns that off. As for
+  Codex, the host needs `python3` and a key that works without a prompt.
 
 Sessions you start after setting it up use it; sessions already open don't. When the pet updates,
 it brings the copies of the mod it set up up to date too. Unticking a machine removes the entries
