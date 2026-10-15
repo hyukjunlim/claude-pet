@@ -20,7 +20,7 @@ const { LocalMod, bundledVersion, modFiles, runningWslDistros, sshInstaller, wsl
 const { isSameHost, sshConfigHosts } = require('./ssh-config');
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
-const { checkForUpdate, startUpdate } = require('./updater');
+const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
 const { raiseCodexWindow } = require('./raise');
 const { EtlFeature } = require('./etl/feature');
 
@@ -29,6 +29,10 @@ const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
 const DEBUG_OPEN_AFTER_MS = Number(process.env.CLAUDE_PET_DEBUG_OPEN_AFTER_MS) || 0;
 
 const APP_ROOT = path.join(__dirname, '..');
+// A clone runs as `electron <folder>`, so the folder goes on the command line whenever the pet
+// starts itself again; a downloaded copy (an installer or zip, see "build" in package.json) is
+// its own exe and needs no argument.
+const ROOT_ARGS = app.isPackaged ? [] : [APP_ROOT];
 const RENDERER_DIR = path.join(__dirname, 'renderer');
 const CELL = { width: 192, height: 208 };
 const WIN_WIDTH = 400;
@@ -997,7 +1001,7 @@ function isPoint(p) {
 // ---------------------------------------------------------------- tray
 
 function loginItemOptions() {
-  return app.isPackaged ? {} : { path: process.execPath, args: [APP_ROOT] };
+  return app.isPackaged ? {} : { path: process.execPath, args: ROOT_ARGS };
 }
 
 // `--start-at-login` / `--no-start-at-login` set the same option as the tray menu's checkbox.
@@ -1138,7 +1142,7 @@ function buildMenu() {
 // to Start at login since this pet started.
 function restart() {
   log('restarting');
-  app.relaunch({ args: [APP_ROOT, ...(DEMO ? ['--demo'] : [])] });
+  app.relaunch({ args: [...ROOT_ARGS, ...(DEMO ? ['--demo'] : [])] });
   app.releaseSingleInstanceLock();
   app.quit();
 }
@@ -1186,11 +1190,13 @@ function updateLabel() {
   return update ? 'Update available…' : 'Check for updates…';
 }
 
+// A clone updates itself from GitHub's main. A downloaded copy can't (it isn't a git checkout and
+// has no npm), so for it the check looks at GitHub's releases and offers the download page.
 async function checkUpdates() {
   updateBusy = 'checking';
   let found;
   try {
-    found = await checkForUpdate(APP_ROOT);
+    found = app.isPackaged ? await checkForRelease(app.getVersion(), { fetch: net.fetch }) : await checkForUpdate(APP_ROOT);
   } finally {
     updateBusy = null;
   }
@@ -1198,13 +1204,43 @@ async function checkUpdates() {
   log(`update check: ${found.status}${found.message ? ` (${found.message})` : ''}`);
   if (update) return offerUpdate();
   if (found.status === 'current') {
-    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: `Version ${app.getVersion()} (${found.head.slice(0, 7)}).` });
+    const at = app.isPackaged ? `Version ${app.getVersion()}.` : `Version ${app.getVersion()} (${found.head.slice(0, 7)}).`;
+    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: at });
+  }
+  if (found.status === 'none') {
+    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: `Version ${app.getVersion()}. ${found.message}` });
   }
   return updateBox({ type: 'warning', message: "Couldn't check for updates.", detail: found.message });
 }
 
+// For a downloaded copy: says what's new and opens the download page; the user installs it.
+async function offerRelease() {
+  const { version, changes, url } = update;
+  updateBusy = 'asking';
+  let answer;
+  try {
+    answer = await updateBox({
+      type: 'question',
+      message: `Claude Pet ${version} is available to download.`,
+      detail: [
+        ...(changes.length ? ["What's new:", ...changes.map((line) => `• ${line}`), ''] : []),
+        `This copy (${app.getVersion()}) was installed from a download, so it can't update itself. Get the new ` +
+        'installer or zip from the download page, quit the pet, and run the installer (or replace the unzipped folder). ' +
+        'Your settings and pets are kept.',
+      ].join('\n'),
+      buttons: ['Open download page', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+  } finally {
+    updateBusy = null;
+  }
+  if (answer.response === 0) shell.openExternal(url);
+}
+
 async function offerUpdate() {
   if (!update || updateBusy) return;
+  if (app.isPackaged) return offerRelease();
   const { target, count, changes } = update;
   updateBusy = 'asking';
   let answer;
@@ -1231,7 +1267,7 @@ async function offerUpdate() {
     await startUpdate({
       root: APP_ROOT,
       target,
-      relaunch: { exe: process.execPath, args: [APP_ROOT] },
+      relaunch: { exe: process.execPath, args: ROOT_ARGS },
       logFile,
       resultFile: updateResultFile(),
     });
@@ -1264,6 +1300,15 @@ async function showUpdateResult() {
 }
 
 // ---------------------------------------------------------------- lifecycle
+
+// A downloaded copy is named "Claude Pet", which would give it its own %APPDATA%\Claude Pet.
+// Settings, pets and the log stay where a clone keeps them (%APPDATA%\claude-pet, and
+// ~/Library/Logs/claude-pet on macOS), so going from one kind of install to the other loses
+// nothing. Set before the single-instance lock, which lives in that folder too.
+app.setPath('userData', path.join(app.getPath('appData'), 'claude-pet'));
+app.setAppLogsPath(process.platform === 'darwin'
+  ? path.join(app.getPath('home'), 'Library', 'Logs', 'claude-pet')
+  : path.join(app.getPath('userData'), 'logs'));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

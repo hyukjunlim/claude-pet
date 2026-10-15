@@ -2,6 +2,8 @@
   "name": "claude-pet",
   "version": "0.1.0",
   "description": "A floating desktop pet that shows what your Claude desktop Code sessions and Codex threads are doing.",
+  "author": "hyukjunlim",
+  "repository": "github:hyukjunlim/claude-pet",
   "main": "src/main.js",
   "private": true,
   "license": "MIT",
@@ -10,9 +12,53 @@
     "demo": "electron . --demo",
     "test": "node --test \"test/**/*.test.js\"",
     "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-shortcut.ps1",
-    "sprite:clay": "python tools/make_clay.py"
+    "sprite:clay": "python tools/make_clay.py",
+    "dist": "electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^44.4.5"
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.hyukjunlim.claude-pet",
+    "productName": "Claude Pet",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "pets/**/*",
+      "claude-mod/**/*",
+      "!claude-mod/**/*.test.ts",
+      "etl-workspace/**/*",
+      "LICENSE"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "artifactName": "Claude-Pet-${version}-win.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Claude-Pet-Setup-${version}.${ext}"
+    }
   }
 }

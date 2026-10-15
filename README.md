@@ -9,17 +9,28 @@ pets work here too.
 
 ## Install
 
-There's no installer yet; the pet runs from a copy of this repo. It's built and tested on
-Windows.
+The pet is built and tested on Windows. There are two ways to get it:
+
+- **Download it.** This needs no Node.js or npm. On the
+  [releases page](https://github.com/hyukjunlim/claude-pet/releases/latest), take
+  `Claude-Pet-Setup-<version>.exe` or `Claude-Pet-<version>-win.zip`. The installer puts the
+  pet in your user folder (no admin rights needed) and starts it; the zip you unzip anywhere and
+  start with `Claude Pet.exe`. The app isn't code-signed, so Windows SmartScreen may warn the
+  first time: choose *More info* → *Run anyway*.
+- **Run it from the source**, as below. That's also the copy that updates itself with one click,
+  and the one to hack on.
+
+Both need something to watch:
 
 - **The Claude desktop app** (with Code sessions), **Codex** ([Codex](#codex)), or both. That's
   what the pet watches. With only one of them, the tray menu leaves out the other's items, and
   clicking the pet opens the one you have. If you run Claude Code from a terminal instead (the
   `claude` CLI, here, in WSL or over SSH), there are no session bubbles for it, but the weekly
   limit still works ([Live Claude usage](#live-claude-usage)).
-- **Git** and **Node.js 22.12 or newer** (the current LTS is fine). `npm install` downloads
-  Electron itself.
-- **Optional:** Python, only to rebuild the built-in pet.
+
+To run it from the source you also need **Git** and **Node.js 22.12 or newer** (the current LTS is
+fine; `npm install` downloads Electron itself), and optionally Python, only to rebuild the
+built-in pet.
 
 ```bash
 git clone https://github.com/hyukjunlim/claude-pet.git
@@ -51,6 +62,7 @@ npm run demo       # cycles through every status with fake sessions
 npm test           # unit tests for the status logic
 npm run shortcut   # creates "Claude Pet.lnk" in this folder (Windows)
 node src/sessions.js   # print what the pet currently sees, then exit
+npm run dist       # builds the installer and the zip into dist/ (Windows)
 ```
 
 From its first run on, the pet starts at login; untick *Start at login* in the tray menu to stop
@@ -66,7 +78,13 @@ keeps the previous log as `claude-pet.old.log`.
 
 ## Updating
 
-Tray menu → **Check for updates…** looks at the latest `main` on GitHub. If there's something new,
+**A downloaded copy** (installer or zip) can't update itself. Tray menu → **Check for updates…**
+asks GitHub whether a newer release exists, shows what changed, and opens the download page. Quit
+the pet, run the new installer (or replace the unzipped folder), and that's it: settings, pets and
+the log live outside the app's folder, so nothing is lost. A copy from the source and a downloaded
+one share those files too, so you can switch between the two.
+
+**A copy from the source** updates itself. Tray menu → **Check for updates…** looks at the latest `main` on GitHub. If there's something new,
 a dialog lists what changed; **Update and restart** closes the pet, updates the files, runs
 `npm install` if `package.json` or the lockfile changed, and starts the pet again. A dialog then
 says it worked, or why it didn't (the old version is kept, and the log has the details). It only
@@ -75,12 +93,32 @@ checks when you ask.
 - **Your things are kept.** Settings, your pets and the log live outside this folder
   (`%APPDATA%\claude-pet` and `~/.claude-pet/pets`), so an update never touches them. Keep a
   customized pet in `~/.claude-pet/pets`, not in this folder's `pets/`.
-- **It needs git** (the pet is a clone of this repo) and Node on your PATH, which the install
-  already asked for. It says why when it can't update: the folder isn't a git clone, isn't on
+- **It needs git** (the pet is a clone of this repo) and Node on your PATH, which the source
+  install already asked for. It says why when it can't update: the folder isn't a git clone, isn't on
   `main`, has commits that aren't on GitHub's `main`, or has edited files that an update would
   overwrite. A lockfile that npm rewrote doesn't count.
 - **Installed before this existed?** That version has no such menu item. Update it by hand once,
   as described under [Install](#install).
+
+## Building the installer
+
+`npm run dist` builds `Claude-Pet-Setup-<version>.exe` (a per-user installer) and
+`Claude-Pet-<version>-win.zip` (unzip and run) into `dist/`, with
+[electron-builder](https://www.electron.build/); the settings are under `build` in
+[package.json](package.json). The first build downloads a few tools and takes a while. The app is
+packed as plain files, not an `app.asar`: the pet copies its Claude Code mod and the eTL workspace
+template out of its folder, and serves its pet sheets over `file://`, which an archive would get
+in the way of. Nothing is signed, hence the SmartScreen notice on first start. The version in
+`package.json` is the one the installer carries and the one **Check for updates…** compares with
+the releases on GitHub, so bump it before building a release.
+
+**Releasing** is a tag push. Set `version` in [package.json](package.json), commit, tag that
+commit `v<version>` (`git tag v0.2.0`), and push the tag (`git push origin v0.2.0`).
+[release.yml](.github/workflows/release.yml) then builds the installer and the zip on GitHub,
+runs the tests first, and publishes a release for the tag with both files attached and notes made
+from the commits since the last one; it refuses a tag that doesn't match `version`. To write the
+notes yourself, create the release for the tag by hand before pushing it, or edit it afterwards.
+The pet's update dialog lists the notes' bullet points (lines starting with `- ` or `* `).
 
 ## What the pet tells you
 

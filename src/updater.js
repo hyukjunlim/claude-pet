@@ -1,6 +1,8 @@
 'use strict';
 
-// In-app updates, for the pet's usual install: a git clone of the repo.
+// In-app updates, for the pet's usual install: a git clone of the repo. (A downloaded copy, from
+// an installer or zip, can't update itself: checkForRelease at the end only says when there's a
+// newer download.)
 //
 //   checkForUpdate(root)  fetches origin's main and says whether it has something new (or why this
 //                         copy can't be updated: another branch, edited files, no git...).
@@ -29,6 +31,9 @@ const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const EXIT_TIMEOUT_MS = 30_000;
 const MAX_CHANGES = 12;          // commit subjects listed in the dialog
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
+const REPO = 'hyukjunlim/claude-pet';
+const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
+const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 
 function git(root, args, { timeout = 15_000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -233,4 +238,51 @@ if (require.main === module) {
   runUpdate(payload, { log: payload.logFile ? fileLog(payload.logFile) : undefined }).catch(() => process.exit(1));
 }
 
-module.exports = { checkForUpdate, runUpdate, startUpdate };
+// ---------------------------------------------------------------- a downloaded copy
+
+// [major, minor, patch] from "v0.2.0" or "0.2.0"; null for anything else.
+function versionParts(v) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v ?? '').trim());
+  return m ? m.slice(1, 4).map(Number) : null;
+}
+
+function isNewer(candidate, current) {
+  for (let i = 0; i < 3; i++) {
+    if (candidate[i] !== current[i]) return candidate[i] > current[i];
+  }
+  return false;
+}
+
+// The bullet points of a release's notes, for the dialog.
+function releaseChanges(body) {
+  return String(body ?? '').split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^[-*] /.test(line))
+    .map((line) => line.slice(2).trim())
+    .slice(0, MAX_CHANGES);
+}
+
+// For a downloaded copy of the pet (see "build" in package.json): asks GitHub for the latest
+// release and says whether it's newer than `version`, with `url` (the page to download it from)
+// in every answer but an error. `fetch` is for tests.
+async function checkForRelease(version, { fetch = globalThis.fetch, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
+  try {
+    const res = await fetch(LATEST_RELEASE_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'claude-pet' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.status === 404) return { status: 'none', message: 'Nothing has been published to download yet.', url: RELEASES_PAGE };
+    if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+    const release = await res.json();
+    const latest = versionParts(release.tag_name);
+    if (!latest) throw new Error(`the latest release is tagged "${release.tag_name}", which is not a version`);
+    const url = typeof release.html_url === 'string' && release.html_url ? release.html_url : RELEASES_PAGE;
+    const found = { version: latest.join('.'), url };
+    if (!isNewer(latest, versionParts(version) || [0, 0, 0])) return { status: 'current', ...found };
+    return { status: 'available', ...found, changes: releaseChanges(release.body) };
+  } catch (err) {
+    return { status: 'error', message: err.name === 'TimeoutError' ? "GitHub didn't answer in time." : err.message };
+  }
+}
+
+module.exports = { checkForRelease, checkForUpdate, runUpdate, startUpdate };

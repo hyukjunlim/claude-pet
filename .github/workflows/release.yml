@@ -1,0 +1,57 @@
+# Builds the Windows installer and zip and attaches them to the GitHub release for a pushed
+# `v<version>` tag, which is where the README's download links and the pet's own
+# "Check for updates…" (a downloaded copy compares its version with the latest release) point.
+# See "Releasing" in README.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The app reports the version in package.json, so a tag that says otherwise would make
+      # "Check for updates…" wrong for everyone who installs this release.
+      - name: Check that the tag matches package.json
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "The tag is $GITHUB_REF_NAME but package.json says $version. Bump the version, commit, and tag v$version." >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      - run: npm test
+
+      # electron-builder would publish on its own when it sees a tag; the step below does it instead.
+      - run: npm run dist -- --publish never
+
+      # A release made by hand for this tag (say, with notes written out) keeps its notes and gets
+      # the files; otherwise one is created with notes from the commits since the last release.
+      - name: Attach the files to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=("dist/Claude-Pet-Setup-$VERSION.exe" "dist/Claude-Pet-$VERSION-win.zip")
+          ls -l "${files[@]}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber "${files[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" --title "Claude Pet $VERSION" --generate-notes "${files[@]}"
+          fi

@@ -3,3 +3,5 @@ node_modules/
 __pycache__/
 # made on each PC by `npm run shortcut`
 *.lnk
+# made by `npm run dist`
+dist/

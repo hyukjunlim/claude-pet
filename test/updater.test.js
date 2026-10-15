@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { checkForUpdate, runUpdate } = require('../src/updater');
+const { checkForRelease, checkForUpdate, runUpdate } = require('../src/updater');
 
 const AUTHOR = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
 
@@ -215,4 +215,58 @@ test('nothing is touched while the pet is still running', async (t) => {
   await runUpdate({ root: copy, target, pid: 1, relaunch: RELAUNCH }, { ...deps, waitForExit: async () => false });
   assert.equal(head(), before);
   assert.deepEqual(calls.starts, []);
+});
+
+// ---------------------------------------------------------------- a downloaded copy
+
+function github(status, body) {
+  const calls = [];
+  const fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { status, ok: status >= 200 && status < 300, json: async () => body };
+  };
+  return { fetch, calls };
+}
+
+test('a newer release is offered with its notes and page', async () => {
+  const { fetch, calls } = github(200, {
+    tag_name: 'v0.2.0',
+    html_url: 'https://github.com/hyukjunlim/claude-pet/releases/tag/v0.2.0',
+    body: 'Notes\r\n\r\n- Faster bubbles\r\n* A new pet\r\nnot a bullet\r\n',
+  });
+  const found = await checkForRelease('0.1.0', { fetch });
+  assert.deepEqual(found, {
+    status: 'available',
+    version: '0.2.0',
+    url: 'https://github.com/hyukjunlim/claude-pet/releases/tag/v0.2.0',
+    changes: ['Faster bubbles', 'A new pet'],
+  });
+  assert.match(calls[0].url, /api\.github\.com\/repos\/hyukjunlim\/claude-pet\/releases\/latest$/);
+  assert.equal(calls[0].options.headers['User-Agent'], 'claude-pet');
+});
+
+test('the same or an older release is not an update', async () => {
+  for (const tag of ['v0.1.0', '0.0.9', 'v0.1.0-rc1']) {
+    const found = await checkForRelease('0.1.0', { fetch: github(200, { tag_name: tag, body: null }).fetch });
+    assert.equal(found.status, 'current', tag);
+    assert.equal(found.url, 'https://github.com/hyukjunlim/claude-pet/releases/latest');
+  }
+  const newer = await checkForRelease('0.1.0', { fetch: github(200, { tag_name: '1.0.0' }).fetch });
+  assert.equal(newer.status, 'available');
+  assert.deepEqual(newer.changes, []);
+});
+
+test('no release yet, a bad tag, a GitHub error and a timeout are reported, not thrown', async () => {
+  const none = await checkForRelease('0.1.0', { fetch: github(404, { message: 'Not Found' }).fetch });
+  assert.equal(none.status, 'none');
+  assert.match(none.url, /releases\/latest$/);
+  const tag = await checkForRelease('0.1.0', { fetch: github(200, { tag_name: 'nightly' }).fetch });
+  assert.equal(tag.status, 'error');
+  assert.match(tag.message, /nightly/);
+  const down = await checkForRelease('0.1.0', { fetch: github(503, {}).fetch });
+  assert.deepEqual(down, { status: 'error', message: 'GitHub answered 503' });
+  const slow = await checkForRelease('0.1.0', { fetch: (_url, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason));
+  }), timeoutMs: 20 });
+  assert.deepEqual(slow, { status: 'error', message: "GitHub didn't answer in time." });
 });
