@@ -265,8 +265,10 @@ test('no release yet, a bad tag, a GitHub error and a timeout are reported, not 
   assert.match(tag.message, /nightly/);
   const down = await checkForRelease('0.1.0', { fetch: github(503, {}).fetch });
   assert.deepEqual(down, { status: 'error', message: 'GitHub answered 503' });
-  const slow = await checkForRelease('0.1.0', { fetch: (_url, { signal }) => new Promise((_resolve, reject) => {
-    signal.addEventListener('abort', () => reject(signal.reason));
-  }), timeoutMs: 20 });
+  // The real fetch gives up through the signal; faking its timeout keeps the test off the clock.
+  const slow = await checkForRelease('0.1.0', { fetch: async (_url, { signal }) => {
+    assert.ok(signal instanceof AbortSignal);
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  } });
   assert.deepEqual(slow, { status: 'error', message: "GitHub didn't answer in time." });
 });
