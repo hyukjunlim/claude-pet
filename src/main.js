@@ -22,6 +22,7 @@ const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
 const { raiseCodexWindow } = require('./raise');
+const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
 
 const DEMO = process.argv.includes('--demo');
@@ -296,10 +297,9 @@ function createWindow() {
       spellcheck: false,
     },
   });
-  // On Windows, Electron puts a 'floating' window just behind the taskbar, so when the taskbar
-  // wasn't always on top at that moment (as it isn't at times when it hides itself), the pet
-  // wasn't either, and other windows went over it. There the other levels are all simply
-  // always on top.
+  watchWindowOrder(win, { log });
+  // Windows puts the floating level behind the taskbar; pop-up-menu avoids that
+  // anchor changing the pet's topmost status when the taskbar hides.
   win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
   win.setMenuBarVisibility(false);
   // Until the page says where the pet is, the window takes no mouse at all.
