@@ -8,7 +8,6 @@ const DEFAULTS = {
   scale: 0.75,
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
-  home: null,              // the monitor that position is on, and where on it (see home.js)
   showActivity: true,
   alwaysAnimate: true,     // animate even when Windows' Animation effects are off
   showUsage: true,         // the weekly-limit meter next to the pet

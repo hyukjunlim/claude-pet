@@ -19,7 +19,6 @@ const { ClaudeUsage } = require('./claude-usage');
 const { LocalMod, bundledVersion, modFiles, runningWslDistros, sshInstaller, wslInstaller } = require('./claude-mod');
 const { isSameHost, sshConfigHosts } = require('./ssh-config');
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
-const { homeOf, homeDisplay, homePosition, validHome } = require('./home');
 const { DemoTracker } = require('./demo');
 const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
 const { raiseCodexWindow } = require('./raise');
@@ -74,8 +73,6 @@ let tray = null;
 let pets = [];
 let currentPet = null;
 let petPos = null;              // top-left of the pet sprite, screen DIPs
-let petHome = null;             // the monitor the pet was put on, and where on it (see home.js)
-let awayFromHome = false;       // that monitor is away, so the pet is on another one for now
 let layout = 'above';           // pills above or below the pet
 let shape = null;               // what the page says is drawn: the pet and the bubbles (see shape.js)
 let shapeKey = '';              // the shape last set on the window, to skip setting it again
@@ -127,18 +124,18 @@ function log(...args) {
 
 // ---------------------------------------------------------------- geometry
 
-function petScale(display = displayForPet()) {
+function petScale() {
   let s = settings.get('scale');
   if (currentPet?.pixelArt) {
     // Snap so every art pixel (4 atlas px) covers a whole number of device pixels.
-    const dpr = display.scaleFactor || 1;
+    const dpr = displayForPet().scaleFactor || 1;
     s = Math.max(1, Math.round(4 * s * dpr)) / (4 * dpr);
   }
   return s;
 }
 
-function petSize(display = displayForPet()) {
-  const s = petScale(display);
+function petSize() {
+  const s = petScale();
   return { width: CELL.width * s, height: CELL.height * s, scale: s };
 }
 
@@ -151,9 +148,9 @@ function displayForPet(pos = petPos) {
   });
 }
 
-function clampPet(pos, display = displayForPet(pos)) {
-  const { width, height } = petSize(display);
-  const wa = display.workArea;
+function clampPet(pos) {
+  const { width, height } = petSize();
+  const wa = displayForPet(pos).workArea;
   return {
     x: Math.min(Math.max(pos.x, wa.x), wa.x + wa.width - width),
     y: Math.min(Math.max(pos.y, wa.y), wa.y + wa.height - height),
@@ -164,23 +161,6 @@ function defaultPosition() {
   const wa = screen.getPrimaryDisplay().workArea;
   const { width, height } = petSize();
   return { x: wa.x + wa.width - width - EDGE_MARGIN - 40, y: wa.y + wa.height - height - EDGE_MARGIN };
-}
-
-// The pet sits where it was put on its monitor. While that monitor is away it stays on the
-// nearest one, as close to home as it can get, and goes back once the monitor is plugged in again.
-function settleAtHome(fallback) {
-  const display = homeDisplay(petHome, screen.getAllDisplays());
-  return display ? clampPet(homePosition(petHome, display), display) : clampPet(fallback);
-}
-
-// Say so once when the pet's monitor goes away, and once when the pet is back on it.
-function noteHome() {
-  const display = displayForPet();
-  const away = !homeDisplay(petHome, [display]);
-  if (away === awayFromHome) return;
-  awayFromHome = away;
-  const name = display.label || display.id;
-  log(away ? `the pet's monitor is away, so it is on ${name} for now` : `the pet is back on ${name}`);
 }
 
 // Bubbles go above the pet when there's room for a few of them there. The stack then grows
@@ -276,20 +256,14 @@ function resizeInPlace(change) {
   finishMove();
 }
 
-// `put`: the pet was put here (dragged, thrown, resized or reset), so this is its home now. A
-// monitor coming or going only moves it for the time being.
-function finishMove(put = true) {
+function finishMove() {
   const next = chooseLayout(petPos);
   const changed = next !== layout;
   layout = next;
   placeWindow();
   sendLayout();
   if (changed) log(`pills now ${layout} the pet`);
-  if (put) {
-    petHome = homeOf(petPos, displayForPet());
-    awayFromHome = false;
-  }
-  settings.set({ position: petPos, home: petHome });
+  settings.set({ position: petPos });
 }
 
 // ---------------------------------------------------------------- window
@@ -1356,13 +1330,7 @@ if (!app.requestSingleInstanceLock()) {
     protocol.handle('pet', handleProtocol);
     loadPets();
     const saved = settings.get('position');
-    petHome = validHome(settings.get('home')) ? settings.get('home') : null;
-    petPos = settleAtHome(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : defaultPosition());
-    if (!petHome) {
-      petHome = homeOf(petPos, displayForPet());
-      settings.set({ home: petHome });
-    }
-    noteHome();
+    petPos = clampPet(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : defaultPosition());
     layout = 'above';
     layout = chooseLayout(petPos);
 
@@ -1426,9 +1394,8 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     const onDisplaysChanged = () => {
-      petPos = settleAtHome(petPos);
-      finishMove(false);
-      noteHome();
+      petPos = clampPet(petPos);
+      finishMove();
     };
     // Debug aid: CLAUDE_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
     if (DEBUG_OPEN_AFTER_MS) {
