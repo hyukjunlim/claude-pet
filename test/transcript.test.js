@@ -74,6 +74,40 @@ test('a turn that ended waiting on you needs you until you have seen it', () => 
   assert.equal(deriveStatus(asking, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');
 });
 
+// The desktop app's next-step box. When it shows a question, its result ends the turn: no reply follows.
+const wrapUp = (s, id, input) => toolUse(s, id, 'mcp__ccd_turn__wrap_up', input);
+const endsTurn = (entry) => ({ ...entry, mcpMeta: { _meta: { 'claude/endTurn': true } } });
+
+test('a turn that ends on a question in the next-step box needs you until you have seen it', () => {
+  const ask = wrapUp(5, 'w1', { recap: 'Compared the metrics.', ask: 'Which metrics go in the paper?', actions: [] });
+  const s = run([prompt(0), ask, endsTurn(toolResult(6, 'w1', 'Shown in the next-step box.'))]);
+  assert.deepEqual(deriveStatus(s, { lastFocusedAt: T0 - 1000 }, T0 + 10_000), { status: 'waiting', detail: 'Which metrics go in the paper?', since: T0 + 6000 });
+  // The app's summary calls the turn completed; the question is still there.
+  const summary = { status_category: 'completed', status_detail: 'Compared the metrics', summarizes_uuid: 'a-w1' };
+  assert.equal(deriveStatus(s, { summary }, T0 + 10_000).status, 'waiting');
+  assert.equal(deriveStatus(s, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');   // looked at
+  assert.equal(deriveStatus(s, { dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
+  // Your answer starts the next turn, and that one ends as usual.
+  const next = run([prompt(0), ask, endsTurn(toolResult(6, 'w1')), prompt(30, 'ABS + TED')]);
+  assert.deepEqual(deriveStatus(next, {}, T0 + 31_000), { status: 'running', detail: 'Thinking', since: T0 + 30_000 });
+  applyEntry(next, reply(40));
+  applyEntry(next, stopSummary(41));
+  assert.equal(deriveStatus(next, {}, T0 + 42_000).status, 'review');
+});
+
+test('a tool result that ends the turn without a question leaves it Ready', () => {
+  const s = run([prompt(0), toolUse(3, 't1', 'mcp__other__finish'), endsTurn(toolResult(4, 't1'))]);
+  assert.deepEqual(deriveStatus(s, {}, T0 + 10_000), { status: 'review', detail: 'Finished', since: T0 + 4000 });
+});
+
+test("a question the next-step box didn't show keeps the turn going", () => {
+  const ask = wrapUp(5, 'w1', { recap: 'Done.', ask: 'Commit it?', actions: [{ action: 'commit' }] });
+  const s = run([prompt(0), ask, toolResult(6, 'w1', 'Not shown: commit does not hold right now.')]);
+  assert.equal(deriveStatus(s, {}, T0 + 7000).status, 'running');
+  applyEntry(s, reply(9));
+  assert.equal(deriveStatus(s, {}, T0 + 10_000).status, 'review');
+});
+
 test("a reply split into thinking and text entries is still the turn's last reply", () => {
   const block = (s, uuid, type) => ({
     type: 'assistant', uuid, timestamp: at(s),

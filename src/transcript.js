@@ -4,9 +4,9 @@
 // ~/.claude/projects/<project>/<session>.jsonl) into a pet status.
 //
 // Statuses, highest priority first (the first four in the order ChatGPT's pet uses):
-//   waiting    - Claude is blocked on you (a question, a plan to approve, or the
-//                desktop app's end-of-turn summary says it needs a decision; sessions.js
-//                adds permission prompts, from the app's log)
+//   waiting    - Claude is blocked on you (a question, a plan to approve, a turn that ended on a
+//                question in the desktop app's next-step box, or the app's end-of-turn summary
+//                says it needs a decision; sessions.js adds permission prompts, from the app's log)
 //   failed     - the turn ended with an API error
 //   review     - the turn finished and you haven't looked at it yet
 //   running    - a turn is in progress
@@ -18,6 +18,7 @@
 const path = require('node:path');
 
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+const NEXT_STEP_TOOL = 'mcp__ccd_turn__wrap_up';   // fills the desktop app's next-step box
 const NEEDS_YOU = new Set(['blocked', 'need_input']);   // end-of-turn summaries the app marks yellow
 const END_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'refusal']);
 const TASK_ENDED = new Set(['completed', 'failed', 'killed', 'stopped']);   // <status> of a task's last notice
@@ -44,6 +45,7 @@ function createTurnState() {
     error: null,
     retrying: false,
     interrupted: false,
+    question: null,              // what the turn ended asking you in the app's next-step box
     backgroundTasks: new Map(),  // task id -> { detail, at }: sent to the background, no ending notice yet
     title: null,
     cwd: null,
@@ -139,14 +141,16 @@ function startTurn(state, at) {
   state.error = null;
   state.retrying = false;
   state.interrupted = false;
+  state.question = null;
 }
 
-function endTurn(state, at, { interrupted = false } = {}) {
+function endTurn(state, at, { interrupted = false, question = null } = {}) {
   state.turnActive = false;
   state.turnEndedAt = at || state.lastEventAt;
   state.pendingTools.clear();
   state.retrying = false;
   state.interrupted = interrupted;
+  state.question = question;
 }
 
 // The id of the task a tool result says went to the background, or null: a command (also one
@@ -229,11 +233,13 @@ function applyUser(state, entry, at) {
 
   if (Array.isArray(content) && content.some((c) => c?.type === 'tool_result')) {
     let interrupted = false;
+    let question = null;
     // One entry holds one result, so its structured toolUseResult says what the call did.
     const single = content.filter((c) => c?.type === 'tool_result').length === 1;
     for (const c of content) {
       if (c?.type !== 'tool_result') continue;
       const call = state.pendingTools.get(c.tool_use_id);
+      if (call?.question) question = call.question;
       const result = single ? entry.toolUseResult : null;
       const task = launchedTask(result, call);
       if (task) startBackgroundTask(state, task, { detail: call?.detail || 'a task', at });
@@ -245,6 +251,12 @@ function applyUser(state, entry, at) {
     }
     if (interrupted) {
       endTurn(state, at, { interrupted: true });
+      return;
+    }
+    // A tool's result can end the turn, with no reply after it: the next-step box does when it
+    // shows you a question.
+    if (entry.mcpMeta?._meta?.['claude/endTurn'] === true) {
+      endTurn(state, at, { question });
       return;
     }
     // A tool result means a turn is in flight, even if we started reading mid-turn.
@@ -288,7 +300,8 @@ function applyAssistant(state, entry, at) {
   if (Array.isArray(msg.content)) {
     for (const c of msg.content) {
       if (c?.type === 'tool_use' && c.id) {
-        state.pendingTools.set(c.id, { name: c.name, detail: describeTool(c.name, c.input), at });
+        const question = c.name === NEXT_STEP_TOOL && typeof c.input?.ask === 'string' && c.input.ask.trim() ? c.input.ask : null;
+        state.pendingTools.set(c.id, { name: c.name, detail: describeTool(c.name, c.input), at, question });
       }
     }
   }
@@ -350,6 +363,9 @@ function turnStatus(state, meta, now) {
   if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
 
   if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
+  // It ended on a question for you in the next-step box. (The app's summary may still call the
+  // turn completed.)
+  if (state.question) return { status: 'waiting', detail: oneLine(state.question), since: ended };
 
   const summary = meta.summary;
   const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;

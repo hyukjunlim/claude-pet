@@ -124,7 +124,7 @@ The pet's update dialog lists the notes' bullet points (lines starting with `- `
 
 | Pet animation | Bubble         | Meaning |
 | ------------- | -------------- | ------- |
-| waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker) and you haven't looked at it since |
+| waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, ended its turn on a question in the app's next-step box, or ended it waiting on a decision from you (the app's yellow marker), and you haven't looked at it since |
 | failed        | **Error**      | The turn ended with an API error |
 | review        | **Ready**      | A turn finished and you haven't opened that session since |
 | running       | **Running**    | Claude is working |
