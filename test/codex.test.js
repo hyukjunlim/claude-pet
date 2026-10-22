@@ -172,8 +172,9 @@ test('the tracker combines running threads here with unread threads on other hos
   try {
     const hash = 'b'.repeat(64);
     const remoteThread = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6c';
+    const subagent = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a7d';   // spawned by remoteThread; the app doesn't list it
     fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
-      'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`remote-ssh-discovered:lab-server:${hash}`]: [remoteThread] } } },
+      'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`remote-ssh-discovered:lab-server:${hash}`]: [remoteThread, subagent] } } },
       'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab-server' }],
     }));
     fs.mkdirSync(path.join(home, 'sqlite'));

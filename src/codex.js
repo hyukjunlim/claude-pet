@@ -622,6 +622,8 @@ class CodexTracker extends EventEmitter {
     for (const [threadId, hostId] of this.unread) {
       // A dot's replies are news; what it started, and its upkeep on a timer, aren't.
       if (followed.has(threadId) || this.subtasks.has(threadId) || this.dreams.has(threadId)) continue;
+      // Nor are threads the app doesn't list, like the subagents a thread spawns, which it marks unread too.
+      if (!this.catalog.has(threadId) && !this.aeons.has(threadId)) continue;
       if (this.aeons.get(threadId)?.replied === false) continue;             // unread, but the chat has nothing new
       const host = this.catalog.get(threadId)?.hostId || hostId;
       const dotAt = Math.min(this.aeons.get(threadId)?.activity || 0, now);   // when a dot last spoke
