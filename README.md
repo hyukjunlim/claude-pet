@@ -46,6 +46,9 @@ all.
 It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* to open the token
 form, or *나중에* to skip it; you can connect later from the tray menu's *eTL* item.
 
+Chats on claude.ai and chatgpt.com can get bubbles too, through an optional browser extension:
+see [Web chats](#web-chats-claudeai-chatgpt).
+
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
@@ -302,6 +305,12 @@ are marked "Claude Chat" or "ChatGPT" (e.g. "ChatGPT · 2m").
   choose *Load unpacked* and pick the folder that *Open the extension folder* shows. The key in the
   extension's manifest fixes its ID, so the host answers only this extension, wherever its folder
   is. Turning web chats off removes the registration.
+
+  Without the tray menu (say, an assistant setting the pet up for you): quit the pet, set
+  `"webChats": true` in `%APPDATA%\claude-pet\settings.json`, and start it again; it registers the
+  host as it starts. The extension's folder is `browser-extension` in the source folder, or
+  `resources\app\browser-extension` next to `Claude Pet.exe` in a downloaded copy. Loading it
+  (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
 - **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
   reply is being written and whether you're looking at it. Never the messages. The extension only
   reads the page and makes no requests of its own; the host hands the tabs' reports to the pet over
