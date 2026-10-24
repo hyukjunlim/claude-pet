@@ -39,8 +39,9 @@ exit 1
 // The same for a web chat's browser window, once the extension has brought the chat's tab forward
 // in it. The browser is whichever one started the extension's native host (Chrome, Edge, Aside or
 // another Chromium browser): up the host's parent chain, past the cmd.exe that ran its launcher.
-// Its window is the one whose title starts with the tab's. The title comes from a web page, so it
-// reaches the script base64-encoded, as data, never as code.
+// Its window is the one whose title starts with the tab's ("<tab> - Google Chrome"), or, for a
+// site installed as an app, ends with it after the app's name ("ChatGPT - <tab>"). The title comes
+// from a web page, so it reaches the script base64-encoded, as data, never as code.
 const BROWSER_HELPER = String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
@@ -66,11 +67,15 @@ public static class PetRaiseBrowser {
       if (pid != browser) return true;
       var s = new StringBuilder(1024);
       GetWindowText(h, s, s.Capacity);
-      if (!s.ToString().StartsWith(title, StringComparison.Ordinal)) return true;
+      if (!Shows(s.ToString(), title)) return true;
       found = h;
       return false;
     }, IntPtr.Zero);
     return found;
+  }
+  // A browser window: "<tab> - <browser>". An app window: "<app> - <tab>", or just "<tab>".
+  public static bool Shows(string window, string tab) {
+    return window.StartsWith(tab, StringComparison.Ordinal) || window.EndsWith(" - " + tab, StringComparison.Ordinal);
   }
   public static bool Raise(IntPtr h) {
     if (IsIconic(h)) ShowWindow(h, 9);              // SW_RESTORE

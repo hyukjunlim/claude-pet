@@ -120,7 +120,7 @@ function newNode(key, label, pathText) {
 }
 
 // `claude`, `codex`: the trackers' full lists. `chats`: the web chats' (WebChats.all), which go
-// first, under "Chat", a folder per site. `sshHosts`: from ~/.ssh/config (sshConfigHosts).
+// first, right under "Chat" (as its `loose`). `sshHosts`: from ~/.ssh/config (sshConfigHosts).
 // `codexConnections`: CodexTracker.connections. `defaultWsl`: the distro Codex's local threads
 // and loopback SSH hosts run in. `now`: for which folders start out open.
 function buildTree({
@@ -159,28 +159,18 @@ function buildTree({
       return { ...host, folders, loose, ...counts(all), latest: latestOf(all) };
     })
     .sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
-  const chat = chatHost(chats, now);
+  const chat = chatHost(chats);
   return chat ? [chat, ...machines] : machines;
 }
 
-// The web chats as the first heading, "Chat", with a folder per site (in a fixed order, so it
-// doesn't jump about) holding its conversations, newest first.
-const CHAT_SITES = [
-  { site: 'claude', label: 'claude.ai', app: 'claude-web' },
-  { site: 'chatgpt', label: 'ChatGPT', app: 'chatgpt' },
-];
+// The web chats as the first heading, "Chat", their conversations right under it, newest first;
+// a dot in each site's color tells claude.ai's from ChatGPT's.
+const CHAT_APP = { claude: 'claude-web', chatgpt: 'chatgpt' };
 
-function chatHost(chats, now) {
-  const folders = CHAT_SITES
-    .map(({ site, label, app }) => {
-      const node = newNode(`chat|${site}`, label, '');
-      node.sessions = chats.filter((c) => c.site === site).map((c) => item(c, app));
-      return node.sessions.length ? { ...finish(node, now), open: true } : null;
-    })
-    .filter(Boolean);
-  if (!folders.length) return null;
-  const all = folders.flatMap(allSessions);
-  return { key: 'chat', kind: 'chat', label: 'Chat', folders, loose: [], ...counts(all), latest: latestOf(all) };
+function chatHost(chats) {
+  const sessions = chats.filter((c) => CHAT_APP[c.site]).map((c) => item(c, CHAT_APP[c.site])).sort(byActivity);
+  if (!sessions.length) return null;
+  return { key: 'chat', kind: 'chat', label: 'Chat', folders: [], loose: sessions, ...counts(sessions), latest: latestOf(sessions) };
 }
 
 // A folder with no sessions of its own and one folder in it becomes one row with it. A top row

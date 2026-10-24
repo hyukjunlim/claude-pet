@@ -109,21 +109,19 @@ test('paths are read the way each app writes them', () => {
   assert.equal(splitPath(null), null);
 });
 
-test('web chats come first, under Chat, a folder per site in a fixed order', () => {
+test('web chats come first, right under Chat, newest first, each with its site\'s mark', () => {
   const chat = (id, site, extra = {}) => ({
     id: `web:${site}:${id}`, kind: 'web', site, title: id, status: 'idle', since: 0, lastActivityAt: ago(1), ...extra,
   });
   const hosts = buildTree({
     claude: [claude('pc', 'C:\\x')],
-    chats: [chat('gpt old', 'chatgpt', { lastActivityAt: ago(3) }), chat('plan', 'claude', { status: 'review' }), chat('gpt new', 'chatgpt', { status: 'running' })],
+    chats: [chat('gpt old', 'chatgpt', { lastActivityAt: ago(3) }), chat('plan', 'claude', { status: 'review' }), chat('gpt new', 'chatgpt', { status: 'running', lastActivityAt: ago(0.5) })],
     now: NOW,
   });
   assert.deepEqual(hosts.map((h) => [h.key, h.label]), [['chat', 'Chat'], ['pc', 'This PC']]);
   const [c] = hosts;
-  assert.deepEqual(c.folders.map((f) => [f.label, f.sessions.map((s) => [s.title, s.app])]), [
-    ['claude.ai', [['plan', 'claude-web']]],
-    ['ChatGPT', [['gpt new', 'chatgpt'], ['gpt old', 'chatgpt']]],
-  ]);
+  assert.deepEqual(c.folders, []);
+  assert.deepEqual(c.loose.map((s) => [s.title, s.app]), [['gpt new', 'chatgpt'], ['plan', 'claude-web'], ['gpt old', 'chatgpt']]);
   assert.deepEqual([c.attention, c.busy], [1, 1]);
   assert.equal(buildTree({ chats: [], claude: [claude('pc', 'C:\\x')], now: NOW })[0].key, 'pc');   // no chats, no heading
 });

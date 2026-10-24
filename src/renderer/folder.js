@@ -93,7 +93,7 @@
     };
     for (const h of hosts) {
       h.folders.forEach(walk);
-      if (h.loose.length) out.push([`${h.key}|loose`, true]);
+      if (h.loose.length && h.kind !== 'chat') out.push([`${h.key}|loose`, true]);
     }
     return out;
   }
@@ -203,7 +203,9 @@
     if (open) {
       const kids = el('div', 'children');
       for (const f of h.folders) kids.append(folderEl(f, 0));
-      if (h.loose.length) {
+      // Web chats sit right under "Chat"; a machine's sessions without a folder, under "No folder".
+      if (h.kind === 'chat') for (const s of h.loose) kids.append(sessionEl(s, 0));
+      else if (h.loose.length) {
         kids.append(folderEl({ key: `${h.key}|loose`, label: 'No folder', path: '', sessions: h.loose, children: [], open: true, attention: 0, busy: 0 }, 0));
       }
       wrap.append(kids);
