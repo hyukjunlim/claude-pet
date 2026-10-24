@@ -2,7 +2,8 @@
 
 // Folder mode's page: every Claude session and Codex thread under its machine and folder (the
 // tree comes ready-made from src/folder-tree.js), eTL's notices under it, and the weekly limits
-// and the pet docked at the bottom. A click on a session opens it in its app; a folder folds.
+// and the pet docked at the bottom. A click on a session opens it in its app; a folder folds,
+// and dragging it moves it among its siblings.
 
 (() => {
   const api = window.folder;
@@ -17,6 +18,7 @@
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
   const APP_NAME = { claude: 'Claude', codex: 'Codex', 'claude-web': 'claude.ai', chatgpt: 'ChatGPT', gemini: 'Gemini' };
   const FOLD_KEY = 'claude-pet:folder-fold';   // folder key -> open, where you changed it
+  const ORDER_KEY = 'claude-pet:folder-order'; // parent key -> its folders' keys, in your order
   const BASE_ZOOM = 1.2;                       // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
 
@@ -24,13 +26,18 @@
   let notices = [];
   let query = '';
   let current = null;                          // the session you opened last
-  let fold = loadFold();
+  let fold = load(FOLD_KEY);
+  let order = load(ORDER_KEY);
+  let press = null;                            // a folder row held down, maybe being dragged
+  let dragged = false;                         // the click a drag ends with isn't one
+  let treePending = false;                     // a tree that came during a drag
 
   // ---------------------------------------------------------- data from the main process
 
   api.onTree((list) => {
     hosts = Array.isArray(list) ? list : [];
-    render();
+    if (press?.dragging) treePending = true;   // the rows hold still under a drag
+    else render();
   });
   api.onNotices((list) => {
     notices = Array.isArray(list) ? list : [];
@@ -58,12 +65,20 @@
 
   // ---------------------------------------------------------- folding
 
-  function loadFold() {
+  function load(key) {
     try {
-      const saved = JSON.parse(localStorage.getItem(FOLD_KEY) || '{}');
+      const saved = JSON.parse(localStorage.getItem(key) || '{}');
       return saved && typeof saved === 'object' ? saved : {};
     } catch {
       return {};
+    }
+  }
+
+  function save(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // kept for this run only
     }
   }
 
@@ -73,13 +88,7 @@
     render();
   }
 
-  function saveFold() {
-    try {
-      localStorage.setItem(FOLD_KEY, JSON.stringify(fold));
-    } catch {
-      // kept for this run only
-    }
-  }
+  const saveFold = () => save(FOLD_KEY, fold);
 
   // While searching, everything that matches is shown open.
   const isOpen = (key, byDefault) => (query ? true : fold[key] ?? byDefault);
@@ -154,10 +163,10 @@
     const out = [];
     const walk = (n) => {
       out.push(...n.sessions);
-      n.children.forEach(walk);
+      arranged(n.key, n.children).forEach(walk);
     };
     for (const h of shown) {
-      h.folders.forEach(walk);
+      arranged(h.key, h.folders).forEach(walk);
       out.push(...h.loose);
     }
     return out;
@@ -202,7 +211,7 @@
     wrap.append(head);
     if (open) {
       const kids = el('div', 'children');
-      for (const f of h.folders) kids.append(folderEl(f, 0));
+      for (const f of arranged(h.key, h.folders)) kids.append(folderEl(f, 0, h.key));
       // Web chats sit right under "Chat"; a machine's sessions without a folder, under "No folder".
       if (h.kind === 'chat') for (const s of h.loose) kids.append(sessionEl(s, 0));
       else if (h.loose.length) {
@@ -213,9 +222,14 @@
     return wrap;
   }
 
-  function folderEl(n, depth) {
+  // `parentKey`: the machine or folder it sits in, among whose folders it can be dragged ("No
+  // folder" has none: it stays last).
+  function folderEl(n, depth, parentKey = null) {
     const open = isOpen(n.key, n.open);
     const wrap = el('div', `folder${open ? ' open' : ''}`);
+    wrap.dataset.key = n.key;
+    if (parentKey) wrap.dataset.parent = parentKey;
+    wrap.style.setProperty('--depth', String(depth));
     const row = el('button', 'row');
     row.type = 'button';
     row.style.setProperty('--depth', String(depth));
@@ -224,12 +238,15 @@
     if (n.path) row.title = n.path;
     row.append(el('span', 'chevron', '▶'), withMatches(el('span', 'name'), n.label));
     if (!open) row.append(...pips(n));
-    row.addEventListener('click', () => setOpen(n.key, !open));
+    row.addEventListener('click', () => {
+      if (!dragged) setOpen(n.key, !open);
+    });
+    if (parentKey) row.addEventListener('pointerdown', (e) => pressFolder(e, wrap));
     wrap.append(row);
     if (open) {
       const kids = el('div', 'children');
       for (const s of n.sessions) kids.append(sessionEl(s, depth + 1));
-      for (const c of n.children) kids.append(folderEl(c, depth + 1));
+      for (const c of arranged(n.key, n.children)) kids.append(folderEl(c, depth + 1, n.key));
       wrap.append(kids);
     }
     return wrap;
@@ -395,6 +412,118 @@
     return g;
   }
 
+  // ---------------------------------------------------------- folder order: drag a folder
+
+  // A parent's folders (a machine's, or a folder's) in the order you dragged them to; the
+  // sessions in a folder stay newest first. The first time a parent shows, its order then (newest
+  // first) is kept, so a folder doesn't move when a session in it gets busy; one that turns up
+  // later goes on top. A folder that's gone keeps its place, for when it's back.
+  function arranged(parentKey, folders) {
+    if (!folders.length) return folders;
+    const saved = order[parentKey];
+    if (!saved) {
+      if (!query) remember(parentKey, folders.map((f) => f.key));
+      return folders;
+    }
+    const rank = new Map(saved.map((k, i) => [k, i]));
+    const fresh = folders.filter((f) => !rank.has(f.key));
+    const placed = folders.filter((f) => rank.has(f.key)).sort((a, b) => rank.get(a.key) - rank.get(b.key));
+    if (fresh.length && !query) remember(parentKey, [...fresh.map((f) => f.key), ...saved]);
+    return [...fresh, ...placed];
+  }
+
+  function remember(parentKey, keys) {
+    order[parentKey] = keys;
+    save(ORDER_KEY, order);
+  }
+
+  // Held down, a folder's row starts a drag once the pointer has moved a little; until then it's
+  // a click, which folds it. Not while searching, when the list shows only part of each parent.
+  const DRAG_PX = 5;
+
+  function pressFolder(e, wrap) {
+    if (e.button !== 0 || query) return;
+    press = { id: e.pointerId, row: e.currentTarget, wrap, y: e.clientY, dragging: false, cancelled: false, target: null, after: false };
+  }
+
+  document.addEventListener('pointermove', (e) => {
+    if (!press || e.pointerId !== press.id || press.cancelled) return;
+    if (!press.dragging) {
+      if (Math.abs(e.clientY - press.y) < DRAG_PX) return;
+      press.dragging = true;
+      press.row.setPointerCapture(e.pointerId);
+      press.wrap.classList.add('dragging');
+      document.body.classList.add('reordering');
+    }
+    scrollNearEdge(e.clientY);
+    mark(dropTarget(e.clientX, e.clientY));
+  });
+  document.addEventListener('pointerup', (e) => {
+    if (press && e.pointerId === press.id) endDrag(true);
+  });
+  document.addEventListener('pointercancel', (e) => {
+    if (press && e.pointerId === press.id) endDrag(false);
+  });
+
+  // The sibling under the pointer (or the sibling whose folders it's in), and whether the dragged
+  // folder goes after it: below its middle.
+  function dropTarget(x, y) {
+    const parent = press.wrap.dataset.parent;
+    let f = document.elementFromPoint(x, y)?.closest('.folder');
+    while (f && f.dataset.parent !== parent) f = f.parentElement?.closest('.folder');
+    if (!f || f === press.wrap) return null;
+    const r = f.getBoundingClientRect();
+    return { wrap: f, after: y > r.top + r.height / 2 };
+  }
+
+  // A line where it would land.
+  function mark(target) {
+    if (press.target === (target?.wrap ?? null) && press.after === Boolean(target?.after)) return;
+    press.target?.classList.remove('drop-before', 'drop-after');
+    press.target = target?.wrap ?? null;
+    press.after = Boolean(target?.after);
+    press.target?.classList.add(press.after ? 'drop-after' : 'drop-before');
+  }
+
+  function scrollNearEdge(y) {
+    const r = treeEl.getBoundingClientRect();
+    if (y < r.top + 24) treeEl.scrollTop -= 12;
+    else if (y > r.bottom - 24) treeEl.scrollTop += 12;
+  }
+
+  // Escape: the folder stays where it was. The drag still ends when the button comes up.
+  function cancelDrag() {
+    mark(null);
+    press.cancelled = true;
+    press.wrap.classList.remove('dragging');
+    document.body.classList.remove('reordering');
+  }
+
+  function endDrag(drop) {
+    const { dragging, cancelled, wrap, target, after } = press;
+    press = null;
+    if (!dragging) return;
+    target?.classList.remove('drop-before', 'drop-after');
+    wrap.classList.remove('dragging');
+    document.body.classList.remove('reordering');
+    if (drop && !cancelled && target) moveFolder(wrap.dataset.parent, wrap.dataset.key, target.dataset.key, after);
+    // The click that comes with the release lands on the old rows; then the list redraws.
+    dragged = true;
+    setTimeout(() => {
+      dragged = false;
+      treePending = false;
+      render();
+    });
+  }
+
+  function moveFolder(parentKey, key, targetKey, after) {
+    const keys = (order[parentKey] || []).filter((k) => k !== key);
+    const at = keys.indexOf(targetKey);
+    if (at < 0) return;
+    keys.splice(after ? at + 1 : at, 0, key);
+    remember(parentKey, keys);
+  }
+
   // ---------------------------------------------------------- the pet
 
   petEl.addEventListener('click', () => {
@@ -477,6 +606,11 @@
   }
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && press?.dragging) {
+      cancelDrag();
+      e.preventDefault();
+      return;
+    }
     if (!e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === '=' || e.key === '+') zoomBy(1);
     else if (e.key === '-' || e.key === '_') zoomBy(-1);
