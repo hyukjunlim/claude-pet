@@ -97,8 +97,9 @@ let etlSessions = [];
 let webSessions = [];
 let folder = null;              // folder mode's sidebar (see folder-mode.js)
 let stepKeys = null;            // Ctrl+Tab through the sidebar (see step-keys.js)
-let claudeAll = [];             // every Claude session and Codex thread, quiet ones too, for folder mode
+let claudeAll = [];             // every Claude session, Codex thread and web chat, quiet ones too, for folder mode
 let codexAll = [];
+let webAll = [];
 let treeKey = '';
 let quitting = false;
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
@@ -490,6 +491,7 @@ function sendTree() {
   const hosts = buildTree({
     claude: claudeAll,
     codex: codexAll,
+    chats: webAll,
     sshHosts: sshConfigHosts(),
     codexConnections: codex?.connections ?? [],
     defaultWsl: wslDistros()[0] ?? null,
@@ -575,6 +577,10 @@ function startWebChats() {
   webchats.on('change', (list) => {
     webSessions = list;
     mergeSessions();
+  });
+  webchats.on('list', (list) => {
+    webAll = list;
+    sendTree();
   });
   webchats.start().catch((err) => log('web chats:', err.message));
 }
@@ -986,7 +992,7 @@ function openWebChat(s, { handoff = true } = {}) {
 // A bubble's session, or (from folder mode) any session in the full lists. `fill`: maximize the
 // app beside the sidebar.
 function openSession(id, { handoff = true, fill = false } = {}) {
-  const s = sessions.find((x) => x.id === id) ?? claudeAll.find((x) => x.id === id) ?? codexAll.find((x) => x.id === id);
+  const s = [sessions, claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((x) => x.id === id), null);
   const open = (url) => openApp(url, { handoff });
   if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(open));   // the eTL chat
   if (s?.kind === 'web') return openWebChat(s, { handoff });

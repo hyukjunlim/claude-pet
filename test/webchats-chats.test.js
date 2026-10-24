@@ -183,3 +183,19 @@ test("titles lose the site's name, and a page with only the name is a new chat",
   assert.equal(displayTitle('chatgpt', 'ChatGPT - Essay outline'), 'Essay outline');
   assert.equal(displayTitle('chatgpt', '  '), 'New chat');
 });
+
+test('the full list has every conversation a tab shows, quiet ones too, newest first, for folder mode', () => {
+  const { c, advance, tab } = chats();
+  const lists = [];
+  c.on('list', (l) => lists.push(l));
+  c.report('h1', tab({ tabId: 7, title: 'Quiet one - Claude' }));
+  advance(1000);
+  c.report('h1', tab({ tabId: 8, site: 'chatgpt', url: `https://chatgpt.com/c/${OTHER}`, title: 'ChatGPT - Busy one', generating: true }));
+  assert.deepEqual(c.items().map((it) => it.title), ['Busy one']);           // the bubbles: only what's going on
+  const all = c.all();
+  assert.deepEqual(all.map((it) => [it.site, it.title, it.status]), [['chatgpt', 'Busy one', 'running'], ['claude', 'Quiet one', 'idle']]);
+  assert.equal(all[1].id, `web:claude:${CONV}`);
+  assert.deepEqual(lists.at(-1), all);
+  c.closed('h1', 7);                                                          // its tab closed: a quiet one goes
+  assert.deepEqual(c.all().map((it) => it.title), ['Busy one']);
+});

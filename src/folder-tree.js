@@ -119,10 +119,13 @@ function newNode(key, label, pathText) {
   return { key, label, path: pathText, sessions: [], children: new Map() };
 }
 
-// `claude`, `codex`: the trackers' full lists. `sshHosts`: from ~/.ssh/config (sshConfigHosts).
+// `claude`, `codex`: the trackers' full lists. `chats`: the web chats' (WebChats.all), which go
+// first, under "Chat", a folder per site. `sshHosts`: from ~/.ssh/config (sshConfigHosts).
 // `codexConnections`: CodexTracker.connections. `defaultWsl`: the distro Codex's local threads
 // and loopback SSH hosts run in. `now`: for which folders start out open.
-function buildTree({ claude = [], codex = [], sshHosts = [], codexConnections = [], defaultWsl = null, now = Date.now() } = {}) {
+function buildTree({
+  claude = [], codex = [], chats = [], sshHosts = [], codexConnections = [], defaultWsl = null, now = Date.now(),
+} = {}) {
   const ctx = { sshHosts, codexConnections, defaultWsl };
   const hosts = new Map();   // key -> { host, root, loose }
   const add = (s, app, { host, where }) => {
@@ -147,7 +150,7 @@ function buildTree({ claude = [], codex = [], sshHosts = [], codexConnections = 
   for (const s of codex) add(s, 'codex', placeCodex(s, ctx));
 
   const order = { pc: 0, wsl: 1, ssh: 2 };
-  return [...hosts.values()]
+  const machines = [...hosts.values()]
     .map(({ host, root, loose }) => {
       const folders = [...root.children.values()].map((n) => finish(compact(n, null), now));
       folders.sort(byLatest);
@@ -156,6 +159,28 @@ function buildTree({ claude = [], codex = [], sshHosts = [], codexConnections = 
       return { ...host, folders, loose, ...counts(all), latest: latestOf(all) };
     })
     .sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
+  const chat = chatHost(chats, now);
+  return chat ? [chat, ...machines] : machines;
+}
+
+// The web chats as the first heading, "Chat", with a folder per site (in a fixed order, so it
+// doesn't jump about) holding its conversations, newest first.
+const CHAT_SITES = [
+  { site: 'claude', label: 'claude.ai', app: 'claude-web' },
+  { site: 'chatgpt', label: 'ChatGPT', app: 'chatgpt' },
+];
+
+function chatHost(chats, now) {
+  const folders = CHAT_SITES
+    .map(({ site, label, app }) => {
+      const node = newNode(`chat|${site}`, label, '');
+      node.sessions = chats.filter((c) => c.site === site).map((c) => item(c, app));
+      return node.sessions.length ? { ...finish(node, now), open: true } : null;
+    })
+    .filter(Boolean);
+  if (!folders.length) return null;
+  const all = folders.flatMap(allSessions);
+  return { key: 'chat', kind: 'chat', label: 'Chat', folders, loose: [], ...counts(all), latest: latestOf(all) };
 }
 
 // A folder with no sessions of its own and one folder in it becomes one row with it. A top row

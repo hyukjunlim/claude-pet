@@ -76,6 +76,7 @@ class WebChatsFeature extends EventEmitter {
     this.sockets = new Map();        // source id -> its host's connection
     this.nextSource = 0;
     this.chats.on('change', (list) => this.emit('change', list));
+    this.chats.on('list', (list) => this.emit('list', list));      // every chat, for folder mode
   }
 
   get enabled() {

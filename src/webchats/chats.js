@@ -82,6 +82,7 @@ class WebChats extends EventEmitter {
     this.tabs = new Map();       // `${source} ${tabId}` -> { source, key, ...report }
     this.chats = new Map();      // conversation key -> its state (see #chat)
     this.lastEmitted = '';
+    this.lastListed = '';
   }
 
   addSource(id, { hostPid = null } = {}) {
@@ -181,6 +182,22 @@ class WebChats extends EventEmitter {
     return out;
   }
 
+  // Every conversation the pet knows (a tab shows it, or it's Ready), quiet ones too, for folder
+  // mode's list; one with nothing going on is idle.
+  all() {
+    return [...this.chats.values()].map((chat) => ({
+      id: `web:${chat.key}`,
+      kind: 'web',
+      site: chat.site,
+      status: chat.status || 'idle',
+      title: chat.title,
+      detail: chat.status === 'running' ? 'Writing a reply' : chat.status === 'review' ? 'Reply ready' : '',
+      url: chat.url,
+      since: chat.since,
+      lastActivityAt: chat.activeAt,
+    })).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  }
+
   clear() {
     for (const chat of this.chats.values()) this.clearTimer(chat.endTimer);
     this.sources.clear();
@@ -192,6 +209,7 @@ class WebChats extends EventEmitter {
   #chat(key, r) {
     return {
       key, site: r.site, title: r.title, url: r.url, status: null, since: 0, looking: false, endTimer: null,
+      activeAt: this.now(),      // when it turned up, or last had a reply going
     };
   }
 
@@ -226,6 +244,7 @@ class WebChats extends EventEmitter {
       if (chat.status !== 'running') {
         chat.status = 'running';
         chat.since = this.now();
+        chat.activeAt = chat.since;
       }
     } else if (chat.status === 'running' && !chat.endTimer) {
       chat.endTimer = this.setTimer(() => this.#ended(chat), END_GRACE_MS);
@@ -238,15 +257,24 @@ class WebChats extends EventEmitter {
     if (this.chats.get(chat.key) !== chat || chat.status !== 'running') return;
     chat.status = chat.looking ? null : 'review';
     chat.since = this.now();
+    chat.activeAt = chat.since;
     this.#emit();
   }
 
+  // 'change': the bubbles (items); 'list': every conversation (all), for folder mode.
   #emit() {
     const list = this.items();
     const key = JSON.stringify(list);
-    if (key === this.lastEmitted) return;
-    this.lastEmitted = key;
-    this.emit('change', list);
+    if (key !== this.lastEmitted) {
+      this.lastEmitted = key;
+      this.emit('change', list);
+    }
+    const all = this.all();
+    const allKey = JSON.stringify(all);
+    if (allKey !== this.lastListed) {
+      this.lastListed = allKey;
+      this.emit('list', all);
+    }
   }
 }
 

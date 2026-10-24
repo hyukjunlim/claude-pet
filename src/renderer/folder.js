@@ -15,7 +15,7 @@
   const player = new window.SpritePlayer(spriteEl);
 
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
-  const APP_NAME = { claude: 'Claude', codex: 'Codex' };
+  const APP_NAME = { claude: 'Claude', codex: 'Codex', 'claude-web': 'claude.ai', chatgpt: 'ChatGPT' };
   const FOLD_KEY = 'claude-pet:folder-fold';   // folder key -> open, where you changed it
   const BASE_ZOOM = 1.2;                       // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%

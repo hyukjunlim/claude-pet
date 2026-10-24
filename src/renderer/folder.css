@@ -215,7 +215,8 @@ header {
   background: var(--claude);
 }
 
-.app.codex { background: var(--codex); }
+.app.codex,
+.app.chatgpt { background: var(--codex); }   /* claude.ai's chats keep Claude's color */
 
 .session .app { margin: 0 3px 0 2px; }
 
