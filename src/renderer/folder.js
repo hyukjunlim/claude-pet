@@ -109,12 +109,6 @@
     row.setAttribute('aria-expanded', String(open));
     if (n.path) row.title = n.path;
     row.append(el('span', 'chevron', '▶'), withMatches(el('span', 'name'), n.label));
-    if (n.both) {
-      const both = el('span', 'both');
-      both.title = 'Claude and Codex both work here';
-      both.append(el('span', 'app claude'), el('span', 'app codex'));
-      row.append(both);
-    }
     if (!open) row.append(...pips(n));
     row.addEventListener('click', () => setOpen(n.key, !open));
     wrap.append(row);
@@ -263,6 +257,90 @@
   });
 
   document.getElementById('pet-mode').addEventListener('click', () => api.petMode());
+
+  // ---------------------------------------------------------- width: drag the right edge
+
+  // The page only says when the drag moves and ends: the window resizes under the pointer, so
+  // its coordinates aren't to be trusted then, and the main process goes by the cursor itself.
+  const edgeEl = document.getElementById('edge');
+  let resizing = null;
+
+  edgeEl.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    edgeEl.setPointerCapture(e.pointerId);
+    edgeEl.classList.add('dragging');
+    resizing = { id: e.pointerId, frame: 0, moved: false };
+  });
+  edgeEl.addEventListener('pointermove', (e) => {
+    if (!resizing || e.pointerId !== resizing.id || resizing.frame) return;
+    resizing.moved = true;
+    resizing.frame = requestAnimationFrame(() => {   // one move per frame
+      if (!resizing) return;
+      resizing.frame = 0;
+      api.resize('move');
+    });
+  });
+  // A click without a drag changes nothing, so the second click of a double-click lands too.
+  const endResize = (e) => {
+    if (!resizing || e.pointerId !== resizing.id) return;
+    const { moved } = resizing;
+    resizing = null;
+    edgeEl.classList.remove('dragging');
+    if (moved) api.resize('end');
+  };
+  edgeEl.addEventListener('pointerup', endResize);
+  edgeEl.addEventListener('pointercancel', endResize);
+  edgeEl.addEventListener('dblclick', () => api.resize('reset'));
+
+  // ---------------------------------------------------------- text size: Ctrl +, Ctrl -, Ctrl 0
+
+  const ZOOM_KEY = 'claude-pet:folder-zoom';
+  const ZOOMS = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
+  const zoomLevelEl = document.getElementById('zoom-level');
+  let zoom = 1;
+  let zoomTimer = null;
+
+  function setZoom(z, show) {
+    zoom = Math.min(ZOOMS.at(-1), Math.max(ZOOMS[0], Number(z) || 1));
+    document.documentElement.style.zoom = String(zoom);   // the whole sidebar, as a browser's zoom does
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {
+      // kept for this run only
+    }
+    if (!show) return;
+    zoomLevelEl.textContent = `${Math.round(zoom * 100)}%`;
+    zoomLevelEl.hidden = false;
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(() => { zoomLevelEl.hidden = true; }, 1200);
+  }
+
+  function zoomBy(step) {
+    const i = ZOOMS.findIndex((z) => z >= zoom - 0.001);
+    const at = i < 0 ? ZOOMS.length - 1 : i;
+    setZoom(ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, at + step))], true);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === '=' || e.key === '+') zoomBy(1);
+    else if (e.key === '-' || e.key === '_') zoomBy(-1);
+    else if (e.key === '0') setZoom(1, true);
+    else return;
+    e.preventDefault();
+  });
+  document.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    zoomBy(e.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+
+  try {
+    setZoom(localStorage.getItem(ZOOM_KEY) || 1, false);
+  } catch {
+    setZoom(1, false);
+  }
 
   // ---------------------------------------------------------- helpers
 

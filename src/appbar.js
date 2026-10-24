@@ -11,6 +11,7 @@ const { spawn } = require('node:child_process');
 
 const CALLBACK_MESSAGE = 0x8000 + 0x50;   // WM_APP + 0x50: Windows' notices about the bar
 const ABN_POSCHANGED = 1;
+const ABN_FULLSCREENAPP = 2;
 
 const HELPER = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -62,6 +63,12 @@ if ('ACTION' -eq 'dock') { [Console]::Out.WriteLine([PetAppBar]::Dock($h, CALLBA
 else { [PetAppBar]::Undock($h) }
 `;
 
+// A message's WPARAM or LPARAM, which Electron hands over as a Buffer.
+function numberOf(param) {
+  if (!Buffer.isBuffer(param)) return Number(param) || 0;
+  return param.length >= 8 ? Number(param.readBigUInt64LE(0)) : param.readUInt32LE(0);
+}
+
 // The window handle Electron gives as a Buffer, as a number.
 function hwndOf(win) {
   const buf = win.getNativeWindowHandle();
@@ -103,7 +110,8 @@ function parseRect(text) {
 class AppBar {
   // `win`: the BrowserWindow. `toDip(rect)`: physical pixels to the window's DIPs (Electron's
   // screen.screenToDipRect on Windows). `onMoved()`: Windows moved the strip; dock again.
-  constructor({ win, toDip, onMoved = () => {}, spawnFn = spawn, platform = process.platform, log = () => {} }) {
+  // `onFullscreen(on)`: an app went full screen on the bar's monitor (on) or stopped being so.
+  constructor({ win, toDip, onMoved = () => {}, onFullscreen = () => {}, spawnFn = spawn, platform = process.platform, log = () => {} }) {
     this.win = win;
     this.hwnd = platform === 'win32' ? hwndOf(win) : 0n;   // kept: the bar is given back by it, even after the window is gone
     this.toDip = toDip;
@@ -113,9 +121,11 @@ class AppBar {
     this.docked = false;
     this.queue = Promise.resolve();
     if (platform === 'win32' && typeof win.hookWindowMessage === 'function') {
-      win.hookWindowMessage(CALLBACK_MESSAGE, (wParam) => {
-        const code = Buffer.isBuffer(wParam) ? Number(wParam.readBigUInt64LE?.(0) ?? wParam.readUInt32LE(0)) : Number(wParam);
-        if (this.docked && code === ABN_POSCHANGED) onMoved();
+      win.hookWindowMessage(CALLBACK_MESSAGE, (wParam, lParam) => {
+        if (!this.docked) return;
+        const code = numberOf(wParam);
+        if (code === ABN_POSCHANGED) onMoved();
+        else if (code === ABN_FULLSCREENAPP) onFullscreen(numberOf(lParam) !== 0);
       });
     }
   }

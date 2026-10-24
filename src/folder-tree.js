@@ -172,7 +172,6 @@ function finish(n, now) {
   const children = [...n.children.values()].map((c) => finish(c, now)).sort(byLatest);
   const sessions = [...n.sessions].sort(byActivity);
   const all = [...sessions, ...children.flatMap(allSessions)];
-  const apps = new Set(sessions.map((s) => s.app));
   const latest = latestOf(all);
   return {
     key: n.key,
@@ -180,7 +179,6 @@ function finish(n, now) {
     path: n.path,
     sessions,
     children,
-    both: apps.size > 1,          // Claude and Codex both work in this very folder
     latest,
     open: now - latest < OPEN_DAYS * DAY_MS,
     ...counts(all),

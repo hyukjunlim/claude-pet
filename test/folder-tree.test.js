@@ -41,9 +41,9 @@ test('the two apps\' names for one server meet, and a parent folder\'s session s
   const [projects] = lab.folders;
   assert.equal(projects.label, '/data/me/projects');      // the folders above it are one row
   assert.deepEqual(titles(projects), ['compare descriptors']);
-  assert.deepEqual(projects.children.map((c) => [c.label, titles(c).sort(), c.both]), [
-    ['BirdCount', ['paper figures'], false],
-    ['RiverSurvey', ['outline stride', 'stride'], true],
+  assert.deepEqual(projects.children.map((c) => [c.label, titles(c).sort()]), [
+    ['BirdCount', ['paper figures']],
+    ['RiverSurvey', ['outline stride', 'stride']],      // both apps' sessions in one folder
   ]);
 });
 
@@ -67,7 +67,7 @@ test('Windows paths match without case, /mnt/c is this PC, and an inner folder i
   const [me] = pc.folders;
   assert.equal(me.label, 'C:\\Users\\Me');
   assert.deepEqual(titles(me), ['home']);
-  assert.deepEqual(me.children.map((c) => [c.label, titles(c), c.both]), [['claude-pet', ['pet', 'etl'], true]]);
+  assert.deepEqual(me.children.map((c) => [c.label, titles(c)]), [['claude-pet', ['pet', 'etl']]]);
 });
 
 test('sessions without a folder of their own go under No folder', () => {

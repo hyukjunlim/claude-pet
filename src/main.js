@@ -26,6 +26,7 @@ const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
 const { FolderWindow } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
+const { maximizeApps } = require('./maximize');
 
 const DEMO = process.argv.includes('--demo');
 // Debug aid: CLAUDE_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
@@ -941,6 +942,8 @@ function openSession(id, { handoff = true } = {}) {
   const url = s && sessionUrl(s);
   if (!url) return false;
   open(url);
+  // From folder mode's sidebar: the app fills the rest of the screen.
+  if (!handoff && (s.kind === 'desktop' || s.kind === 'codex')) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
   // A finished session or a one-off notice is done with once opened; a class bubble
   // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked. A quiet
   // session (folder mode lists those too) has nothing to be done with.
@@ -1080,7 +1083,17 @@ function registerIpc() {
   ipcMain.on('folder:pet-click', (e) => {
     if (!fromFolder(e)) return;
     const url = mainAppLink();
-    if (url) openApp(url, { handoff: false });
+    if (!url) return;
+    openApp(url, { handoff: false });
+    maximizeApps('open', url === APP_LINK.codex ? 'codex' : 'claude');
+  });
+  // Dragging the sidebar's edge: the window follows the cursor, and the drop docks it at the new
+  // width; a double-click goes back to the default.
+  ipcMain.on('folder:resize', (e, phase) => {
+    if (!fromFolder(e)) return;
+    if (phase === 'reset') settings.set({ folderWidth: folder.setWidth(DEFAULTS.folderWidth) });
+    else if (phase === 'end') settings.set({ folderWidth: folder.setWidth(folder.widthAtCursor()) });
+    else if (phase === 'move') folder.preview(folder.widthAtCursor());
   });
   ipcMain.on('folder:pet-mode', (e) => {
     if (fromFolder(e)) setMode('pet');
@@ -1452,7 +1465,8 @@ if (!app.requestSingleInstanceLock()) {
 
     registerIpc();
     createTray();
-    folder = new FolderWindow({ log });
+    // Each time the sidebar docks, the Claude and Codex windows are maximized beside it.
+    folder = new FolderWindow({ log, width: settings.get('folderWidth'), onDocked: () => maximizeApps('all') });
     const modeFlag = process.argv.find((a) => a.startsWith('--mode='))?.slice('--mode='.length);
     if (modeFlag === 'pet' || modeFlag === 'folder') settings.set({ mode: modeFlag });
     createWindow();

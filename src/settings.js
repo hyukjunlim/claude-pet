@@ -7,6 +7,7 @@ const DEFAULTS = {
   petKey: 'built-in:clay',
   scale: 0.75,
   mode: 'pet',             // 'pet': the floating pet; 'folder': a sidebar of every session, by machine and folder
+  folderWidth: 400,        // the sidebar's width in DIPs (drag its right edge; double-click it for this)
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
   showActivity: true,

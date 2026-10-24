@@ -54,12 +54,24 @@ test('docking turns the strip into DIPs; undocking gives it back once; Windows\'
   assert.match(runs[0], /Dock\(\$h, \d+, 450\)/);          // 300 DIPs at 150%
   assert.match(runs[0], /\[long\]'42'/);
   hooks.get(CALLBACK_MESSAGE)(1);                          // ABN_POSCHANGED
-  hooks.get(CALLBACK_MESSAGE)(2);                          // another notice
+  hooks.get(CALLBACK_MESSAGE)(3);                          // another notice
   assert.equal(moved, 1);
   await bar.undock();
   await bar.undock();
   assert.equal(runs.length, 2);
   assert.match(runs[1], /if \('undock' -eq 'dock'\)/);
+});
+
+test('an app going full screen, and back, is passed on while docked', async () => {
+  const { win, hooks, spawnFn } = fakes();
+  const seen = [];
+  const bar = new AppBar({ win, spawnFn, platform: 'win32', toDip: (r) => r, onFullscreen: (on) => seen.push(on) });
+  const param = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+  hooks.get(CALLBACK_MESSAGE)(param(2), param(1));
+  await bar.dock(300);
+  hooks.get(CALLBACK_MESSAGE)(param(2), param(1));          // ABN_FULLSCREENAPP, opening
+  hooks.get(CALLBACK_MESSAGE)(param(2), param(0));          // and closing
+  assert.deepEqual(seen, [true, false]);
 });
 
 test('a strip Windows would not give is no strip, and leaves nothing to give back', async () => {

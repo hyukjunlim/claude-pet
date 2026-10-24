@@ -186,13 +186,6 @@ header {
   white-space: nowrap;
 }
 
-/* Claude and Codex both work in this very folder. */
-.both {
-  flex: none;
-  display: flex;
-  gap: 2px;
-}
-
 /* An app's mark: Claude a dot, Codex a diamond. */
 .app {
   flex: none;
@@ -374,3 +367,34 @@ mark {
 }
 
 #sprite.pixel { image-rendering: pixelated; }
+
+/* ------------------------------------------------------------------ width and text size */
+
+/* The right edge: drag it to make the sidebar wider or narrower. */
+#edge {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+#edge:hover,
+#edge.dragging { background: color-mix(in srgb, var(--claude) 45%, transparent); }
+
+/* The text size, for a moment after Ctrl +, - or 0. */
+#zoom-level {
+  position: fixed;
+  top: 46px;
+  right: 14px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
