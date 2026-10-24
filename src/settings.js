@@ -6,6 +6,7 @@ const path = require('node:path');
 const DEFAULTS = {
   petKey: 'built-in:clay',
   scale: 0.75,
+  theme: 'system',         // the pet's look: 'system' (Windows' app mode), 'light' or 'dark'
   mode: 'pet',             // 'pet': the floating pet; 'folder': a sidebar of every session, by machine and folder
   folderWidth: 400,        // the sidebar's width in DIPs (drag its right edge; double-click it for this)
   folderPetScale: 0.5,     // the size of the pet at the sidebar's foot (Small; tray menu → Size in folder mode)

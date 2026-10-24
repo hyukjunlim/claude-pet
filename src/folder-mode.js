@@ -20,6 +20,11 @@ function clampWidth(width) {
   return Number.isFinite(w) ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w)) : WIDTH;
 }
 
+// The page's background (folder.css --page), light or dark.
+function pageColor() {
+  return nativeTheme.shouldUseDarkColors ? '#262624' : '#f8f7f4';
+}
+
 class FolderWindow {
   // `onDocked()`: the strip was taken (again), so windows maximized next to it have moved.
   constructor({ log = () => {}, width = WIDTH, onDocked = () => {} } = {}) {
@@ -65,7 +70,7 @@ class FolderWindow {
       // one you drag). It steps down while an app is full screen on the monitor.
       alwaysOnTop: true,
       show: false,
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#262624' : '#f8f7f4',
+      backgroundColor: pageColor(),
       // Square, with no frame or accent border, the way a maximized window meets the screen's edge.
       ...(process.platform === 'win32' ? { thickFrame: false, roundedCorners: false, accentColor: false } : {}),
       webPreferences: {
@@ -77,6 +82,10 @@ class FolderWindow {
       },
     });
     this.win = win;
+    // Behind the page while it resizes; the tray menu's Theme can change it.
+    const shade = () => win.setBackgroundColor(pageColor());
+    nativeTheme.on('updated', shade);
+    win.on('closed', () => nativeTheme.off('updated', shade));
     // No menu, so none of its shortcuts (Ctrl+= and Ctrl+- would zoom every pet page at once);
     // the page zooms its own text (folder.js).
     win.removeMenu();

@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, MenuItem, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage,
+  app, BrowserWindow, Menu, MenuItem, Tray, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage,
   screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
@@ -1195,6 +1195,23 @@ function registerIpc() {
   });
 }
 
+// Light or dark, for every page of the pet's (the sidebar, the bubbles, the eTL window). The
+// pages' own CSS goes by prefers-color-scheme, which follows this.
+const THEMES = [
+  { label: 'System (Windows app mode)', value: 'system' },
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+];
+
+function themeOf() {
+  const theme = settings.get('theme');
+  return THEMES.some((t) => t.value === theme) ? theme : 'system';
+}
+
+function applyTheme() {
+  nativeTheme.themeSource = themeOf();
+}
+
 function isPoint(p) {
   return p && Number.isFinite(p.screenX) && Number.isFinite(p.screenY);
 }
@@ -1334,6 +1351,18 @@ function buildMenu() {
         } else {
           resizeInPlace(() => settings.set({ scale: s.value }));
         }
+      },
+    })),
+  });
+  items.push({
+    label: 'Theme',
+    submenu: THEMES.map((t) => ({
+      label: t.label,
+      type: 'radio',
+      checked: themeOf() === t.value,
+      click: () => {
+        settings.set({ theme: t.value });
+        applyTheme();
       },
     })),
   });
@@ -1564,6 +1593,7 @@ if (!app.requestSingleInstanceLock()) {
     layout = 'above';
     layout = chooseLayout(petPos);
 
+    applyTheme();
     registerIpc();
     createTray();
     // Each time the sidebar docks, the Claude and Codex windows are maximized beside it.
