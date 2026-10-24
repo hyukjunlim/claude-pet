@@ -24,8 +24,13 @@ const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
 const { raiseCodexWindow } = require('./raise');
 const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
+const { FolderWindow } = require('./folder-mode');
+const { buildTree } = require('./folder-tree');
 
 const DEMO = process.argv.includes('--demo');
+// Debug aid: CLAUDE_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
+// there, so a second copy can run next to the one you use.
+const DEBUG_USER_DATA = process.env.CLAUDE_PET_USER_DATA || null;
 const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
 const DEBUG_OPEN_AFTER_MS = Number(process.env.CLAUDE_PET_DEBUG_OPEN_AFTER_MS) || 0;
 
@@ -84,6 +89,11 @@ let sessions = [];              // Claude, Codex and eTL together, most urgent f
 let claudeSessions = [];
 let codexSessions = [];
 let etlSessions = [];
+let folder = null;              // folder mode's sidebar (see folder-mode.js)
+let claudeAll = [];             // every Claude session and Codex thread, quiet ones too, for folder mode
+let codexAll = [];
+let treeKey = '';
+let quitting = false;
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
@@ -314,7 +324,7 @@ function createWindow() {
     if (details.reason !== 'clean-exit') setTimeout(() => replaceWindow(created), 1000);
   });
   win.once('ready-to-show', () => {
-    if (settings.get('visible')) {
+    if (settings.get('visible') && settings.get('mode') !== 'folder') {
       win.showInactive();
       wake();
     }
@@ -333,6 +343,23 @@ function replaceWindow(old) {
 
 function setVisible(visible) {
   settings.set({ visible });
+  applyMode();
+}
+
+// Shows the floating pet or the folder sidebar, whichever the mode is, if the pet is to be seen.
+function applyMode() {
+  const visible = settings.get('visible');
+  if (settings.get('mode') === 'folder') {
+    if (win && !win.isDestroyed()) win.hide();
+    if (visible) {
+      folder.show(displayForPet());
+      treeKey = '';
+    } else {
+      folder.close();
+    }
+    return;
+  }
+  folder.close();
   if (!win || win.isDestroyed()) return;
   if (visible) {
     win.showInactive();
@@ -342,8 +369,16 @@ function setVisible(visible) {
   }
 }
 
+function setMode(mode) {
+  if ((mode !== 'pet' && mode !== 'folder') || mode === settings.get('mode')) return;
+  settings.set({ mode, visible: true });
+  log(`mode: ${mode}`);
+  applyMode();
+}
+
 function wake() {
   win?.webContents.send('pet:wake');
+  folder?.send('folder:wake');
 }
 
 // ---------------------------------------------------------------- pets
@@ -365,18 +400,22 @@ function loadPets() {
 }
 
 function sendPet() {
-  if (!win || win.isDestroyed() || !currentPet) return;
-  win.webContents.send('pet:pet', {
+  if (!currentPet) return;
+  const payload = {
     key: currentPet.key,
     displayName: currentPet.displayName,
     url: sheetUrl(currentPet),
     rows: currentPet.rows,
     pixelArt: currentPet.pixelArt,
-  });
+  };
+  if (win && !win.isDestroyed()) win.webContents.send('pet:pet', payload);
+  folder?.send('folder:pet', payload);
 }
 
 function sendMotion() {
-  if (win && !win.isDestroyed()) win.webContents.send('pet:motion', { alwaysAnimate: settings.get('alwaysAnimate') === true });
+  const motion = { alwaysAnimate: settings.get('alwaysAnimate') === true };
+  if (win && !win.isDestroyed()) win.webContents.send('pet:motion', motion);
+  folder?.send('folder:motion', motion);
 }
 
 function selectPet(key) {
@@ -420,6 +459,10 @@ function handleProtocol(request) {
 // ---------------------------------------------------------------- sessions
 
 function sendSessions() {
+  // Folder mode: the pet acts out the most urgent session, as the floating pet does, and eTL's
+  // notices sit under the tree.
+  folder?.send('folder:status', sessions[0]?.status || 'idle');
+  folder?.send('folder:notices', etlSessions);
   if (!win || win.isDestroyed()) return;
   win.webContents.send('pet:sessions', { sessions, showActivity: settings.get('showActivity') });
   if (tray) tray.setToolTip(trayTooltip());
@@ -429,6 +472,22 @@ function mergeSessions() {
   sessions = [...claudeSessions, ...codexSessions, ...etlSessions].sort(compareSessions);
   sendSessions();
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
+}
+
+// Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
+function sendTree() {
+  if (!folder?.open) return;
+  const hosts = buildTree({
+    claude: claudeAll,
+    codex: codexAll,
+    sshHosts: sshConfigHosts(),
+    codexConnections: codex?.connections ?? [],
+    defaultWsl: wslDistros()[0] ?? null,
+  });
+  const key = JSON.stringify(hosts);
+  if (key === treeKey) return;
+  treeKey = key;
+  folder.send('folder:tree', hosts);
 }
 
 function codexInstalled() {
@@ -459,6 +518,10 @@ function startCodex() {
     codexSessions = list;
     mergeSessions();
   });
+  codex.on('list', (list) => {
+    codexAll = list;
+    sendTree();
+  });
   codex.on('usage', setUsage);
   codex.on('error', (err) => log('codex tracker error:', err?.message || err));
   codex.start();
@@ -468,7 +531,9 @@ function stopCodex() {
   codex?.stop();
   codex = null;
   codexSessions = [];
+  codexAll = [];
   mergeSessions();
+  sendTree();
   setUsage({ codex: null });
 }
 
@@ -506,12 +571,12 @@ function currentUsage() {
 
 // Also runs every minute: a week can turn over, and figures can get old, with no news.
 function sendUsage(force = false) {
-  if (!win || win.isDestroyed()) return;
   const items = settings.get('showUsage') ? currentUsage() : [];
   const key = JSON.stringify(items);
   if (key === usageKey && force !== true) return;
   usageKey = key;
-  win.webContents.send('pet:usage', items);
+  if (win && !win.isDestroyed()) win.webContents.send('pet:usage', items);
+  folder?.send('folder:usage', items);
 }
 
 // "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h · as of 2h ago"
@@ -853,8 +918,9 @@ function focusHandoffWindow() {
   handoffWin.focus();
 }
 
-function openApp(url) {
-  if (process.platform === 'win32') {
+// `handoff: false` for a click in folder mode's sidebar, which has the focus to hand on itself.
+function openApp(url, { handoff = true } = {}) {
+  if (process.platform === 'win32' && handoff) {
     clearTimeout(handoffTimer);
     focusHandoffWindow();
     handoffTimer = setTimeout(() => {
@@ -867,15 +933,18 @@ function openApp(url) {
   if (url.startsWith('codex:')) raiseCodexWindow();   // a reopened Codex window stays behind otherwise
 }
 
-function openSession(id) {
-  const s = sessions.find((x) => x.id === id);
-  if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(openApp));   // the eTL chat
+// A bubble's session, or (from folder mode) any session in the full lists.
+function openSession(id, { handoff = true } = {}) {
+  const s = sessions.find((x) => x.id === id) ?? claudeAll.find((x) => x.id === id) ?? codexAll.find((x) => x.id === id);
+  const open = (url) => openApp(url, { handoff });
+  if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(open));   // the eTL chat
   const url = s && sessionUrl(s);
   if (!url) return false;
-  openApp(url);
+  open(url);
   // A finished session or a one-off notice is done with once opened; a class bubble
-  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked.
-  if (s.status !== 'running' && s.status !== 'background' && !s.keepOnOpen) {
+  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked. A quiet
+  // session (folder mode lists those too) has nothing to be done with.
+  if (s.status !== 'running' && s.status !== 'background' && s.status !== 'idle' && !s.keepOnOpen) {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }
@@ -992,6 +1061,35 @@ function registerIpc() {
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
     tray?.popUpContextMenu(buildMenu(), position);
   });
+
+  // Folder mode's sidebar.
+  const fromFolder = (event) => Boolean(folder?.owns(event.sender));
+  ipcMain.on('folder:ready', (e) => {
+    if (!fromFolder(e)) return;
+    treeKey = '';
+    sendTree();
+    sendPet();
+    sendMotion();
+    sendSessions();
+    sendUsage(true);
+  });
+  ipcMain.on('folder:open', (e, id) => {
+    if (!fromFolder(e) || typeof id !== 'string') return;
+    if (!openSession(id, { handoff: false })) log('folder: nothing to open for', id);
+  });
+  ipcMain.on('folder:pet-click', (e) => {
+    if (!fromFolder(e)) return;
+    const url = mainAppLink();
+    if (url) openApp(url, { handoff: false });
+  });
+  ipcMain.on('folder:pet-mode', (e) => {
+    if (fromFolder(e)) setMode('pet');
+  });
+  ipcMain.on('folder:context-menu', (e, p) => {
+    if (!fromFolder(e)) return;
+    const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
+    tray?.popUpContextMenu(buildMenu(), position);
+  });
 }
 
 function isPoint(p) {
@@ -1013,6 +1111,16 @@ function applyLoginFlag(argv) {
   log(`start at login: ${app.getLoginItemSettings(loginItemOptions()).openAtLogin ? 'on' : 'off'}`);
 }
 
+// `--mode=pet` / `--mode=folder` switch the mode, as the tray menu does (also when the pet is
+// already running: starting it again hands the flag over). Returns whether there was one.
+function applyModeFlag(argv) {
+  const flag = argv.find((a) => a.startsWith('--mode='));
+  if (!flag) return false;
+  if (settings.get('mode') === flag.slice('--mode='.length)) setVisible(true);
+  else setMode(flag.slice('--mode='.length));
+  return true;
+}
+
 function buildMenu() {
   const items = [];
   items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
@@ -1026,12 +1134,20 @@ function buildMenu() {
   }
   for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
   items.push({ type: 'separator' });
+  const folderMode = settings.get('mode') === 'folder';
   items.push({
-    label: 'Show pet',
+    label: folderMode ? 'Show sidebar' : 'Show pet',
     type: 'checkbox',
     checked: settings.get('visible'),
     accelerator: settings.get('shortcut'),
     click: (mi) => setVisible(mi.checked),
+  });
+  items.push({
+    label: 'Mode',
+    submenu: [
+      { label: 'Floating pet', type: 'radio', checked: !folderMode, click: () => setMode('pet') },
+      { label: 'Folder sidebar (every session, by machine and folder)', type: 'radio', checked: folderMode, click: () => setMode('folder') },
+    ],
   });
   items.push({
     label: 'Show activity bubbles',
@@ -1305,7 +1421,7 @@ async function showUpdateResult() {
 // Settings, pets and the log stay where a clone keeps them (%APPDATA%\claude-pet, and
 // ~/Library/Logs/claude-pet on macOS), so going from one kind of install to the other loses
 // nothing. Set before the single-instance lock, which lives in that folder too.
-app.setPath('userData', path.join(app.getPath('appData'), 'claude-pet'));
+app.setPath('userData', DEBUG_USER_DATA || path.join(app.getPath('appData'), 'claude-pet'));
 app.setAppLogsPath(process.platform === 'darwin'
   ? path.join(app.getPath('home'), 'Library', 'Logs', 'claude-pet')
   : path.join(app.getPath('userData'), 'logs'));
@@ -1315,7 +1431,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_event, argv) => {
     applyLoginFlag(argv);
-    setVisible(true);
+    if (!applyModeFlag(argv)) setVisible(true);
   });
   app.setAppUserModelId('ClaudePet');
 
@@ -1336,7 +1452,11 @@ if (!app.requestSingleInstanceLock()) {
 
     registerIpc();
     createTray();
+    folder = new FolderWindow({ log });
+    const modeFlag = process.argv.find((a) => a.startsWith('--mode='))?.slice('--mode='.length);
+    if (modeFlag === 'pet' || modeFlag === 'folder') settings.set({ mode: modeFlag });
     createWindow();
+    if (settings.get('mode') === 'folder') applyMode();
     if (!DEMO) showUpdateResult();
 
     tracker = DEMO
@@ -1347,6 +1467,10 @@ if (!app.requestSingleInstanceLock()) {
     tracker.on('change', (list) => {
       claudeSessions = list;
       mergeSessions();
+    });
+    tracker.on('list', (list) => {
+      claudeAll = list;
+      sendTree();
     });
     tracker.on('seen', () => settings.set({ seen: tracker.seenSnapshot() }));
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
@@ -1386,7 +1510,7 @@ if (!app.requestSingleInstanceLock()) {
 
     const shortcut = settings.get('shortcut');
     try {
-      if (shortcut && !globalShortcut.register(shortcut, () => setVisible(!win?.isVisible()))) {
+      if (shortcut && !globalShortcut.register(shortcut, () => setVisible(!settings.get('visible')))) {
         log(`shortcut ${shortcut} is taken by another app`);
       }
     } catch (err) {
@@ -1404,9 +1528,16 @@ if (!app.requestSingleInstanceLock()) {
         openApp(mainAppLink() || APP_LINK.claude);
       }, DEBUG_OPEN_AFTER_MS);
     }
-    screen.on('display-metrics-changed', onDisplaysChanged);
-    screen.on('display-added', onDisplaysChanged);
-    screen.on('display-removed', onDisplaysChanged);
+    screen.on('display-metrics-changed', (_e, _display, changed) => {
+      onDisplaysChanged();
+      folder.onDisplayChanged(changed);
+    });
+    for (const event of ['display-added', 'display-removed']) {
+      screen.on(event, () => {
+        onDisplaysChanged();
+        folder.onDisplayChanged();
+      });
+    }
     log(`watching ${os.homedir()} sessions${codex ? ' and Codex threads' : ''}; press ${shortcut} to show/hide`);
   });
 
@@ -1419,7 +1550,14 @@ if (!app.requestSingleInstanceLock()) {
     // Keep running in the tray.
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (e) => {
+    // The sidebar's strip is given back before the pet goes, so maximized windows fill it again.
+    if (folder?.open && !quitting) {
+      e.preventDefault();
+      quitting = true;
+      folder.close().finally(() => app.quit());
+      return;
+    }
     clearInterval(usageTimer);
     clearInterval(wslTimer);
     stopMomentum();

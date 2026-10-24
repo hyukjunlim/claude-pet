@@ -327,6 +327,8 @@ class SessionTracker extends EventEmitter {
     this.lastProjectScan = 0;
     this.lastEmitted = '';
     this.sessions = [];
+    this.all = [];                     // every desktop session in the index, for folder mode
+    this.lastListed = '';
     this.busy = false;
     this.rerun = false;
     this.running = false;
@@ -627,6 +629,7 @@ class SessionTracker extends EventEmitter {
   recompute(force = false) {
     const now = this.now();
     const out = [];
+    const all = [];
     const skews = new Map();
     const selected = this.appLog?.selected ?? null;
     if (selected && this.appInFront) {
@@ -659,8 +662,7 @@ class SessionTracker extends EventEmitter {
         frontPending: inQuestion && this.appInFront === null && Boolean(this.frontWatcher),
         logTurn: this.appLog?.turnOf(r.hostSessionId) ?? null,
       });
-      if (!derived) continue;
-      out.push({
+      const base = {
         id: r.hostSessionId,
         kind: 'desktop',
         hostSessionId: r.hostSessionId,
@@ -668,7 +670,15 @@ class SessionTracker extends EventEmitter {
         remote: r.remote && (name || r.remote),
         project: projectName(r.cwd),
         cwd: r.cwd,
-        ...derived,
+      };
+      if (derived) out.push({ ...base, ...derived });
+      // Folder mode lists every session, with where it runs; one with nothing going on is idle.
+      all.push({
+        ...base,
+        machineKey: r.machineKey,
+        machine: name || r.machine,
+        lastActivityAt: r.lastActivityAt,
+        ...(derived ?? { status: 'idle', detail: '', since: r.lastActivityAt }),
       });
     }
     for (const [cliId, file] of this.cliSessions) {
@@ -697,6 +707,13 @@ class SessionTracker extends EventEmitter {
     if (force || key !== this.lastEmitted) {
       this.lastEmitted = key;
       this.emit('change', active);
+    }
+    all.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    this.all = all;
+    const listKey = JSON.stringify(all);
+    if (force || listKey !== this.lastListed) {
+      this.lastListed = listKey;
+      this.emit('list', all);
     }
     if (this.running) this.watchFront(frontNeeded);
   }

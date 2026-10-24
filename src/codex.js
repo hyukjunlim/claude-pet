@@ -39,6 +39,7 @@ const DREAM_SOURCE = 'dreaming';                 // a dot's upkeep threads (thei
 const DOT_WORKING_MS = 45 * 1000;                // a turn with no new stamp this long is taken as over
 const DOT_TURN_MS = 60 * 1000;                   // a stamp this soon after a turn's last belongs to it
 const DOT_READY_MS = 20 * 1000;                  // an unread flag this soon after a turn's stamp is its reply
+const USER_THREAD = 'user';                      // the catalog's thread_source for threads you started
 
 function codexPaths() {
   const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -222,14 +223,15 @@ function readCatalog(file) {
   try {
     DatabaseSync ??= require('node:sqlite').DatabaseSync;
     db = new DatabaseSync(file, { readOnly: true });
-    const rows = db.prepare(
-      "select host_id, thread_id, display_title, source_updated_at, cwd from local_thread_catalog where host_id not like 'chatgpt:%'",
-    ).all();
+    // `select *`: thread_source and missing_candidate came in later versions of the app.
+    const rows = db.prepare("select * from local_thread_catalog where host_id not like 'chatgpt:%'").all();
     return new Map(rows.map((r) => [r.thread_id, {
       hostId: r.host_id,
       title: r.display_title || null,
       updatedAt: Math.round((Number(r.source_updated_at) || 0) * 1000),
       cwd: r.cwd || null,
+      threadSource: r.thread_source ?? null,
+      missing: r.missing_candidate === 1,
     }]));
   } catch {
     return null;   // not there, locked mid-migration, or no SQLite in this runtime
@@ -277,6 +279,8 @@ class CodexTracker extends EventEmitter {
     this.scanDirty = false;
     this.lastEmitted = '';
     this.sessions = [];
+    this.all = [];                    // every thread the app lists, for folder mode
+    this.lastListed = '';
     this.busy = false;
     this.rerun = false;
     this.running = false;
@@ -645,7 +649,45 @@ class CodexTracker extends EventEmitter {
       this.lastEmitted = key;
       this.emit('change', out);
     }
+    this.recomputeAll(byThread, force);
     this.updateLimits();
+  }
+
+  // Folder mode lists the threads the app's sidebar does: the ones you started, on this PC and
+  // on SSH hosts. A dot lives in the cloud with no folder, and helper threads (the auto-reviewer,
+  // a thread's subagents) aren't yours, so neither is listed.
+  recomputeAll(byThread, force = false) {
+    const all = [];
+    for (const [threadId, c] of this.catalog) {
+      if (c.missing || (c.threadSource != null && c.threadSource !== USER_THREAD)) continue;
+      if (this.aeons.has(threadId) || this.subtasks.has(threadId) || this.dreams.has(threadId)) continue;
+      const s = byThread.get(threadId) ?? this.listed(threadId, c);
+      all.push({ ...s, hostId: c.hostId, lastActivityAt: c.updatedAt });
+    }
+    all.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    this.all = all;
+    const key = JSON.stringify(all);
+    if (force || key !== this.lastListed) {
+      this.lastListed = key;
+      this.emit('list', all);
+    }
+  }
+
+  // A thread with nothing going on, as folder mode shows it.
+  listed(threadId, c) {
+    return {
+      id: `codex:${threadId}`,
+      kind: 'codex',
+      hostSessionId: null,
+      title: c.title || this.threadNames.get(threadId) || folderName(c.cwd) || 'Codex thread',
+      remote: hostName(c.hostId, this.hostNames),
+      project: projectName(c.cwd),
+      cwd: c.cwd,
+      url: threadUrl(threadId, c.hostId),
+      status: 'idle',
+      detail: '',
+      since: c.updatedAt,
+    };
   }
 
   // The rate limits are the account's, so the newest ones win, whichever machine they came from.

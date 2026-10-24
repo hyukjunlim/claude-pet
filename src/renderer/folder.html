@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <title>Claude Pet</title>
+  <link rel="stylesheet" href="folder.css">
+</head>
+<body>
+  <header>
+    <input id="search" type="search" placeholder="Search sessions" aria-label="Search sessions" spellcheck="false" autocomplete="off">
+    <button id="pet-mode" type="button" title="Back to the floating pet" aria-label="Back to the floating pet">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H2v4M10 14h4v-4M2 2l5 5M14 14l-5-5"/></svg>
+    </button>
+  </header>
+  <main id="tree" role="tree" aria-label="Sessions by machine and folder"></main>
+  <section id="notices" aria-label="eTL" hidden></section>
+  <footer id="dock">
+    <div id="meter" class="meter" role="img" hidden></div>
+    <div id="pet" role="button" aria-label="Claude Pet">
+      <div id="sprite" aria-hidden="true"></div>
+    </div>
+  </footer>
+  <script src="sprite.js"></script>
+  <script src="folder.js"></script>
+</body>
+</html>

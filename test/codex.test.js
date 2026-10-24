@@ -215,6 +215,42 @@ test('the tracker combines running threads here with unread threads on other hos
   }
 });
 
+test('the full list has the threads the app lists, quiet ones included, but not helpers or chats', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  try {
+    fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
+      'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab', alias: 'lab-server' }],
+    }));
+    fs.mkdirSync(path.join(home, 'sqlite'));
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(path.join(home, 'sqlite', 'codex-dev.db'));
+    db.exec('create table local_thread_catalog (host_id text, thread_id text, display_title text, source_updated_at real, cwd text, thread_source text, missing_candidate integer)');
+    const add = db.prepare('insert into local_thread_catalog values (?, ?, ?, ?, ?, ?, ?)');
+    const t = Date.now() / 1000 - 3 * 24 * 3600;
+    add.run('remote-ssh-discovered:lab-server', 'th-remote', 'Compare descriptors', t + 10, '/data/proj', 'user', 0);
+    add.run('local', 'th-local', 'Reframe chemistry', t, '/home/me/proj', 'user', 0);
+    add.run('remote-ssh-discovered:lab-server', 'th-review', 'Guardian review', t + 20, '/data/proj', 'guardian_review', 0);
+    add.run('local', 'th-missing', 'Gone', t + 30, '/home/me/proj', 'user', 1);
+    add.run('chatgpt:org:user', 'chat-thread', 'A chat', t + 40, null, null, 0);
+    db.close();
+
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false });
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);
+    assert.deepEqual(tracker.all.map((s) => [s.id, s.hostId, s.status]), [
+      ['codex:th-remote', 'remote-ssh-discovered:lab-server', 'idle'],
+      ['codex:th-local', 'local', 'idle'],
+    ]);
+    const [remote] = tracker.all;
+    assert.equal(remote.title, 'Compare descriptors');
+    assert.equal(remote.remote, 'lab');
+    assert.equal(remote.url, 'codex://threads/th-remote?hostId=remote-ssh-discovered%3Alab-server');
+    assert.equal(remote.lastActivityAt, Math.round((t + 10) * 1000));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 // ------------------------------------------------------------------ dot
 
 const DOT = '0199d0d0-0001-7000-8000-00000000d071';

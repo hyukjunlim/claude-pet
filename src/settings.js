@@ -6,6 +6,7 @@ const path = require('node:path');
 const DEFAULTS = {
   petKey: 'built-in:clay',
   scale: 0.75,
+  mode: 'pet',             // 'pet': the floating pet; 'folder': a sidebar of every session, by machine and folder
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
   showActivity: true,
