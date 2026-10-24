@@ -74,19 +74,21 @@ test('a turn that ended waiting on you needs you until you have seen it', () => 
   assert.equal(deriveStatus(asking, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');
 });
 
-// The desktop app's next-step box. When it shows a question, its result ends the turn: no reply follows.
+// The desktop app's next-step box. Its result says whether the box shows the question. Then a
+// closing reply ends the turn; in earlier versions of the app the result itself ended it.
 const wrapUp = (s, id, input) => toolUse(s, id, 'mcp__ccd_turn__wrap_up', input);
+const SHOWN = 'Shown in the next-step box. Your closing message is your answer to the user: write it now.';
 const endsTurn = (entry) => ({ ...entry, mcpMeta: { _meta: { 'claude/endTurn': true } } });
 
-test('a turn that ends on a question in the next-step box needs you until you have seen it', () => {
+test('a turn that ends on a question in the next-step box needs you until you answer it', () => {
   const ask = wrapUp(5, 'w1', { recap: 'Compared the metrics.', ask: 'Which metrics go in the paper?', actions: [] });
   const s = run([prompt(0), ask, endsTurn(toolResult(6, 'w1', 'Shown in the next-step box.'))]);
   assert.deepEqual(deriveStatus(s, { lastFocusedAt: T0 - 1000 }, T0 + 10_000), { status: 'waiting', detail: 'Which metrics go in the paper?', since: T0 + 6000 });
   // The app's summary calls the turn completed; the question is still there.
   const summary = { status_category: 'completed', status_detail: 'Compared the metrics', summarizes_uuid: 'a-w1' };
   assert.equal(deriveStatus(s, { summary }, T0 + 10_000).status, 'waiting');
-  assert.equal(deriveStatus(s, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');   // looked at
-  assert.equal(deriveStatus(s, { dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
+  assert.equal(deriveStatus(s, { lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'waiting');   // looking doesn't settle it
+  assert.equal(deriveStatus(s, { dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');        // the × does
   // Your answer starts the next turn, and that one ends as usual.
   const next = run([prompt(0), ask, endsTurn(toolResult(6, 'w1')), prompt(30, 'ABS + TED')]);
   assert.deepEqual(deriveStatus(next, {}, T0 + 31_000), { status: 'running', detail: 'Thinking', since: T0 + 30_000 });
@@ -101,11 +103,62 @@ test('a tool result that ends the turn without a question leaves it Ready', () =
 });
 
 test("a question the next-step box didn't show keeps the turn going", () => {
-  const ask = wrapUp(5, 'w1', { recap: 'Done.', ask: 'Commit it?', actions: [{ action: 'commit' }] });
+  const ask = wrapUp(5, 'w1', { recap: 'Done.', ask: 'Commit it?', actions: [{ action: 'commit' }], blocked: true });
   const s = run([prompt(0), ask, toolResult(6, 'w1', 'Not shown: commit does not hold right now.')]);
   assert.equal(deriveStatus(s, {}, T0 + 7000).status, 'running');
   applyEntry(s, reply(9));
   assert.equal(deriveStatus(s, {}, T0 + 10_000).status, 'review');
+});
+
+test('a question the next-step box shows still needs you after the closing reply', () => {
+  const ask = wrapUp(5, 'w1', { recap: 'Fixed it.', ask: 'Commit this fix?', actions: [{ action: 'commit' }], blocked: true });
+  const s = run([prompt(0), ask, toolResult(6, 'w1', SHOWN)]);
+  assert.equal(deriveStatus(s, {}, T0 + 7000).status, 'waiting');   // the box is up while the closing reply comes
+  applyEntry(s, reply(9));
+  applyEntry(s, stopSummary(10));
+  assert.deepEqual(deriveStatus(s, {}, T0 + 11_000), { status: 'waiting', detail: 'Commit this fix?', since: T0 + 10_000 });
+  const summary = { status_category: 'completed', status_detail: 'Fixed it', summarizes_uuid: 'a-final' };
+  assert.equal(deriveStatus(s, { summary }, T0 + 11_000).status, 'waiting');
+  assert.equal(deriveStatus(s, { lastFocusedAt: T0 + 10_500 }, T0 + 11_000).status, 'waiting');   // looked at, not answered
+  // Also over a task still running in the background, which would show "Background" otherwise.
+  const bg = run([prompt(0), toolUse(1, 'b1', 'Bash', { command: 'watch' }), toolResult(2, 'b1', 'started', { backgroundTaskId: 'task1' }),
+    ask, toolResult(6, 'w1', SHOWN), reply(9)]);
+  assert.equal(deriveStatus(bg, {}, T0 + 11_000).status, 'waiting');
+  // A question whose answer can wait (not blocked) needs you too.
+  const canWait = wrapUp(5, 'w1', { recap: 'Fixed it.', ask: 'Commit this fix?' });
+  const later = run([prompt(0), canWait, toolResult(6, 'w1', SHOWN), reply(9)]);
+  assert.deepEqual(deriveStatus(later, {}, T0 + 11_000), { status: 'waiting', detail: 'Commit this fix?', since: T0 + 9000 });
+});
+
+test('a question in the next-step box outlasts turns a background task or another session starts', () => {
+  const notice = (s, extra) => ({
+    type: 'user', timestamp: at(s), ...extra,
+    message: { role: 'user', content: '<task-notification>\n<task-id>task1</task-id>\n<status>completed</status>\n</task-notification>' },
+  });
+  const fromTask = { origin: { kind: 'task-notification' }, turnOrigin: 'task_notification' };
+  const ask = wrapUp(5, 'w1', { recap: 'Started the logger.', ask: 'Which port?', blocked: true });
+  const asked = [prompt(0), toolUse(1, 'b1', 'Bash', { command: 'logger' }), toolResult(2, 'b1', 'started', { backgroundTaskId: 'task1' }),
+    ask, toolResult(6, 'w1', SHOWN), reply(9)];
+  const s = run([...asked, notice(20, fromTask), toolUse(21, 'r1', 'Read', { file_path: 'log.txt' }), toolResult(22, 'r1'), reply(25, 'a-n')]);
+  assert.deepEqual(deriveStatus(s, {}, T0 + 30_000), { status: 'waiting', detail: 'Which port?', since: T0 + 9000 });
+  // Dismissed in between: the later turn shows as itself, without bringing the question back.
+  assert.equal(deriveStatus(s, { dismissedAt: T0 + 15_000 }, T0 + 30_000).status, 'review');
+  // A message from another session, or a notice in an older transcript without an origin, too.
+  assert.equal(deriveStatus(run([...asked, notice(20, { origin: { kind: 'peer' } }), reply(25, 'a-n')]), {}, T0 + 30_000).status, 'waiting');
+  assert.equal(deriveStatus(run([...asked, notice(20), reply(25, 'a-n')]), {}, T0 + 30_000).status, 'waiting');
+  // Your prompt answers it (the logger still runs); a newer box replaces it.
+  assert.equal(deriveStatus(run([...asked, prompt(20, 'port 80'), reply(25, 'a-n')]), {}, T0 + 30_000).status, 'background');
+  const newer = run([...asked, notice(20, fromTask), wrapUp(21, 'w2', { recap: 'The logger stopped.' }), toolResult(22, 'w2', SHOWN), reply(25, 'a-n')]);
+  assert.equal(deriveStatus(newer, {}, T0 + 30_000).status, 'review');
+});
+
+test('work after the next-step box drops its question', () => {
+  const ask = wrapUp(5, 'w1', { recap: 'Fixed it.', ask: 'Commit this fix?', blocked: true });
+  const s = run([prompt(0), ask, toolResult(6, 'w1', SHOWN), toolUse(7, 't1', 'Bash', { command: 'npm test' }), toolResult(8, 't1'), reply(9)]);
+  assert.deepEqual(deriveStatus(s, {}, T0 + 10_000), { status: 'review', detail: 'Finished', since: T0 + 9000 });
+  // A box without a question leaves the turn Ready too.
+  const recapOnly = run([prompt(0), wrapUp(5, 'w2', { recap: 'Fixed it.' }), toolResult(6, 'w2', SHOWN), reply(9)]);
+  assert.equal(deriveStatus(recapOnly, {}, T0 + 10_000).status, 'review');
 });
 
 test("a reply split into thinking and text entries is still the turn's last reply", () => {
