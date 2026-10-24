@@ -102,7 +102,7 @@ function placeCodex(s, ctx) {
   return { host: sshHost({ target, port: c?.port ?? null, labels: [c?.name, s.remote] }, ctx), where };
 }
 
-function item(s, app) {
+function itemOf(s, app) {
   return {
     id: s.id,
     app,
@@ -123,11 +123,13 @@ function newNode(key, label, pathText) {
 // `claude`, `codex`: the trackers' full lists. `chats`: the web chats' (WebChats.all), which go
 // first, right under "Chat" (as its `loose`). `sshHosts`: from ~/.ssh/config (sshConfigHosts).
 // `codexConnections`: CodexTracker.connections. `defaultWsl`: the distro Codex's local threads
-// and loopback SSH hosts run in. `now`: for which folders start out open.
+// and loopback SSH hosts run in. `flags`: the sessions you flagged to come back to (flags.js).
+// `now`: for which folders start out open.
 function buildTree({
-  claude = [], codex = [], chats = [], sshHosts = [], codexConnections = [], defaultWsl = null, now = Date.now(),
+  claude = [], codex = [], chats = [], sshHosts = [], codexConnections = [], defaultWsl = null, flags = {}, now = Date.now(),
 } = {}) {
   const ctx = { sshHosts, codexConnections, defaultWsl };
+  const item = (s, app) => ({ ...itemOf(s, app), flagged: Object.hasOwn(flags, s.id) });
   const hosts = new Map();   // key -> { host, root, loose }
   const add = (s, app, { host, where }) => {
     let h = hosts.get(host.key);
@@ -162,7 +164,7 @@ function buildTree({
   const wsl = machines.filter((m) => m.kind === 'wsl');
   if (wsl.length > 1) for (const m of wsl) if (m.distro) m.label = `WSL · ${m.distro}`;
   machines.sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
-  const chat = chatHost(chats);
+  const chat = chatHost(chats, item);
   return chat ? [chat, ...machines] : machines;
 }
 
@@ -170,7 +172,7 @@ function buildTree({
 // a dot in each site's color tells claude.ai's, ChatGPT's and Gemini's apart.
 const CHAT_APP = { claude: 'claude-web', chatgpt: 'chatgpt', gemini: 'gemini' };
 
-function chatHost(chats) {
+function chatHost(chats, item) {
   const sessions = chats.filter((c) => CHAT_APP[c.site]).map((c) => item(c, CHAT_APP[c.site])).sort(byActivity);
   if (!sessions.length) return null;
   return { key: 'chat', kind: 'chat', label: 'Chat', folders: [], loose: sessions, ...counts(sessions), latest: latestOf(sessions) };
@@ -207,11 +209,12 @@ function allSessions(n) {
   return [...n.sessions, ...n.children.flatMap(allSessions)];
 }
 
-// How many need you, and how many are working, so a folded folder can still say so.
+// How many need you, are working, or are flagged, so a folded folder can still say so.
 function counts(sessions) {
   return {
     attention: sessions.filter((s) => ATTENTION.has(s.status)).length,
     busy: sessions.filter((s) => BUSY.has(s.status)).length,
+    flagged: sessions.filter((s) => s.flagged).length,
   };
 }
 

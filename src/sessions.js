@@ -678,6 +678,8 @@ class SessionTracker extends EventEmitter {
         machineKey: r.machineKey,
         machine: name || r.machine,
         lastActivityAt: r.lastActivityAt,
+        // Your newest prompt (a task's notice doesn't count), stamped by the CLI's machine.
+        lastPromptAt: r.latestUserFrameAt ? r.latestUserFrameAt - skew : 0,
         ...(derived ?? { status: 'idle', detail: '', since: r.lastActivityAt }),
       });
     }

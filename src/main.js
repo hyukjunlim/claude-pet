@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage,
+  app, BrowserWindow, Menu, MenuItem, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage,
   screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
@@ -27,6 +27,7 @@ const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
 const { FolderWindow } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
+const { settleFlags } = require('./flags');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
 
@@ -487,6 +488,7 @@ function mergeSessions() {
 
 // Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
 function sendTree() {
+  const flags = currentFlags();
   if (!folder?.open) return;
   const hosts = buildTree({
     claude: claudeAll,
@@ -495,11 +497,29 @@ function sendTree() {
     sshHosts: sshConfigHosts(),
     codexConnections: codex?.connections ?? [],
     defaultWsl: wslDistros()[0] ?? null,
+    flags,
   });
   const key = JSON.stringify(hosts);
   if (key === treeKey) return;
   treeKey = key;
   folder.send('folder:tree', hosts);
+}
+
+// Folder mode's follow-up flags (flags.js), less the ones whose session you've since sent a
+// message.
+function currentFlags() {
+  const saved = settings.get('flags') || {};
+  const left = settleFlags(saved, [...claudeAll, ...codexAll, ...webAll]);
+  if (left !== saved) settings.set({ flags: left });
+  return left;
+}
+
+function setFlag(id, on) {
+  const flags = { ...currentFlags() };
+  if (on) flags[id] = Date.now();
+  else delete flags[id];
+  settings.set({ flags });
+  sendTree();
 }
 
 function codexInstalled() {
@@ -1140,6 +1160,11 @@ function registerIpc() {
     if (!fromFolder(e) || typeof id !== 'string') return;
     if (!openSession(id, { handoff: via === 'key', fill: true })) log('folder: nothing to open for', id);
   });
+  // A row's flag: it stays until you send that session your next message.
+  ipcMain.on('folder:flag', (e, id, on) => {
+    if (!fromFolder(e) || typeof id !== 'string') return;
+    setFlag(id, on === true);
+  });
   ipcMain.on('folder:pet-click', (e) => {
     if (!fromFolder(e)) return;
     const url = mainAppLink();
@@ -1158,7 +1183,15 @@ function registerIpc() {
   ipcMain.on('folder:context-menu', (e, p) => {
     if (!fromFolder(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
-    tray?.popUpContextMenu(buildMenu(), position);
+    const menu = buildMenu();
+    // On a session's row, its flag comes first.
+    const id = typeof p?.id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === p.id)) ? p.id : null;
+    if (id) {
+      const flagged = Object.hasOwn(currentFlags(), id);
+      menu.insert(0, new MenuItem({ type: 'separator' }));
+      menu.insert(0, new MenuItem({ label: flagged ? 'Clear flag' : 'Flag for follow-up', click: () => setFlag(id, !flagged) }));
+    }
+    tray?.popUpContextMenu(menu, position);
   });
 }
 

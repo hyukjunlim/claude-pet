@@ -117,6 +117,12 @@ test('questions asked mid-turn wait for you until you answer them, while the tur
   assert.equal(rolloutStatus(ended, { now: T0 + 21_000 }).status, 'running');
 });
 
+test("the last message you sent a thread is noted, for folder mode's flags", () => {
+  const sent = (s, text) => ({ timestamp: at(s), type: 'event_msg', payload: { type: 'item_completed', turn_id: 't1', item: { type: 'UserMessage', id: `u${s}`, content: [{ type: 'text', text }] } } });
+  assert.equal(rollout([meta(), started(1), complete(9)]).lastPromptAt, 0);
+  assert.equal(rollout([meta(), started(1), sent(1, 'parse the logs'), complete(9), started(20), sent(20, 'and the tests')]).lastPromptAt, T0 + 20_000);
+});
+
 test('a turn is running even when the rollout is read from after its start', () => {
   const work = (s, turn, type = 'item_completed') => (type === 'token_usage_record'
     ? { timestamp: at(s), type, payload: { turn_id: turn } }

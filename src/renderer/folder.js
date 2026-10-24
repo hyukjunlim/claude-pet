@@ -206,7 +206,8 @@
       // Web chats sit right under "Chat"; a machine's sessions without a folder, under "No folder".
       if (h.kind === 'chat') for (const s of h.loose) kids.append(sessionEl(s, 0));
       else if (h.loose.length) {
-        kids.append(folderEl({ key: `${h.key}|loose`, label: 'No folder', path: '', sessions: h.loose, children: [], open: true, attention: 0, busy: 0 }, 0));
+        const flagged = h.loose.filter((s) => s.flagged).length;
+        kids.append(folderEl({ key: `${h.key}|loose`, label: 'No folder', path: '', sessions: h.loose, children: [], open: true, attention: 0, busy: 0, flagged }, 0));
       }
       wrap.append(kids);
     }
@@ -236,12 +237,13 @@
   }
 
   function sessionEl(s, depth) {
-    const row = el('button', `row session status-${s.status}${s.id === current ? ' current' : ''}`);
+    const row = el('button', `row session status-${s.status}${s.flagged ? ' flagged' : ''}${s.id === current ? ' current' : ''}`);
     row.type = 'button';
+    row.dataset.id = s.id;
     row.style.setProperty('--depth', String(depth));
     row.setAttribute('role', 'treeitem');
     const state = LABELS[s.status];
-    row.setAttribute('aria-label', [s.title, APP_NAME[s.app], state, `Click to open in ${APP_NAME[s.app]}`].filter(Boolean).join(', '));
+    row.setAttribute('aria-label', [s.title, APP_NAME[s.app], state, s.flagged && 'Flagged', `Click to open in ${APP_NAME[s.app]}`].filter(Boolean).join(', '));
     row.append(el('span', 'chevron'), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
     if (state) row.append(el('span', 'state', state));
     else {
@@ -249,6 +251,7 @@
       ago.dataset.at = String(s.lastActivityAt || 0);
       row.append(ago);
     }
+    row.append(flagEl(s));
     row.addEventListener('click', () => {
       current = s.id;
       api.open(s.id);
@@ -257,11 +260,48 @@
     return row;
   }
 
-  // A folded folder's news: something needs you, or is working.
+  // The follow-up flag at a session's end: faint while you point at the row, filled in once set.
+  // Opening the session leaves it; your next message to it takes it off (main.js, flags.js).
+  function flagEl(s) {
+    const flag = el('span', 'flag');
+    flag.title = s.flagged ? 'Clear flag' : 'Flag for follow-up';
+    flag.append(flagIcon());
+    flag.addEventListener('click', (e) => {
+      e.stopPropagation();   // not an open
+      s.flagged = !s.flagged;
+      api.flag(s.id, s.flagged);
+      render();
+    });
+    return flag;
+  }
+
+  // A flag on its pole; CSS fills the cloth in.
+  function flagIcon() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const d of ['M4 14.5V2.5', 'M4 2.75h8.25L10.25 6l2 3.25H4z']) {
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', d);
+      svg.append(path);
+    }
+    return svg;
+  }
+
+  // A folded folder's news: something needs you, or is working; and whether you flagged a
+  // session in it.
   function pips(n) {
-    if (n.attention > 0) return [el('span', 'pip attention')];
-    if (n.busy > 0) return [el('span', 'pip busy')];
-    return [];
+    const news = n.attention > 0 ? 'attention' : n.busy > 0 ? 'busy' : null;
+    if (!news && !(n.flagged > 0)) return [];
+    const wrap = el('span', 'pips');
+    if (news) wrap.append(el('span', `pip ${news}`));
+    if (n.flagged > 0) {
+      const flag = el('span', 'flag-pip');
+      flag.append(flagIcon());
+      wrap.append(flag);
+    }
+    return [wrap];
   }
 
   // ---------------------------------------------------------- search
@@ -377,7 +417,7 @@
   document.addEventListener('contextmenu', (e) => {
     if (e.target === searchEl) return;   // the field's own menu (cut, copy, paste)
     e.preventDefault();
-    api.contextMenu(e.screenX, e.screenY);
+    api.contextMenu(e.screenX, e.screenY, e.target.closest?.('.session')?.dataset.id);
   });
 
   // ---------------------------------------------------------- width: drag the right edge

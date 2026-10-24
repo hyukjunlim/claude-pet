@@ -592,6 +592,7 @@ class CodexTracker extends EventEmitter {
     const now = this.now();
     const byThread = new Map();
     const followed = new Set();
+    const prompted = new Map();   // threadId -> when you last sent it a message, on our clock
     // A dot's bubble is named for the dot.
     const session = (threadId, hostId, cwd, derived) => {
       const c = this.catalog.get(threadId);
@@ -613,6 +614,7 @@ class CodexTracker extends EventEmitter {
     const follow = (s, hostId, skew) => {
       if (!s.threadId || s.subagent) return;
       followed.add(s.threadId);
+      if (s.lastPromptAt) prompted.set(s.threadId, s.lastPromptAt - skew);
       const derived = rolloutStatus(s, {
         now, skew, unread: this.unread.has(s.threadId), dismissedAt: this.dismissed.get(`codex:${s.threadId}`),
       });
@@ -649,20 +651,21 @@ class CodexTracker extends EventEmitter {
       this.lastEmitted = key;
       this.emit('change', out);
     }
-    this.recomputeAll(byThread, force);
+    this.recomputeAll(byThread, prompted, force);
     this.updateLimits();
   }
 
   // Folder mode lists the threads the app's sidebar does: the ones you started, on this PC and
   // on SSH hosts. A dot lives in the cloud with no folder, and helper threads (the auto-reviewer,
   // a thread's subagents) aren't yours, so neither is listed.
-  recomputeAll(byThread, force = false) {
+  // `prompted`: when you last sent each followed thread a message (folder mode's flags go by it).
+  recomputeAll(byThread, prompted = new Map(), force = false) {
     const all = [];
     for (const [threadId, c] of this.catalog) {
       if (c.missing || (c.threadSource != null && c.threadSource !== USER_THREAD)) continue;
       if (this.aeons.has(threadId) || this.subtasks.has(threadId) || this.dreams.has(threadId)) continue;
       const s = byThread.get(threadId) ?? this.listed(threadId, c);
-      all.push({ ...s, hostId: c.hostId, lastActivityAt: c.updatedAt });
+      all.push({ ...s, hostId: c.hostId, lastActivityAt: c.updatedAt, lastPromptAt: prompted.get(threadId) || 0 });
     }
     all.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     this.all = all;

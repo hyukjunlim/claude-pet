@@ -203,6 +203,7 @@ class WebChats extends EventEmitter {
       url: chat.url,
       since: chat.since,
       lastActivityAt: chat.activeAt,
+      lastPromptAt: chat.sentAt,
     })).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   }
 
@@ -218,6 +219,7 @@ class WebChats extends EventEmitter {
     return {
       key, site: r.site, title: r.title, url: r.url, status: null, since: 0, looking: false, endTimer: null,
       activeAt: this.now(),      // when it turned up, or last had a reply going
+      sentAt: 0,                 // when a reply last started, which a message of yours starts
     };
   }
 
@@ -253,6 +255,7 @@ class WebChats extends EventEmitter {
         chat.status = 'running';
         chat.since = this.now();
         chat.activeAt = chat.since;
+        chat.sentAt = chat.since;
       }
     } else if (chat.status === 'running' && !chat.endTimer) {
       chat.endTimer = this.setTimer(() => this.#ended(chat), END_GRACE_MS);

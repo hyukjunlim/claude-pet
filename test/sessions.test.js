@@ -423,7 +423,7 @@ test('the full list has every session in the index, quiet ones included, with wh
     fs.mkdirSync(index, { recursive: true });
     const old = Date.now() - 30 * 24 * 60 * 60 * 1000;   // no transcript to follow: nothing to show as a bubble
     const write = (id, extra) => fs.writeFileSync(path.join(index, `${id}.json`), JSON.stringify({ sessionId: id, lastActivityAt: old, ...extra }));
-    write('local_ssh3', { title: 'Paper figures', cwd: '/data/proj/BB', sshConfig: { sshHost: 'alice@10.0.0.5', sshPort: 22 }, lastActivityAt: old + 1000 });
+    write('local_ssh3', { title: 'Paper figures', cwd: '/data/proj/BB', sshConfig: { sshHost: 'alice@10.0.0.5', sshPort: 22 }, lastActivityAt: old + 1000, latestUserFrameAt: old + 500 });
     write('local_wsl1', { title: 'Tokenizer', cwd: '/home/me/tok', wslConfig: { distro: 'Ubuntu' } });
     write('local_pc1', { title: 'Pet', cwd: 'C:\\Users\\me\\pet' });
     write('local_gone', { title: 'Archived', cwd: 'C:\\x', isArchived: true });
@@ -439,7 +439,7 @@ test('the full list has every session in the index, quiet ones included, with wh
     const [ssh, ...rest] = tracker.all;                      // newest first
     assert.deepEqual(ssh, {
       id: 'local_ssh3', kind: 'desktop', hostSessionId: 'local_ssh3', title: 'Paper figures', remote: 'lab', project: 'BB',
-      cwd: '/data/proj/BB', machineKey: 'ssh:alice@10.0.0.5:22', machine: 'lab', lastActivityAt: old + 1000,
+      cwd: '/data/proj/BB', machineKey: 'ssh:alice@10.0.0.5:22', machine: 'lab', lastActivityAt: old + 1000, lastPromptAt: old + 500,
       status: 'idle', detail: '', since: old + 1000,
     });
     assert.deepEqual(rest.map((s) => [s.id, s.machineKey]).sort(), [['local_pc1', null], ['local_wsl1', 'wsl:Ubuntu']]);

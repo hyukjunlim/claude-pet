@@ -35,6 +35,7 @@ function createRolloutState() {
     asks: new Map(),         // this turn's unanswered request_user_input_async questions: id -> { detail, at }
     endedTurns: new Set(),   // ids of recent turns that finished
     limits: null,            // the account's rate limits as of the newest reply (see rateLimitsOf)
+    lastPromptAt: 0,         // when you last sent the thread a message
   };
 }
 
@@ -180,6 +181,7 @@ function noteItem(state, item, at) {
       state.asks.set(JSON.stringify([ASYNC_ASK_TOOL, item.id, i]), { detail: describeQuestion({ questions: [q] }), at });
     });
   } else if (item?.type === 'UserMessage') {
+    state.lastPromptAt = Math.max(state.lastPromptAt, at);
     for (const id of answeredQuestions(item.content)) state.asks.delete(id);
   }
 }

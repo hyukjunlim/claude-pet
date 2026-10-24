@@ -30,6 +30,17 @@ const build = (claudeList, codexList) => buildTree({
 });
 const titles = (n) => n.sessions.map((s) => s.title);
 
+test('a flagged session says so, and so does each folder and host it sits in', () => {
+  const [lab] = buildTree({
+    claude: [claude('paper figures', '/data/me/projects/BirdCount', onLab), claude('stride', '/data/me/projects/RiverSurvey', onLab)],
+    sshHosts: SSH_HOSTS, codexConnections: CONNECTIONS, flags: { 'paper figures': NOW - 1000 }, now: NOW,
+  });
+  const [projects] = lab.folders;
+  const [bb, retro] = [...projects.children].sort((a, b) => a.label.localeCompare(b.label));
+  assert.deepEqual([lab.flagged, projects.flagged, bb.flagged, retro.flagged], [1, 1, 1, 0]);
+  assert.deepEqual([bb.sessions[0].flagged, retro.sessions[0].flagged], [true, false]);
+});
+
 test('the two apps\' names for one server meet, and a parent folder\'s session stays at the parent', () => {
   const [lab] = build(
     [claude('paper figures', '/data/me/projects/BirdCount', onLab), claude('stride', '/data/me/projects/RiverSurvey', onLab)],
