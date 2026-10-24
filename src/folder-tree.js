@@ -38,11 +38,12 @@ function sshMachine(target, port, sshHosts) {
   };
 }
 
-const PC = { key: 'pc', kind: 'pc', label: 'This PC' };
+const PC = { key: 'pc', kind: 'pc', label: 'Local' };
 
+// Just "WSL"; with more than one distro in the tree, each also names its own (buildTree).
 function wslHost(distro) {
   return distro
-    ? { key: `wsl:${distro.toLowerCase()}`, kind: 'wsl', label: `WSL · ${distro}` }
+    ? { key: `wsl:${distro.toLowerCase()}`, kind: 'wsl', label: 'WSL', distro }
     : { key: 'wsl', kind: 'wsl', label: 'WSL' };
 }
 
@@ -157,8 +158,10 @@ function buildTree({
       loose.sort(byActivity);
       const all = [...folders.flatMap(allSessions), ...loose];
       return { ...host, folders, loose, ...counts(all), latest: latestOf(all) };
-    })
-    .sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
+    });
+  const wsl = machines.filter((m) => m.kind === 'wsl');
+  if (wsl.length > 1) for (const m of wsl) if (m.distro) m.label = `WSL · ${m.distro}`;
+  machines.sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
   const chat = chatHost(chats);
   return chat ? [chat, ...machines] : machines;
 }

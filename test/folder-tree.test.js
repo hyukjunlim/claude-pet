@@ -52,7 +52,10 @@ test('WSL is one host whether the path came as a distro, a share, Codex\'s local
     [claude('tok', '/home/me/tok', { machineKey: 'wsl:Ubuntu', machine: 'Ubuntu' }), claude('share', '\\\\wsl$\\Ubuntu\\home\\me\\tok')],
     [codex('chem', '/home/me/chem'), codex('loop', '/home/me/tok', 'remote-ssh-discovered:wsl-ubuntu')],
   );
-  assert.deepEqual(hosts.map((h) => [h.key, h.label]), [['wsl:ubuntu', 'WSL · Ubuntu']]);
+  assert.deepEqual(hosts.map((h) => [h.key, h.label]), [['wsl:ubuntu', 'WSL']]);
+  // With a second distro, each names its own.
+  const two = build([claude('tok', '\\\\wsl$\\Ubuntu\\home\\me\\tok'), claude('deb', '\\\\wsl$\\Debian\\home\\me\\deb')]);
+  assert.deepEqual(two.map((h) => h.label), ['WSL · Debian', 'WSL · Ubuntu']);
   const [home] = hosts[0].folders;
   assert.equal(home.label, '/home/me');
   assert.deepEqual(home.children.map((c) => [c.label, titles(c).sort()]), [['tok', ['loop', 'share', 'tok']], ['chem', ['chem']]]);
@@ -118,7 +121,7 @@ test('web chats come first, right under Chat, newest first, each with its site\'
     chats: [chat('gpt old', 'chatgpt', { lastActivityAt: ago(3) }), chat('plan', 'claude', { status: 'review' }), chat('gpt new', 'chatgpt', { status: 'running', lastActivityAt: ago(0.5) })],
     now: NOW,
   });
-  assert.deepEqual(hosts.map((h) => [h.key, h.label]), [['chat', 'Chat'], ['pc', 'This PC']]);
+  assert.deepEqual(hosts.map((h) => [h.key, h.label]), [['chat', 'Chat'], ['pc', 'Local']]);
   const [c] = hosts;
   assert.deepEqual(c.folders, []);
   assert.deepEqual(c.loose.map((s) => [s.title, s.app]), [['gpt new', 'chatgpt'], ['plan', 'claude-web'], ['gpt old', 'chatgpt']]);
