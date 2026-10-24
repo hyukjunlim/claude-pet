@@ -166,7 +166,7 @@ header {
   white-space: nowrap;
 }
 
-.host-head .pips { margin-left: auto; }
+.host-head .pip { margin-left: auto; }
 
 .row {
   display: flex;
@@ -258,20 +258,13 @@ header {
 .pip.attention { --c: var(--waiting); }
 .pip.busy { --c: var(--running); }
 
-.pips {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-/* The follow-up flag, at a session's end: a faint outline while you point at the row, filled in
-   once set. Every row keeps its place, so the flags line up and nothing moves when one shows. */
+/* The follow-up flag, in the place a folder's row has its arrow: a faint outline while you point
+   at the row, filled in once set. */
 .flag {
   flex: none;
   display: flex;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   color: var(--faint);
   visibility: hidden;
   cursor: pointer;
@@ -283,8 +276,7 @@ header {
 .flagged .flag { color: var(--text); }
 .flagged .flag:hover { color: var(--muted); }
 
-.flag svg,
-.flag-pip svg {
+.flag svg {
   width: 100%;
   height: 100%;
   fill: none;
@@ -294,17 +286,7 @@ header {
   stroke-linejoin: round;
 }
 
-.flagged .flag svg,
-.flag-pip svg { fill: currentColor; }
-
-/* ... and on a folded folder that has a flagged session in it. */
-.flag-pip {
-  flex: none;
-  display: flex;
-  width: 11px;
-  height: 11px;
-  color: var(--text);
-}
+.flagged .flag svg { fill: currentColor; }
 
 .children[hidden] { display: none; }
 

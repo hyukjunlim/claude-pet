@@ -209,12 +209,11 @@ function allSessions(n) {
   return [...n.sessions, ...n.children.flatMap(allSessions)];
 }
 
-// How many need you, are working, or are flagged, so a folded folder can still say so.
+// How many need you, and how many are working, so a folded folder can still say so.
 function counts(sessions) {
   return {
     attention: sessions.filter((s) => ATTENTION.has(s.status)).length,
     busy: sessions.filter((s) => BUSY.has(s.status)).length,
-    flagged: sessions.filter((s) => s.flagged).length,
   };
 }
 

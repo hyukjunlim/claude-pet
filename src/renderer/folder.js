@@ -206,8 +206,7 @@
       // Web chats sit right under "Chat"; a machine's sessions without a folder, under "No folder".
       if (h.kind === 'chat') for (const s of h.loose) kids.append(sessionEl(s, 0));
       else if (h.loose.length) {
-        const flagged = h.loose.filter((s) => s.flagged).length;
-        kids.append(folderEl({ key: `${h.key}|loose`, label: 'No folder', path: '', sessions: h.loose, children: [], open: true, attention: 0, busy: 0, flagged }, 0));
+        kids.append(folderEl({ key: `${h.key}|loose`, label: 'No folder', path: '', sessions: h.loose, children: [], open: true, attention: 0, busy: 0 }, 0));
       }
       wrap.append(kids);
     }
@@ -244,14 +243,13 @@
     row.setAttribute('role', 'treeitem');
     const state = LABELS[s.status];
     row.setAttribute('aria-label', [s.title, APP_NAME[s.app], state, s.flagged && 'Flagged', `Click to open in ${APP_NAME[s.app]}`].filter(Boolean).join(', '));
-    row.append(el('span', 'chevron'), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
+    row.append(flagEl(s), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
     if (state) row.append(el('span', 'state', state));
     else {
       const ago = el('span', 'ago', formatAgo(s.lastActivityAt));
       ago.dataset.at = String(s.lastActivityAt || 0);
       row.append(ago);
     }
-    row.append(flagEl(s));
     row.addEventListener('click', () => {
       current = s.id;
       api.open(s.id);
@@ -260,8 +258,9 @@
     return row;
   }
 
-  // The follow-up flag at a session's end: faint while you point at the row, filled in once set.
-  // Opening the session leaves it; your next message to it takes it off (main.js, flags.js).
+  // The follow-up flag, where a folder's row has its arrow: faint while you point at the row,
+  // filled in once set. Opening the session leaves it; your next message to it takes it off
+  // (main.js, flags.js).
   function flagEl(s) {
     const flag = el('span', 'flag');
     flag.title = s.flagged ? 'Clear flag' : 'Flag for follow-up';
@@ -289,19 +288,11 @@
     return svg;
   }
 
-  // A folded folder's news: something needs you, or is working; and whether you flagged a
-  // session in it.
+  // A folded folder's news: something needs you, or is working.
   function pips(n) {
-    const news = n.attention > 0 ? 'attention' : n.busy > 0 ? 'busy' : null;
-    if (!news && !(n.flagged > 0)) return [];
-    const wrap = el('span', 'pips');
-    if (news) wrap.append(el('span', `pip ${news}`));
-    if (n.flagged > 0) {
-      const flag = el('span', 'flag-pip');
-      flag.append(flagIcon());
-      wrap.append(flag);
-    }
-    return [wrap];
+    if (n.attention > 0) return [el('span', 'pip attention')];
+    if (n.busy > 0) return [el('span', 'pip busy')];
+    return [];
   }
 
   // ---------------------------------------------------------- search
