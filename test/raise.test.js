@@ -30,6 +30,25 @@ test("a hidden PowerShell helper raises the Codex app's window, on Windows only"
   assert.match(script, /SetForegroundWindow/);
 });
 
+// A lone Alt tap opens the menu bar of the window that has the focus, so the helpers never send one.
+test('both helpers send Alt only when the window is not in front, with an unassigned key inside it', () => {
+  const steps = [
+    'GetForegroundWindow() == h) return true',
+    'keybd_event(0x12, 0, 0,',                   // Alt down
+    'keybd_event(0xE8, 0, 0,',
+    'keybd_event(0xE8, 0, 2,',
+    'keybd_event(0x12, 0, 2,',                   // Alt up
+    'return SetForegroundWindow(h)',
+  ];
+  for (const script of [HELPER, BROWSER_HELPER]) {
+    const raise = script.slice(script.indexOf('public static bool Raise('));
+    const at = steps.map((s) => raise.indexOf(s));
+    assert.ok(at.every((i) => i >= 0), `missing step in Raise: ${steps[at.indexOf(-1)]}`);
+    assert.deepEqual(at, [...at].sort((a, b) => a - b));
+    assert.equal(raise.match(/keybd_event\(0x12,/g).length, 2);   // one Alt down, one Alt up
+  }
+});
+
 test('a newer raise replaces one still waiting', () => {
   const { runs, spawnFn } = fakeSpawn();
   raiseCodexWindow({ spawnFn, platform: 'win32' });

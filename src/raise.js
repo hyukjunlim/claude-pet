@@ -3,8 +3,10 @@
 // Brings the Codex app's window to the front after the pet hands it a codex:// link (Windows).
 // With its window closed, Codex lives on in the tray: a link makes it open the window again, but
 // Windows keeps that window behind the one in front, so a click on the pet seemed to do nothing.
-// A small PowerShell helper waits up to 5 seconds for the window and raises it. (A tap of Alt
-// first is what lets a background process set the front window.)
+// A small PowerShell helper waits up to 5 seconds for the window and raises it. (A key event
+// first is what lets a background process set the front window. It is Alt with an unassigned key
+// inside it, since a lone Alt tap opens the menu bar of whatever window has the focus, and it is
+// sent only when the window isn't in front already.)
 
 const { spawn } = require('node:child_process');
 
@@ -14,13 +16,17 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class PetRaise {
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   public static bool Raise(IntPtr h) {
     if (IsIconic(h)) ShowWindow(h, 9);              // SW_RESTORE
+    if (GetForegroundWindow() == h) return true;    // in front already: no key event needed
     keybd_event(0x12, 0, 0, UIntPtr.Zero);          // Alt down
+    keybd_event(0xE8, 0, 0, UIntPtr.Zero);          // unassigned key, so the Alt
+    keybd_event(0xE8, 0, 2, UIntPtr.Zero);          //   isn't a lone tap that opens a menu
     keybd_event(0x12, 0, 2, UIntPtr.Zero);          // Alt up
     return SetForegroundWindow(h);
   }
@@ -54,6 +60,7 @@ public static class PetRaiseBrowser {
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
@@ -79,7 +86,10 @@ public static class PetRaiseBrowser {
   }
   public static bool Raise(IntPtr h) {
     if (IsIconic(h)) ShowWindow(h, 9);              // SW_RESTORE
+    if (GetForegroundWindow() == h) return true;    // in front already: no key event needed
     keybd_event(0x12, 0, 0, UIntPtr.Zero);          // Alt down
+    keybd_event(0xE8, 0, 0, UIntPtr.Zero);          // unassigned key, so the Alt
+    keybd_event(0xE8, 0, 2, UIntPtr.Zero);          //   isn't a lone tap that opens a menu
     keybd_event(0x12, 0, 2, UIntPtr.Zero);          // Alt up
     return SetForegroundWindow(h);
   }
