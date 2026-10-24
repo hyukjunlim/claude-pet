@@ -21,9 +21,10 @@ const { isSameHost, sshConfigHosts } = require('./ssh-config');
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
-const { raiseCodexWindow } = require('./raise');
+const { raiseBrowserWindow, raiseCodexWindow } = require('./raise');
 const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
+const { WebChatsFeature } = require('./webchats/feature');
 
 const DEMO = process.argv.includes('--demo');
 const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
@@ -58,6 +59,7 @@ const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', r
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;   // the only pages an eTL bubble opens
+const WEB_LINK = /^https:\/\/(claude\.ai|chatgpt\.com)\//;   // and a web chat's
 const FOREGROUND_HANDOFF_MS = 1500;
 const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as claude-pet.old.log
 
@@ -69,6 +71,7 @@ let settings;
 let tracker;
 let codex = null;               // Codex threads, when Codex is installed and shown
 let etl = null;                 // SNU eTL notices, when turned on (see etl/feature.js)
+let webchats = null;            // claude.ai and ChatGPT chats, when turned on (see webchats/feature.js)
 let win = null;
 let tray = null;
 let pets = [];
@@ -80,10 +83,11 @@ let shapeKey = '';              // the shape last set on the window, to skip set
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
-let sessions = [];              // Claude, Codex and eTL together, most urgent first
+let sessions = [];              // Claude, Codex, eTL and web chats together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
 let etlSessions = [];
+let webSessions = [];
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
@@ -426,7 +430,7 @@ function sendSessions() {
 }
 
 function mergeSessions() {
-  sessions = [...claudeSessions, ...codexSessions, ...etlSessions].sort(compareSessions);
+  sessions = [...claudeSessions, ...codexSessions, ...etlSessions, ...webSessions].sort(compareSessions);
   sendSessions();
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
 }
@@ -488,8 +492,25 @@ function startEtl() {
   etl.start();
 }
 
+function startWebChats() {
+  webchats = new WebChatsFeature({
+    electron: { dialog, shell },
+    settings,
+    appRoot: APP_ROOT,
+    userData: app.getPath('userData'),
+    exe: process.execPath,
+    log,
+  });
+  webchats.on('change', (list) => {
+    webSessions = list;
+    mergeSessions();
+  });
+  webchats.start().catch((err) => log('web chats:', err.message));
+}
+
 function trackerFor(id) {
   if (String(id).startsWith('etl:')) return etl;
+  if (String(id).startsWith('web:')) return webchats;
   return String(id).startsWith('codex:') ? codex : tracker;
 }
 
@@ -816,6 +837,10 @@ function sessionUrl(s) {
   if (s?.kind === 'codex') return s.url || null;   // codex://threads/<id>?hostId=…
   if (s?.kind === 'etl' && s.assistant) return etl?.assistantLinks().at(-1) || null;   // the eTL chat
   if (s?.kind === 'etl') return ETL_LINK.test(s.url || '') ? s.url : null;
+  if (s?.kind === 'web') {
+    const url = webchats?.target(s.id)?.url || '';
+    return WEB_LINK.test(url) ? url : null;
+  }
   const m = DESKTOP_SESSION_RE.exec(s?.hostSessionId || '');
   if (!m || !tracker.desktop?.has(s.hostSessionId)) return null;
   return `claude://resume?session=${m[1]}`;
@@ -853,23 +878,43 @@ function focusHandoffWindow() {
   handoffWin.focus();
 }
 
+function handOffFocus() {
+  if (process.platform !== 'win32') return;
+  clearTimeout(handoffTimer);
+  focusHandoffWindow();
+  handoffTimer = setTimeout(() => {
+    if (!handoffWin || handoffWin.isDestroyed()) return;
+    if (DEBUG_OPEN_AFTER_MS) log(`debug: hiding focus helper (focused=${handoffWin.isFocused()})`);
+    handoffWin.hide();
+  }, FOREGROUND_HANDOFF_MS);
+}
+
 function openApp(url) {
-  if (process.platform === 'win32') {
-    clearTimeout(handoffTimer);
-    focusHandoffWindow();
-    handoffTimer = setTimeout(() => {
-      if (!handoffWin || handoffWin.isDestroyed()) return;
-      if (DEBUG_OPEN_AFTER_MS) log(`debug: hiding focus helper (focused=${handoffWin.isFocused()})`);
-      handoffWin.hide();
-    }, FOREGROUND_HANDOFF_MS);
-  }
+  handOffFocus();
   shell.openExternal(url).catch((err) => log(`could not open ${url.split(':')[0]}:`, err.message));
   if (url.startsWith('codex:')) raiseCodexWindow();   // a reopened Codex window stays behind otherwise
+}
+
+// A web chat opens in the tab that shows it: the extension brings the tab forward in its window,
+// and the pet brings that window to the front. With no such tab left, its address opens instead.
+function openWebChat(s) {
+  const target = webchats?.target(s.id);
+  if (target?.tab && webchats.focus(s.id)) {
+    handOffFocus();
+    raiseBrowserWindow({ hostPid: target.tab.hostPid, title: target.tab.rawTitle });
+  } else {
+    const url = sessionUrl(s);
+    if (!url) return false;
+    openApp(url);
+  }
+  if (s.status !== 'running') webchats.dismiss(s.id);
+  return true;
 }
 
 function openSession(id) {
   const s = sessions.find((x) => x.id === id);
   if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(openApp));   // the eTL chat
+  if (s?.kind === 'web') return openWebChat(s);
   const url = s && sessionUrl(s);
   if (!url) return false;
   openApp(url);
@@ -1017,9 +1062,10 @@ function buildMenu() {
   const items = [];
   items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
   const tags = { cli: ' (terminal)', codex: ' (Codex)', etl: ' (eTL)' };
+  const tagOf = (s) => (s.kind === 'web' ? ` (${s.site === 'chatgpt' ? 'ChatGPT' : 'Claude Chat'})` : tags[s.kind] || '');
   for (const s of sessions.slice(0, 8)) {
     items.push({
-      label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tags[s.kind] || ''}`,
+      label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tagOf(s)}`,
       enabled: Boolean(sessionUrl(s)),
       click: () => openSession(s.id),
     });
@@ -1075,6 +1121,7 @@ function buildMenu() {
     });
   }
   if (etl) items.push(etl.menu());
+  if (webchats) items.push(webchats.menu());
   items.push({
     label: 'Pet',
     submenu: [
@@ -1382,6 +1429,7 @@ if (!app.requestSingleInstanceLock()) {
     tracker.start();
     startCodex();
     if (!DEMO) startEtl();
+    if (!DEMO) startWebChats();
     usageTimer = setInterval(sendUsage, 60_000);
 
     const shortcut = settings.get('shortcut');
@@ -1426,6 +1474,7 @@ if (!app.requestSingleInstanceLock()) {
     tracker?.stop();
     codex?.stop();
     etl?.stop();
+    webchats?.stop();
     claudeUsage?.stop();
     if (settings) settings.save();
   });
