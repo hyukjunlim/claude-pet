@@ -82,7 +82,7 @@ chrome.tabs.onRemoved.addListener(forget);
 // old copy of content.js, which can no longer reach this script. Each gets a fresh copy instead.
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason !== 'install' && reason !== 'update') return;
-  chrome.tabs.query({ url: ['https://claude.ai/*', 'https://chatgpt.com/*'] })
+  chrome.tabs.query({ url: ['https://claude.ai/*', 'https://chatgpt.com/*', 'https://gemini.google.com/*'] })
     .then((tabs) => Promise.all(tabs.map((t) => chrome.scripting
       .executeScript({ target: { tabId: t.id }, files: ['content.js'] })
       .catch(() => {}))))              // a tab that's loading or gone

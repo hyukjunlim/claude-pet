@@ -109,6 +109,22 @@ test("on ChatGPT's other page, only a stop button shown in the message box count
   assert.equal(page(`https://claude.ai/chat/${CONV}`, { buttons: [{ label: '중지', shown: true }] }).sent[0].generating, false);
 });
 
+test("on Gemini, its send button turned stop button counts (there's no send button while you've typed nothing)", () => {
+  const p = page('https://gemini.google.com/app/671b3f7b87a71fc7', { title: '서울대 MICC 연구실 정보 - Google Gemini' });
+  assert.deepEqual(plain(p.sent[0]), {
+    type: 'chat', site: 'gemini', url: 'https://gemini.google.com/app/671b3f7b87a71fc7', title: '서울대 MICC 연구실 정보 - Google Gemini', generating: false, looking: true,
+  });
+  p.present = ['.send-button.stop'];
+  p.mutate();
+  assert.equal(p.sent.at(-1).generating, true);
+  p.present = ['button[aria-label="대답 생성 중지"]'];   // the label alone, in Korean, counts too
+  p.mutate();
+  assert.equal(p.sent.at(-1).generating, true);
+  p.present = [];
+  p.mutate();
+  assert.equal(p.sent.at(-1).generating, false);
+});
+
 test('leaving the page says so, and the script does nothing on other sites', () => {
   const p = page(`https://claude.ai/chat/${CONV}`);
   p.fire('pagehide');
@@ -182,7 +198,7 @@ test('after an install or update, the chat tabs already open get a fresh copy of
   b.on.installed({ reason: 'update' });
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(plain(b.calls), [
-    ['tabs.query', { url: ['https://claude.ai/*', 'https://chatgpt.com/*'] }],
+    ['tabs.query', { url: ['https://claude.ai/*', 'https://chatgpt.com/*', 'https://gemini.google.com/*'] }],
     ['executeScript', { target: { tabId: 11 }, files: ['content.js'] }],
     ['executeScript', { target: { tabId: 12 }, files: ['content.js'] }],
   ]);

@@ -66,7 +66,7 @@ const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', r
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;   // the only pages an eTL bubble opens
-const WEB_LINK = /^https:\/\/(claude\.ai|chatgpt\.com)\//;   // and a web chat's
+const WEB_LINK = /^https:\/\/(claude\.ai|chatgpt\.com|gemini\.google\.com)\//;   // and a web chat's
 const FOREGROUND_HANDOFF_MS = 1500;
 const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as claude-pet.old.log
 

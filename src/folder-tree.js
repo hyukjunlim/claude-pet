@@ -164,8 +164,8 @@ function buildTree({
 }
 
 // The web chats as the first heading, "Chat", their conversations right under it, newest first;
-// a dot in each site's color tells claude.ai's from ChatGPT's.
-const CHAT_APP = { claude: 'claude-web', chatgpt: 'chatgpt' };
+// a dot in each site's color tells claude.ai's, ChatGPT's and Gemini's apart.
+const CHAT_APP = { claude: 'claude-web', chatgpt: 'chatgpt', gemini: 'gemini' };
 
 function chatHost(chats) {
   const sessions = chats.filter((c) => CHAT_APP[c.site]).map((c) => item(c, CHAT_APP[c.site])).sort(byActivity);

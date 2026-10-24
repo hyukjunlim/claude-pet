@@ -125,3 +125,8 @@ test('web chats come first, right under Chat, newest first, each with its site\'
   assert.deepEqual([c.attention, c.busy], [1, 1]);
   assert.equal(buildTree({ chats: [], claude: [claude('pc', 'C:\\x')], now: NOW })[0].key, 'pc');   // no chats, no heading
 });
+
+test("a Gemini chat sits under Chat with Gemini's own mark", () => {
+  const [c] = buildTree({ chats: [{ id: 'web:gemini:671b3f7b87a71fc7', kind: 'web', site: 'gemini', title: 'MICC', status: 'review', since: ago(0.1), lastActivityAt: ago(0.1) }], now: NOW });
+  assert.deepEqual([c.key, c.loose.map((s) => [s.title, s.app, s.status])], ['chat', [['MICC', 'gemini', 'review']]]);
+});

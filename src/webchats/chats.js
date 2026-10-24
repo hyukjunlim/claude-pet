@@ -31,6 +31,14 @@ const SITES = {
     suffix: /^ChatGPT\s*[-–]\s*|\s*[-–]\s*ChatGPT$/,
     home: 'ChatGPT',
   },
+  // A conversation is /app/<16 hex digits>; its tab is "<title> - Google Gemini".
+  gemini: {
+    origin: 'https://gemini.google.com',
+    name: 'Gemini',
+    conversation: /^\/app\/([0-9a-f]{12,32})(?:\/|$)/i,
+    suffix: /\s*[-–]\s*Google Gemini$/,
+    home: 'Google Gemini',
+  },
 };
 const END_GRACE_MS = 2000;     // the stop control can drop out for a moment between steps of one reply
 const MAX_RAW_TITLE = 300;

@@ -1,7 +1,7 @@
 'use strict';
 
-// Watches one claude.ai or ChatGPT tab and tells the extension's background script whether a
-// reply is being written in it and whether you're looking at it. It reads only the page's
+// Watches one claude.ai, ChatGPT or Gemini tab and tells the extension's background script whether
+// a reply is being written in it and whether you're looking at it. It reads only the page's
 // address, its title and whether the site's stop control is up, nothing of the conversation.
 //
 // A reply is being written while the site shows that control. WRITING lists what to look for on
@@ -25,11 +25,14 @@
     const r = b.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   });
+  // Gemini (October 2026) turns its send button into a stop button, class "stop", labelled in the
+  // page's language, while a reply is written; with nothing to send there's no send button at all.
   const WRITING = {
     'claude.ai': ['[data-is-streaming="true"]', 'button[aria-label="Stop response"]'],
     'chatgpt.com': ['[data-composer-submit][data-stop-generating]', '[data-message-streaming]', '[data-testid="stop-button"]', shownStopButton],
+    'gemini.google.com': ['.send-button.stop', 'button[aria-label="Stop response"]', 'button[aria-label="대답 생성 중지"]'],
   };
-  const SITE = { 'claude.ai': 'claude', 'chatgpt.com': 'chatgpt' };
+  const SITE = { 'claude.ai': 'claude', 'chatgpt.com': 'chatgpt', 'gemini.google.com': 'gemini' };
   const SETTLE_MS = 150;         // lets a burst of page changes settle into one look
   const TICK_MS = 5000;          // looks again on a timer too, in case nothing on the page moves
   const RESEND_MS = 30_000;      // and says it again unchanged this often, for a restarted background script

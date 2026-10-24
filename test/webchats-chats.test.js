@@ -182,6 +182,15 @@ test("titles lose the site's name, and a page with only the name is a new chat",
   assert.equal(displayTitle('chatgpt', 'ChatGPT'), 'New chat');
   assert.equal(displayTitle('chatgpt', 'ChatGPT - Essay outline'), 'Essay outline');
   assert.equal(displayTitle('chatgpt', '  '), 'New chat');
+  assert.equal(displayTitle('gemini', '서울대 MICC 연구실 정보 - Google Gemini'), '서울대 MICC 연구실 정보');
+  assert.equal(displayTitle('gemini', 'Google Gemini'), 'New chat');
+});
+
+test('a Gemini conversation is /app/ and its id; the start page is a chat of its own until it gets one', () => {
+  const r = parseReport({ tabId: 3, site: 'gemini', url: 'https://gemini.google.com/app/671B3F7B87A71FC7?hl=ko', title: '서울대 MICC 연구실 정보 - Google Gemini' });
+  assert.deepEqual([r.url, r.conversation, r.title], ['https://gemini.google.com/app/671B3F7B87A71FC7', '671b3f7b87a71fc7', '서울대 MICC 연구실 정보']);
+  assert.equal(parseReport({ tabId: 3, site: 'gemini', url: 'https://gemini.google.com/app', title: 'Google Gemini' }).conversation, null);
+  assert.equal(parseReport({ tabId: 3, site: 'gemini', url: 'https://gemini.google.com.evil.example/app/671b3f7b87a71fc7', title: 'x' }), null);
 });
 
 test('the full list has every conversation a tab shows, quiet ones too, newest first, for folder mode', () => {
