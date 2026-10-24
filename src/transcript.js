@@ -393,19 +393,21 @@ function turnStatus(state, meta, now) {
 
   const ended = state.turnEndedAt;
   if (!ended || state.interrupted || now - ended > UNREAD_WINDOW_MS) return { status: 'idle', detail: '', since: ended };
-  // How the turn ended matters only until you've seen it.
-  const seenAt = Math.max(meta.lastFocusedAt || 0, meta.dismissedAt || 0);
-  if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
-
-  if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
 
   const summary = meta.summary;
   const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;
   const detail = current ? oneLine(current.needs_action || current.status_detail || '', 120) : '';
-  // It ended waiting on your answer or decision (the app's yellow marker).
-  if (current && NEEDS_YOU.has(current.status_category)) {
+  // It ended waiting on your answer or decision (the app's yellow marker). Like a question, that
+  // stands until you answer it or dismiss it.
+  if (!state.error && current && NEEDS_YOU.has(current.status_category) && !(meta.dismissedAt >= ended)) {
     return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
   }
+
+  // How else the turn ended matters only until you've seen it.
+  const seenAt = Math.max(meta.lastFocusedAt || 0, meta.dismissedAt || 0);
+  if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
+
+  if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
 
   if (current) {
     if (current.status_category === 'failed' || current.status_category === 'error') {

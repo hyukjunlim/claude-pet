@@ -1001,9 +1001,11 @@ function openSession(id, { handoff = true, fill = false } = {}) {
   open(url);
   if (fill && (s.kind === 'desktop' || s.kind === 'codex')) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
   // A finished session or a one-off notice is done with once opened; a class bubble
-  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked. A quiet
-  // session (folder mode lists those too) has nothing to be done with.
-  if (s.status !== 'running' && s.status !== 'background' && s.status !== 'idle' && !s.keepOnOpen) {
+  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked, and a
+  // session that needs you until you answer it (or click its ×). A quiet session (folder mode
+  // lists those too) has nothing to be done with.
+  const asks = s.status === 'waiting' && s.kind !== 'etl';
+  if (s.status !== 'running' && s.status !== 'background' && s.status !== 'idle' && !asks && !s.keepOnOpen) {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }
