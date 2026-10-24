@@ -17,6 +17,8 @@
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
   const APP_NAME = { claude: 'Claude', codex: 'Codex' };
   const FOLD_KEY = 'claude-pet:folder-fold';   // folder key -> open, where you changed it
+  const BASE_ZOOM = 1.2;                       // the text size at 100% (Ctrl 0), over folder.css's px
+  let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
 
   let hosts = [];
   let notices = [];
@@ -38,7 +40,18 @@
   api.onPet((pet) => {
     player.setSheet(pet);
     petEl.setAttribute('aria-label', `${pet.displayName}, your Claude pet`);
+    petScale = Number(pet.scale) || 0.5;
+    sizePet();
   });
+
+  // The atlas cell, 192 x 208, at the pet's scale (tray menu → Size), on screen: the page's
+  // zoom is undone for it, so Ctrl + and Ctrl - size the text and leave the pet as it is.
+  let petScale = 0.5;
+  function sizePet() {
+    const z = BASE_ZOOM * zoom;
+    petEl.style.width = `${(192 * petScale) / z}px`;
+    petEl.style.height = `${(208 * petScale) / z}px`;
+  }
   api.onMotion(({ alwaysAnimate }) => player.setAlwaysAnimate(alwaysAnimate));
   api.onStatus((status) => player.setBase(status || 'idle'));
   api.onWake(() => player.playOnce('waving', 3));
@@ -56,16 +69,77 @@
 
   function setOpen(key, open) {
     fold[key] = open;
+    saveFold();
+    render();
+  }
+
+  function saveFold() {
     try {
       localStorage.setItem(FOLD_KEY, JSON.stringify(fold));
     } catch {
       // kept for this run only
     }
-    render();
   }
 
   // While searching, everything that matches is shown open.
   const isOpen = (key, byDefault) => (query ? true : fold[key] ?? byDefault);
+
+  // Every folder row as [key, open by default]: the machines' folders, and each "No folder".
+  function folderKeys() {
+    const out = [];
+    const walk = (n) => {
+      out.push([n.key, n.open]);
+      n.children.forEach(walk);
+    };
+    for (const h of hosts) {
+      h.folders.forEach(walk);
+      if (h.loose.length) out.push([`${h.key}|loose`, true]);
+    }
+    return out;
+  }
+
+  // The folders on the way to the session you opened last, so folding everything leaves it in view.
+  function keptKeys() {
+    const kept = new Set();
+    const has = (list) => list.some((s) => s.id === current);
+    const walk = (n) => {
+      if (has(n.sessions) || n.children.some(walk)) {
+        kept.add(n.key);
+        return true;
+      }
+      return false;
+    };
+    for (const h of hosts) {
+      h.folders.forEach(walk);
+      if (has(h.loose)) kept.add(`${h.key}|loose`);
+    }
+    return kept;
+  }
+
+  // The header's button folds every folder but those (the machines stay open, so their top
+  // folders show), or, when they're all folded, opens everything.
+  const foldAllEl = document.getElementById('fold-all');
+  const allFolded = () => {
+    const kept = keptKeys();
+    return folderKeys().every(([key, byDefault]) => kept.has(key) || !(fold[key] ?? byDefault));
+  };
+
+  function updateFoldAll() {
+    const folded = allFolded();
+    const label = folded ? 'Expand all folders' : 'Collapse all folders';
+    foldAllEl.classList.toggle('folded', folded);
+    foldAllEl.title = label;
+    foldAllEl.setAttribute('aria-label', label);
+  }
+
+  foldAllEl.addEventListener('click', () => {
+    const open = allFolded();
+    const kept = keptKeys();
+    for (const [key] of folderKeys()) fold[key] = open || kept.has(key);
+    for (const h of hosts) fold[h.key] = true;
+    saveFold();
+    render();
+  });
 
   // ---------------------------------------------------------- the tree
 
@@ -75,6 +149,7 @@
     treeEl.replaceChildren(...shown.map(hostEl));
     if (!shown.length) treeEl.append(el('div', 'empty', query ? 'No sessions match.' : 'No Claude sessions or Codex threads yet.'));
     treeEl.scrollTop = scroll;
+    updateFoldAll();
   }
 
   function hostEl(h) {
@@ -84,7 +159,9 @@
     const head = el('button', 'host-head');
     head.type = 'button';
     head.setAttribute('aria-expanded', String(open));
-    head.append(el('span', 'chevron', '▶'), el('span', 'name', h.label));
+    // A machine is a heading, as a group is in the Claude app's sidebar: just its name, which
+    // folds it when clicked. The arrows on the left are the folders'.
+    head.append(el('span', 'host-name', h.label));
     if (!open) head.append(...pips(h));
     head.addEventListener('click', () => setOpen(h.key, !open));
     wrap.append(head);
@@ -212,31 +289,41 @@
     }));
   }
 
-  // ---------------------------------------------------------- the weekly limits (as pet.js draws them)
+  // ---------------------------------------------------------- the weekly limits, beside the pet
 
+  // A row per app, as the Claude app's account row sits at the foot of its sidebar: the name and
+  // how much is used above a thin bar, with a tick for how far into the week it is (a fill past
+  // the tick: faster than the week goes by). The rest is in the tooltip.
   function renderMeter(usage) {
     meterEl.hidden = !usage.length;
     meterEl.replaceChildren(...usage.map(gauge));
-    meterEl.setAttribute('aria-label', `Weekly limits: ${usage.map((u) => `${u.name} ${u.percent}% used`).join('; ')}`);
+    meterEl.setAttribute('aria-label', `Weekly limits: ${usage.map(describe).join('; ')}`);
+  }
+
+  function describe(u) {
+    return [
+      `${u.name}: ${u.percent}% of the weekly limit used`,
+      u.elapsed != null && `${u.elapsed}% into the week`,
+      u.resetsIn && `resets in ${u.resetsIn}`,
+      u.age && `as of ${u.age} ago`,
+    ].filter(Boolean).join(' · ');
   }
 
   function gauge(u) {
     const g = el('div', `gauge ${u.app}`);
+    g.title = describe(u);
+    const label = el('div', 'gauge-label');
+    label.append(el('span', 'name', u.name), el('span', 'pct', `${u.percent}%`));
+    const track = el('div', 'track');
     const fill = el('span', 'fill');
-    fill.style.width = `${u.percent}%`;
-    g.append(fill);
+    fill.style.width = `${Math.min(100, Math.max(0, u.percent))}%`;
+    track.append(fill);
     if (u.elapsed != null) {
       const now = el('span', 'now');
       now.style.left = `${u.elapsed}%`;
-      g.append(now);
+      track.append(now);
     }
-    g.append(el('span', 'name', u.name), el('span', 'pct', `${u.percent}%`));
-    for (const [layer, clip] of [['base', `inset(0 0 0 ${u.percent}%)`], ['ink', `inset(0 ${100 - u.percent}% 0 0)`]]) {
-      const copy = el('span', layer);
-      copy.append(el('span', 'name', u.name), el('span', 'pct', `${u.percent}%`));
-      copy.style.clipPath = clip;
-      g.append(copy);
-    }
+    g.append(label, track);
     return g;
   }
 
@@ -255,8 +342,6 @@
     e.preventDefault();
     api.contextMenu(e.screenX, e.screenY);
   });
-
-  document.getElementById('pet-mode').addEventListener('click', () => api.petMode());
 
   // ---------------------------------------------------------- width: drag the right edge
 
@@ -298,12 +383,13 @@
   const ZOOM_KEY = 'claude-pet:folder-zoom';
   const ZOOMS = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
   const zoomLevelEl = document.getElementById('zoom-level');
-  let zoom = 1;
   let zoomTimer = null;
 
   function setZoom(z, show) {
     zoom = Math.min(ZOOMS.at(-1), Math.max(ZOOMS[0], Number(z) || 1));
-    document.documentElement.style.zoom = String(zoom);   // the whole sidebar, as a browser's zoom does
+    // The whole sidebar, as a browser's zoom does, from a 100% that is 1.2 times the CSS's sizes.
+    document.documentElement.style.zoom = String(BASE_ZOOM * zoom);
+    sizePet();
     try {
       localStorage.setItem(ZOOM_KEY, String(zoom));
     } catch {

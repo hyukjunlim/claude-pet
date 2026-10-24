@@ -8,6 +8,7 @@ const DEFAULTS = {
   scale: 0.75,
   mode: 'pet',             // 'pet': the floating pet; 'folder': a sidebar of every session, by machine and folder
   folderWidth: 400,        // the sidebar's width in DIPs (drag its right edge; double-click it for this)
+  folderPetScale: 0.5,     // the size of the pet at the sidebar's foot (Small; tray menu → Size in folder mode)
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
   showActivity: true,

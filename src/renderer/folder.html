@@ -9,17 +9,18 @@
 <body>
   <header>
     <input id="search" type="search" placeholder="Search sessions" aria-label="Search sessions" spellcheck="false" autocomplete="off">
-    <button id="pet-mode" type="button" title="Back to the floating pet" aria-label="Back to the floating pet">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H2v4M10 14h4v-4M2 2l5 5M14 14l-5-5"/></svg>
+    <button id="fold-all" type="button" title="Collapse all folders" aria-label="Collapse all folders">
+      <svg class="collapse" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7l4-4 4 4M4 13l4-4 4 4"/></svg>
+      <svg class="expand" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3l4 4 4-4M4 9l4 4 4-4"/></svg>
     </button>
   </header>
   <main id="tree" role="tree" aria-label="Sessions by machine and folder"></main>
   <section id="notices" aria-label="eTL" hidden></section>
   <footer id="dock">
-    <div id="meter" class="meter" role="img" hidden></div>
     <div id="pet" role="button" aria-label="Claude Pet">
       <div id="sprite" aria-hidden="true"></div>
     </div>
+    <div id="meter" role="img" hidden></div>
   </footer>
   <div id="edge" role="separator" aria-orientation="vertical" aria-label="Sidebar width: drag, or double-click for the default" title="Drag to resize · double-click for the default width"></div>
   <div id="zoom-level" aria-live="polite" hidden></div>

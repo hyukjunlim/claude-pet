@@ -136,8 +136,8 @@ function log(...args) {
 
 // ---------------------------------------------------------------- geometry
 
-function petScale() {
-  let s = settings.get('scale');
+// The floating pet's scale (tray menu → Size), or `s`: folder mode's pet has a size of its own.
+function petScale(s = settings.get('scale')) {
   if (currentPet?.pixelArt) {
     // Snap so every art pixel (4 atlas px) covers a whole number of device pixels.
     const dpr = displayForPet().scaleFactor || 1;
@@ -410,7 +410,7 @@ function sendPet() {
     pixelArt: currentPet.pixelArt,
   };
   if (win && !win.isDestroyed()) win.webContents.send('pet:pet', payload);
-  folder?.send('folder:pet', payload);
+  folder?.send('folder:pet', { ...payload, scale: petScale(settings.get('folderPetScale')) });
 }
 
 function sendMotion() {
@@ -1095,9 +1095,6 @@ function registerIpc() {
     else if (phase === 'end') settings.set({ folderWidth: folder.setWidth(folder.widthAtCursor()) });
     else if (phase === 'move') folder.preview(folder.widthAtCursor());
   });
-  ipcMain.on('folder:pet-mode', (e) => {
-    if (fromFolder(e)) setMode('pet');
-  });
   ipcMain.on('folder:context-menu', (e, p) => {
     if (!fromFolder(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
@@ -1227,13 +1224,22 @@ function buildMenu() {
       sendMotion();
     },
   });
+  // In folder mode, the size of the pet at the foot of the sidebar; otherwise the floating pet's.
+  const sizeKey = folderMode ? 'folderPetScale' : 'scale';
   items.push({
     label: 'Size',
     submenu: SCALES.map((s) => ({
       label: s.label,
       type: 'radio',
-      checked: settings.get('scale') === s.value,
-      click: () => resizeInPlace(() => settings.set({ scale: s.value })),
+      checked: settings.get(sizeKey) === s.value,
+      click: () => {
+        if (folderMode) {
+          settings.set({ folderPetScale: s.value });
+          sendPet();
+        } else {
+          resizeInPlace(() => settings.set({ scale: s.value }));
+        }
+      },
     })),
   });
   items.push({

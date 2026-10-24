@@ -90,7 +90,8 @@ header {
 
 #search:focus { border-color: color-mix(in srgb, var(--claude) 55%, var(--border)); }
 
-#pet-mode {
+/* Folds every folder, or opens everything; it shows what a click will do. */
+#fold-all {
   flex: none;
   width: 30px;
   height: 30px;
@@ -102,9 +103,9 @@ header {
   cursor: pointer;
 }
 
-#pet-mode:hover { background: var(--hover); color: var(--text); }
+#fold-all:hover { background: var(--hover); color: var(--text); }
 
-#pet-mode svg {
+#fold-all svg {
   width: 14px;
   height: 14px;
   fill: none;
@@ -113,6 +114,10 @@ header {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+#fold-all .expand,
+#fold-all.folded .collapse { display: none; }
+#fold-all.folded .expand { display: inline; }
 
 /* ------------------------------------------------------------------ tree */
 
@@ -124,26 +129,42 @@ header {
   scrollbar-width: thin;
 }
 
-.host { margin-top: 10px; }
+.host { padding-top: 8px; }
 
+/* Between machines, a divider like the one above the limits. */
+.host + .host {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* A machine's heading: its name; a click folds it. */
 .host-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
-  padding: 4px 6px;
+  padding: 5px 6px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-align: left;
   cursor: pointer;
 }
 
-.host-head:hover { background: var(--hover); }
+.host-head:hover { background: var(--hover); color: var(--text); }
+
+.host-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-head .pip { margin-left: auto; }
 
 .row {
   display: flex;
@@ -173,8 +194,7 @@ header {
   transition: transform 120ms;
 }
 
-.open > .row > .chevron,
-.open > .host-head > .chevron { transform: rotate(90deg); }
+.open > .row > .chevron { transform: rotate(90deg); }
 
 .folder > .row .name { color: var(--text); font-weight: 550; }
 
@@ -186,20 +206,16 @@ header {
   white-space: nowrap;
 }
 
-/* An app's mark: Claude a dot, Codex a diamond. */
+/* An app's mark: the same dot, in Claude's color or Codex's. */
 .app {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--claude);
 }
 
-.app.codex {
-  border-radius: 1px;
-  background: var(--codex);
-  transform: rotate(45deg) scale(0.9);
-}
+.app.codex { background: var(--codex); }
 
 .session .app { margin: 0 3px 0 2px; }
 
@@ -229,8 +245,8 @@ header {
 /* A folded folder or host still says when something in it needs you, or is working. */
 .pip {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 5px;           /* the size of a session's dot */
+  height: 5px;
   border-radius: 50%;
   background: var(--c);
 }
@@ -266,97 +282,72 @@ mark {
 
 /* ------------------------------------------------------------------ dock: the limits and the pet */
 
+/* One row, as the Claude app's account row: the pet, then a thin bar per app. */
 #dock {
   flex: none;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px 10px 10px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 4px 4px;
   border-top: 1px solid var(--border);
 }
 
-.meter {
+#meter {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  margin-bottom: 8px;
-  border-radius: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.gauge {
-  --fill: color-mix(in srgb, var(--muted) 30%, transparent);
-  position: relative;
+.gauge-label {
   display: flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 3px 10px 4px;
+  gap: 6px;
+  margin-bottom: 3px;
+  color: var(--muted);
 }
 
-.gauge.claude {
-  --fill: color-mix(in srgb, var(--running), #be6446);
-  --ink: #fff;
+.gauge .name { overflow: hidden; text-overflow: ellipsis; }
+
+.gauge .pct {
+  margin-left: auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
-.gauge + .gauge::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 9px;
-  left: 9px;
-  height: 1px;
-  background: color-mix(in srgb, var(--text) 16%, transparent);
+.track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hover);
 }
 
 .gauge .fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background: var(--fill);
+  border-radius: 2px;
+  background: var(--muted);
 }
 
+.gauge.claude .fill { background: var(--claude); }
+
+/* How far into the week: a tick across the bar, inside the row so no text is under it. */
 .gauge .now {
   position: absolute;
-  inset: 0 auto 0 0;
+  top: -2px;
+  bottom: -2px;
   width: 2px;
   margin-left: -1px;
+  border-radius: 1px;
   background: var(--text);
 }
 
-.gauge .name,
-.gauge .pct { position: relative; flex: none; }
-
-.gauge .name { font-weight: 600; }
-
-.gauge .pct {
-  margin-left: auto;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.gauge .base,
-.gauge .ink {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: baseline;
-  gap: 5px;
-  padding: inherit;
-}
-
-.gauge .ink { color: var(--ink); }
-.gauge.claude .base,
-.gauge.claude .ink { display: flex; }
-.gauge.claude > .name,
-.gauge.claude > .pct { visibility: hidden; }
-
 #pet {
   flex: none;
-  width: 96px;          /* the atlas cell (192 x 208) at half size */
-  height: 104px;
-  margin-left: auto;
+  width: 80px;          /* the atlas cell (192 x 208) at Small, over the page's zoom; folder.js sets it */
+  height: 87px;
   cursor: pointer;
 }
 

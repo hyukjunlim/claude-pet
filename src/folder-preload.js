@@ -23,7 +23,6 @@ contextBridge.exposeInMainWorld('folder', {
   ready: () => ipcRenderer.send('folder:ready'),
   open: (id) => ipcRenderer.send('folder:open', String(id)),
   activatePet: () => ipcRenderer.send('folder:pet-click'),
-  petMode: () => ipcRenderer.send('folder:pet-mode'),
   resize: (phase) => ipcRenderer.send('folder:resize', String(phase)),   // 'move', 'end' or 'reset'
   contextMenu: (screenX, screenY) => ipcRenderer.send('folder:context-menu', { screenX, screenY }),
 });
