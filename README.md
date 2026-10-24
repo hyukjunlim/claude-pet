@@ -46,6 +46,9 @@ all.
 It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* to open the token
 form, or *나중에* to skip it; you can connect later from the tray menu's *eTL* item.
 
+Chats on claude.ai and chatgpt.com can get bubbles too, through an optional browser extension:
+see [Web chats](#web-chats-claudeai-chatgpt).
+
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
@@ -278,7 +281,54 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
-- **Not shown:** ChatGPT chats, and Codex's own helper threads such as its auto-reviewer.
+- **Not shown:** ChatGPT chats in the app (those on chatgpt.com can be, see
+  [Web chats](#web-chats-claudeai-chatgpt)), and Codex's own helper threads such as its auto-reviewer.
+
+## Web chats (claude.ai, ChatGPT)
+
+Chats on claude.ai and chatgpt.com can get bubbles too, from a small browser extension in
+[browser-extension/](browser-extension/) for Chrome, Edge and other Chromium browsers. It's **off**
+until you turn it on: tray menu → *Web chats* → *Show claude.ai and ChatGPT chats*. Their bubbles
+are marked "Claude Chat" or "ChatGPT" (e.g. "ChatGPT · 2m").
+
+- **Running** while a reply is being written, **Ready** once it's done, unless you were looking at
+  the chat's tab (the one shown in a browser window that has the focus) when it finished. Ready goes
+  away when you look at the chat, click its bubble or close it with ×. A conversation open in
+  several tabs gets one bubble.
+- **Clicking** brings the chat's tab and its browser window to the front. If the tab is gone, the
+  chat's address opens in your default browser.
+- **Setting up:** turning it on writes a native messaging host (a manifest and a small launcher) to
+  `%APPDATA%\claude-pet\webchats` and registers it for Chrome and Edge under
+  `HKCU\Software\…\NativeMessagingHosts\com.hyukjunlim.claude_pet`, which needs no admin rights;
+  other Chromium browsers, such as Aside, read Chrome's. Then load the extension once: open the
+  browser's extensions page (`chrome://extensions`, `edge://extensions`), turn on *Developer mode*,
+  choose *Load unpacked* and pick the folder that *Open the extension folder* shows. The key in the
+  extension's manifest fixes its ID, so the host answers only this extension, wherever its folder
+  is. Turning web chats off removes the registration.
+
+  Without the tray menu (say, an assistant setting the pet up for you): quit the pet, set
+  `"webChats": true` in `%APPDATA%\claude-pet\settings.json`, and start it again; it registers the
+  host as it starts. The extension's folder is `browser-extension` in the source folder, or
+  `resources\app\browser-extension` next to `Claude Pet.exe` in a downloaded copy. Loading it
+  (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
+- **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
+  reply is being written and whether you're looking at it. Never the messages. The extension only
+  reads the page and makes no requests of its own; the host hands the tabs' reports to the pet over
+  a local named pipe (`\\.\pipe\claude-pet-webchats-<user>`), not the network.
+- **How it knows a reply is being written:** by the site's stop control. On claude.ai the message
+  being written carries `data-is-streaming="true"`. ChatGPT serves two different pages: on one, the
+  send button carries `data-stop-generating` and the message `data-message-streaming`; on the other,
+  which signed-in accounts may get, the only sign is a stop button shown in the message box,
+  labelled in the page's language (a hidden twin of it is always there). All of this is in `WRITING`
+  at the top of [browser-extension/content.js](browser-extension/content.js).
+- **When bubbles don't come:** tray menu → *Web chats* says *Extension connected* once a browser
+  has the extension running, and *Waiting for the extension* until then. If it's connected and a
+  site's replies still don't show, the site has changed its page, and `WRITING` is what to fix.
+  After changing the extension, reload it on the extensions page; the chat tabs already open get
+  the new copy without a reload.
+- **Not shown:** chats in the Claude or ChatGPT desktop apps, chats on other devices, and replies
+  that finish after you closed their tab (ChatGPT's deep research keeps going on the server then,
+  out of the pet's sight).
 
 ## Weekly limits
 
@@ -531,7 +581,7 @@ src/preload.js      Minimal API exposed to the page (context isolation, sandboxe
 src/renderer/       Pet page: sprite engine, activity bubbles
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
-src/raise.js        Brings Codex's window to the front after a codex:// link (Windows)
+src/raise.js        Brings Codex's window, or a web chat's browser window, to the front (Windows)
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
 src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
@@ -544,7 +594,9 @@ src/usage.js        Weekly limits: Claude's figures (the mod's, the app's), Code
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
 src/etl/            SNU eTL: API client, notices, timetable, token store, query bridge, chat folder
+src/webchats/       Web chats: the extension's native host, its registration, tab reports → bubbles
 tools/make_clay.py  Generates Clay, the built-in pet
 claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
 etl-workspace/      What the eTL chat folder is made from: instructions, skills, etl.js
+browser-extension/  The Chrome/Edge extension that reports claude.ai and ChatGPT tabs to the pet
 ```

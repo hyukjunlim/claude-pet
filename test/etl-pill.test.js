@@ -1,6 +1,6 @@
 'use strict';
 
-// The bubbles src/renderer/pet.js draws for eTL notices. test/renderer-fixture.js stands in for
+// The bubbles src/renderer/pet.js draws for eTL notices and web chats. test/renderer-fixture.js stands in for
 // the page only as far as the pet's shape needs, so this runs the page against elements that
 // also keep their children, text and attributes.
 
@@ -146,6 +146,18 @@ test('the eTL 비서 bubble has a × to turn it off; a running session still has
   assert.equal(find(assistant, 'close').getAttribute('aria-label'), 'Turn off this bubble');
   assert.equal(find(running, 'close'), null);
   assert.equal(find(page()([NOTICE])[0], 'close').getAttribute('aria-label'), 'Dismiss');
+});
+
+test('a web chat says which chat it is, and only a Ready one has a ×', () => {
+  const [ready, running] = page()([
+    { id: 'web:chatgpt:1', kind: 'web', site: 'chatgpt', status: 'review', title: 'Essay outline', detail: 'Reply ready', since: Date.now() },
+    { id: 'web:claude:2', kind: 'web', site: 'claude', status: 'running', title: 'Trip ideas', detail: 'Writing a reply', since: Date.now() },
+  ]);
+  assert.equal(find(ready, 'what').textContent, 'ChatGPT');
+  assert.equal(ready.getAttribute('aria-label'), 'Essay outline, Reply ready, Click to open in the browser');
+  assert.ok(find(ready, 'close'));
+  assert.equal(find(running, 'what').textContent, 'Claude Chat');
+  assert.equal(find(running, 'close'), null);
 });
 
 test('Claude and Codex bubbles are as before', () => {

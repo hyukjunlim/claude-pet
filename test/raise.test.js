@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { HELPER, raiseCodexWindow } = require('../src/raise');
+const { BROWSER_HELPER, HELPER, raiseBrowserWindow, raiseCodexWindow } = require('../src/raise');
 
 function fakeSpawn() {
   const runs = [];
@@ -37,4 +37,23 @@ test('a newer raise replaces one still waiting', () => {
   assert.equal(runs[0].child.killed, true);
   assert.equal(runs[1].child.killed, false);
   runs[1].child.emit('exit');
+});
+
+test("a web chat's window is found from its host's browser and its tab's title, which reaches the helper only as data", () => {
+  const { runs, spawnFn } = fakeSpawn();
+  const title = '"; Remove-Item C:\\ -Recurse; "  한글 - Claude';
+  raiseBrowserWindow({ hostPid: 4321, title, spawnFn, platform: 'win32', env: { PATH: 'x' } });
+  const { opts, args } = runs[0];
+  const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
+  assert.equal(script, BROWSER_HELPER);
+  assert.ok(!script.includes('Remove-Item'));
+  assert.match(script, /ParentProcessId/);        // the browser is up the host's parent chain
+  assert.equal(opts.env.PET_RAISE_HOST_PID, '4321');
+  assert.equal(Buffer.from(opts.env.PET_RAISE_TITLE, 'base64').toString('utf8'), title);
+  assert.equal(opts.env.PATH, 'x');
+  runs[0].child.emit('exit');
+  assert.equal(raiseBrowserWindow({ hostPid: 4321, title, spawnFn, platform: 'darwin' }), null);
+  assert.equal(raiseBrowserWindow({ hostPid: null, title, spawnFn, platform: 'win32' }), null);
+  assert.equal(raiseBrowserWindow({ hostPid: 4321, title: '', spawnFn, platform: 'win32' }), null);
+  assert.equal(runs.length, 1);
 });

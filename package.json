@@ -33,6 +33,7 @@
       "claude-mod/**/*",
       "!claude-mod/**/*.test.ts",
       "etl-workspace/**/*",
+      "browser-extension/**/*",
       "LICENSE"
     ],
     "win": {
