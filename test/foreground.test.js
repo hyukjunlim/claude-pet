@@ -25,12 +25,15 @@ test('the helper reports only changes, as true/false for the app', () => {
   child.kill = () => {};
   const w = new ForegroundWatcher({ app: 'Claude', spawnFn: () => child });
   const seen = [];
+  const names = [];
   w.on('front', (v) => seen.push(v));
+  w.on('name', (n) => names.push(n));
   w.start();
   child.stdout.write('explorer\r\nClaude\r\n');
   child.stdout.write('claude\nCode\n');
   return new Promise((resolve) => setImmediate(() => {
     assert.deepEqual(seen, [false, true, false]);
+    assert.deepEqual(names, ['explorer', 'Claude', 'claude', 'Code']);   // each line, as written
     w.stop();
     resolve();
   }));

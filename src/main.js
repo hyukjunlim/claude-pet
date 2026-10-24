@@ -27,6 +27,7 @@ const { EtlFeature } = require('./etl/feature');
 const { FolderWindow } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
 const { maximizeApps } = require('./maximize');
+const { StepKeys } = require('./step-keys');
 
 const DEMO = process.argv.includes('--demo');
 // Debug aid: CLAUDE_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
@@ -91,6 +92,7 @@ let claudeSessions = [];
 let codexSessions = [];
 let etlSessions = [];
 let folder = null;              // folder mode's sidebar (see folder-mode.js)
+let stepKeys = null;            // Ctrl+Tab through the sidebar (see step-keys.js)
 let claudeAll = [];             // every Claude session and Codex thread, quiet ones too, for folder mode
 let codexAll = [];
 let treeKey = '';
@@ -355,11 +357,14 @@ function applyMode() {
     if (visible) {
       folder.show(displayForPet());
       treeKey = '';
+      stepKeys.start();
     } else {
+      stepKeys.stop();
       folder.close();
     }
     return;
   }
+  stepKeys.stop();
   folder.close();
   if (!win || win.isDestroyed()) return;
   if (visible) {
@@ -934,16 +939,16 @@ function openApp(url, { handoff = true } = {}) {
   if (url.startsWith('codex:')) raiseCodexWindow();   // a reopened Codex window stays behind otherwise
 }
 
-// A bubble's session, or (from folder mode) any session in the full lists.
-function openSession(id, { handoff = true } = {}) {
+// A bubble's session, or (from folder mode) any session in the full lists. `fill`: maximize the
+// app beside the sidebar.
+function openSession(id, { handoff = true, fill = false } = {}) {
   const s = sessions.find((x) => x.id === id) ?? claudeAll.find((x) => x.id === id) ?? codexAll.find((x) => x.id === id);
   const open = (url) => openApp(url, { handoff });
   if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(open));   // the eTL chat
   const url = s && sessionUrl(s);
   if (!url) return false;
   open(url);
-  // From folder mode's sidebar: the app fills the rest of the screen.
-  if (!handoff && (s.kind === 'desktop' || s.kind === 'codex')) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
+  if (fill && (s.kind === 'desktop' || s.kind === 'codex')) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
   // A finished session or a one-off notice is done with once opened; a class bubble
   // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked. A quiet
   // session (folder mode lists those too) has nothing to be done with.
@@ -1076,9 +1081,11 @@ function registerIpc() {
     sendSessions();
     sendUsage(true);
   });
-  ipcMain.on('folder:open', (e, id) => {
+  // A click in the sidebar has the focus to hand on; Ctrl+Tab (`via` 'key') comes while Claude
+  // or Codex is in front, so the pet takes the focus first, as a click on the floating pet does.
+  ipcMain.on('folder:open', (e, id, via) => {
     if (!fromFolder(e) || typeof id !== 'string') return;
-    if (!openSession(id, { handoff: false })) log('folder: nothing to open for', id);
+    if (!openSession(id, { handoff: via === 'key', fill: true })) log('folder: nothing to open for', id);
   });
   ipcMain.on('folder:pet-click', (e) => {
     if (!fromFolder(e)) return;
@@ -1473,6 +1480,13 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     // Each time the sidebar docks, the Claude and Codex windows are maximized beside it.
     folder = new FolderWindow({ log, width: settings.get('folderWidth'), onDocked: () => maximizeApps('all') });
+    // Taken while Claude, Codex (ChatGPT.exe) or the sidebar (this app) is in front.
+    stepKeys = new StepKeys({
+      apps: ['claude', 'chatgpt', path.parse(process.execPath).name],
+      onStep: (direction) => folder.send('folder:step', direction),
+      globalShortcut,
+      log,
+    });
     const modeFlag = process.argv.find((a) => a.startsWith('--mode='))?.slice('--mode='.length);
     if (modeFlag === 'pet' || modeFlag === 'folder') settings.set({ mode: modeFlag });
     createWindow();
@@ -1581,6 +1595,7 @@ if (!app.requestSingleInstanceLock()) {
     clearInterval(usageTimer);
     clearInterval(wslTimer);
     stopMomentum();
+    stepKeys?.stop();
     tracker?.stop();
     codex?.stop();
     etl?.stop();

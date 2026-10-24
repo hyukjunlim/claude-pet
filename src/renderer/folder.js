@@ -98,23 +98,27 @@
     return out;
   }
 
-  // The folders on the way to the session you opened last, so folding everything leaves it in view.
-  function keptKeys() {
-    const kept = new Set();
-    const has = (list) => list.some((s) => s.id === current);
+  // The machine and the folders on the way to session `id`.
+  function pathTo(id) {
+    const keys = new Set();
+    const has = (list) => list.some((s) => s.id === id);
     const walk = (n) => {
       if (has(n.sessions) || n.children.some(walk)) {
-        kept.add(n.key);
+        keys.add(n.key);
         return true;
       }
       return false;
     };
     for (const h of hosts) {
-      h.folders.forEach(walk);
-      if (has(h.loose)) kept.add(`${h.key}|loose`);
+      const inFolders = h.folders.some(walk);
+      if (!inFolders && has(h.loose)) keys.add(`${h.key}|loose`);
+      if (inFolders || has(h.loose)) keys.add(h.key);
     }
-    return kept;
+    return keys;
   }
+
+  // The folders on the way to the session you opened last, so folding everything leaves it in view.
+  const keptKeys = () => pathTo(current);
 
   // The header's button folds every folder but those (the machines stay open, so their top
   // folders show), or, when they're all folded, opens everything.
@@ -139,6 +143,37 @@
     for (const h of hosts) fold[h.key] = true;
     saveFold();
     render();
+  });
+
+  // ---------------------------------------------------------- Ctrl+Tab: the next session, in the list's order
+
+  // Every session as the list shows it (what matches, while searching), folded folders included:
+  // a step into one opens it.
+  function listed() {
+    const shown = query ? hosts.map(filterHost).filter(Boolean) : hosts;
+    const out = [];
+    const walk = (n) => {
+      out.push(...n.sessions);
+      n.children.forEach(walk);
+    };
+    for (const h of shown) {
+      h.folders.forEach(walk);
+      out.push(...h.loose);
+    }
+    return out;
+  }
+
+  api.onStep((direction) => {
+    const list = listed();
+    if (!list.length) return;
+    const at = list.findIndex((s) => s.id === current);
+    const next = at < 0 ? (direction > 0 ? 0 : list.length - 1) : (at + direction + list.length) % list.length;
+    current = list[next].id;
+    for (const key of pathTo(current)) fold[key] = true;
+    saveFold();
+    render();
+    treeEl.querySelector('.row.current')?.scrollIntoView({ block: 'nearest' });
+    api.open(current, 'key');
   });
 
   // ---------------------------------------------------------- the tree

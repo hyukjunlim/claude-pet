@@ -20,8 +20,9 @@ contextBridge.exposeInMainWorld('folder', {
   onMotion: listen('folder:motion'),
   onStatus: listen('folder:status'),
   onWake: listen('folder:wake'),
+  onStep: listen('folder:step'),     // Ctrl+Tab (+1) or Ctrl+Shift+Tab (-1)
   ready: () => ipcRenderer.send('folder:ready'),
-  open: (id) => ipcRenderer.send('folder:open', String(id)),
+  open: (id, via) => ipcRenderer.send('folder:open', String(id), via === 'key' ? 'key' : 'click'),
   activatePet: () => ipcRenderer.send('folder:pet-click'),
   resize: (phase) => ipcRenderer.send('folder:resize', String(phase)),   // 'move', 'end' or 'reset'
   contextMenu: (screenX, screenY) => ipcRenderer.send('folder:context-menu', { screenX, screenY }),
