@@ -35,9 +35,20 @@ test('the eTL 비서 bubble shows only while turned on, and turning it on or off
   assert.deepEqual(changes.at(-1), []);
   f.setAssistantBubble(true);
   assert.deepEqual(changes.at(-1), ['etl:assistant']);
-  f.dismiss('etl:assistant');                   // no × for it; nothing changes
   f.stop();
   assert.deepEqual(changes.at(-1), []);
+});
+
+test('the eTL 비서 bubble\'s × turns it off, as its menu item does, until turned on again', (t) => {
+  const { f, data, changes } = feature(t, { etlAssistantBubble: true });
+  f.start();
+  assert.deepEqual(changes.at(-1), ['etl:assistant']);
+  f.dismiss('etl:assistant');
+  assert.deepEqual(changes.at(-1), []);
+  assert.equal(data.etlAssistantBubble, false);
+  assert.equal(f.menu().submenu.find((m) => m.label === 'eTL 비서 말풍선 보이기').checked, false);
+  f.setAssistantBubble(true);
+  assert.deepEqual(changes.at(-1), ['etl:assistant']);
 });
 
 test('with eTL off there is no eTL 비서 bubble, and its menu item is there to turn it on', (t) => {

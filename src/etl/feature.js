@@ -151,7 +151,7 @@ class EtlFeature extends EventEmitter {
   }
 
   dismiss(id) {
-    if (id === ASSISTANT_ID) return;    // it has no ×; the menu turns it off
+    if (id === ASSISTANT_ID) return this.setAssistantBubble(false);   // its ×, like the menu item
     if (String(id).startsWith('etl:timetable:')) {
       this.log('etl timetable: closed', id);
       this.notifier?.dismiss(id);                                            // until tomorrow

@@ -138,6 +138,16 @@ test('an eTL notice whose link is not on eTL is not offered as a link', () => {
   }
 });
 
+test('the eTL 비서 bubble has a × to turn it off; a running session still has none', () => {
+  const [assistant, running] = page()([
+    { id: 'etl:assistant', kind: 'etl', assistant: true, status: 'background', badge: 'eTL 비서', title: '과제·공지·강의자료 물어보기', since: Date.now() },
+    { id: 'a', status: 'running', title: 'Refactor auth', since: Date.now() },
+  ]);
+  assert.equal(find(assistant, 'close').getAttribute('aria-label'), 'Turn off this bubble');
+  assert.equal(find(running, 'close'), null);
+  assert.equal(find(page()([NOTICE])[0], 'close').getAttribute('aria-label'), 'Dismiss');
+});
+
 test('Claude and Codex bubbles are as before', () => {
   const [claude, codex, cli] = page()([
     { id: 'a', status: 'review', title: 'Refactor auth', detail: 'All tests pass', project: 'auth-service', remote: 'lab', since: Date.now() },

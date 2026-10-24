@@ -177,11 +177,12 @@
     text.append(line, detail);
     el.append(text);
 
-    if (!BUSY.has(s.status)) {
+    // The eTL 비서 bubble is 'background' only to sit last; its × turns it off (as the tray menu does).
+    if (!BUSY.has(s.status) || s.assistant) {
       const close = document.createElement('button');
       close.className = 'close';
       close.type = 'button';
-      close.setAttribute('aria-label', 'Dismiss');
+      close.setAttribute('aria-label', s.assistant ? 'Turn off this bubble' : 'Dismiss');
       close.textContent = '×';
       close.addEventListener('click', (e) => {
         e.stopPropagation();
