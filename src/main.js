@@ -46,6 +46,9 @@ const APP_ROOT = path.join(__dirname, '..');
 // starts itself again; a downloaded copy (an installer or zip, see "build" in package.json) is
 // its own exe and needs no argument.
 const ROOT_ARGS = app.isPackaged ? [] : [APP_ROOT];
+// The pet and what it starts (its PowerShell helpers, the updater) work in the home folder, not the
+// one the pet was started in, so they never keep that folder from being moved or deleted.
+process.chdir(os.homedir());
 const RENDERER_DIR = path.join(__dirname, 'renderer');
 const CELL = { width: 192, height: 208 };
 const WIN_WIDTH = 400;

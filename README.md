@@ -1,10 +1,10 @@
 # Ttokttok Pet
 
-A small animated companion that floats above your windows and shows what your
-Claude desktop **Code** sessions are doing, and your **Codex** threads too. It works like the
-Pets feature in the ChatGPT/Codex desktop app and uses the same pet format, so ChatGPT/Codex
-pets work here too. It can also sit as a sidebar that lists every session by machine and folder
-([Folder mode](#folder-mode)).
+A small animated companion that floats above your windows and keeps track of what's waiting for
+you: your Claude desktop **Code** sessions, **Codex** threads, chats on claude.ai, ChatGPT and
+Gemini, and SNU eTL deadlines. It works like the Pets feature in the ChatGPT/Codex desktop app and
+uses the same pet format, so ChatGPT/Codex pets work here too. It can also sit as a sidebar that
+lists every session by machine and folder ([Folder mode](#folder-mode)).
 
 ![Clay, the default pet](tools/clay-preview.png)
 
@@ -645,6 +645,7 @@ src/appbar.js       Docks a window as a Windows app bar (a small PowerShell help
 src/maximize.js     Maximizes the Claude and Codex windows beside the sidebar (Windows)
 src/step-keys.js    Ctrl+Tab through the sidebar while Claude, Codex or the sidebar is in front
 src/marks.js        Folder mode's Mark as Ready: which marks your next message takes off
+src/migrate.js      Brings over what an older install kept under its previous name
 src/hidden.js       Sessions hidden from the sidebar: which ones show again
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
