@@ -93,7 +93,9 @@ class EtlFeature extends EventEmitter {
     this.emit('change', []);
   }
 
-  async setEnabled(on) {
+  // `openChat`: straight into the eTL chat in Codex, when it's there (not from Getting started,
+  // which has more steps to go).
+  async setEnabled(on, { openChat = true } = {}) {
     if (!on) {
       this.settings.set({ etlEnabled: false });
       this.stop();
@@ -102,7 +104,7 @@ class EtlFeature extends EventEmitter {
     if (!this.token.has() && !(await this.registerToken())) return;   // no token, stays off
     this.settings.set({ etlEnabled: true });
     this.#run();
-    if (this.codexInstalled()) await this.openInCodex();   // straight into the eTL chat
+    if (openChat && this.codexInstalled()) await this.openInCodex();
   }
 
   // Opens the token window; true once a token that eTL accepted is saved. The first time, it

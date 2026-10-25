@@ -40,15 +40,14 @@ npm install
 npm start
 ```
 
-On its first start, the pet offers to set up a small mod for Claude Code, which is where it gets
-Claude's weekly limit from ([Live Claude usage](#live-claude-usage)). Say *Set it up*, and that's
-all.
-
-It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* to open the token
-form, or *나중에* to skip it; you can connect later from tray menu → *Sources* → *eTL*.
-
-Chats on claude.ai, chatgpt.com and gemini.google.com can get bubbles too, through an optional
-browser extension: see [Web chats](#web-chats-claudeai-chatgpt-gemini).
+On its first start, the pet opens **Getting started**, which sets it up a step at a time: the mode
+(a floating pet or a sidebar), the small mod for Claude Code that Claude's weekly limit comes from
+([Live Claude usage](#live-claude-usage)), SNU eTL, and the browser extension for chats on
+claude.ai, ChatGPT and Gemini ([Web chats](#web-chats-claudeai-chatgpt-gemini)). Each step can be
+skipped. Then you try the pet out on practice items (a bubble next to the floating pet, or two
+sessions at the top of the sidebar): click, mark done, hide and show with `Ctrl+Alt+P`, step
+through with `Ctrl+Tab`, right-click. Tray menu → *Getting started…* (or `--getting-started`)
+opens it again.
 
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
@@ -417,9 +416,10 @@ Code knows how much of your plan's limits the account has used, and when they re
 saves those figures to `~/.ttokttok-pet/usage.json`, and does nothing else. The weekly-limit meter
 then follows your usage as it happens, from any session, whether you're at the PC or not.
 
-**Setting it up.** The pet asks once, on its first start, or as soon as it finds Claude Code in WSL.
-Later, use tray menu → *Sources* → *Live Claude usage*, which has a checkbox per machine. The
-desktop app isn't needed: Claude Code reads the same settings whether you start it from a terminal or the app does.
+**Setting it up.** Getting started's *Claude usage* step sets it up on the machines you tick. If it
+found Claude Code nowhere, the pet asks once as soon as it finds it in WSL. Later, use tray menu →
+*Sources* → *Live Claude usage*, which has a checkbox per machine. The desktop app isn't needed:
+Claude Code reads the same settings whether you start it from a terminal or the app does.
 
 - **This PC:** the pet copies the mod to `~/.ttokttok-pet/mod/pet-usage` and adds two entries to
   the `env` of Claude Code's settings (`~/.claude/settings.json`, backed up first to
@@ -465,8 +465,8 @@ For students at Seoul National University, the pet can also watch [eTL](https://
 (SNU's Canvas LMS) and answer questions about it in a chat folder. It's **off** until you turn it
 on, and while it's off the pet makes no request to eTL and creates no file for it.
 
-**Turning it on.** On first start, choose *eTL 연결* when offered, or use tray menu → *Sources* →
-*eTL* → *켜기* later. A small window asks for an eTL access token: on eTL, open *계정 → 설정*
+**Turning it on.** In Getting started's *SNU eTL* step, choose *Connect eTL…*, or use tray menu →
+*Sources* → *eTL* → *켜기* later. A small window asks for an eTL access token: on eTL, open *계정 → 설정*
 (https://myetl.snu.ac.kr/profile/settings) → *새 액세스 토큰*, and paste it there. The pet checks
 the token with eTL before saving it. *토큰 등록/변경…* replaces it.
 
@@ -634,7 +634,7 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 src/main.js         Electron main process: window, drag/throw, tray, deep links
 src/shape.js        The window's shape: which parts take the mouse (the pet and the bubbles)
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
-src/renderer/       Pet page (sprite engine, activity bubbles) and the sidebar's page
+src/renderer/       Pet page (sprite engine, activity bubbles), the sidebar's page and Getting started's page
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Which app's window is in front, for Ctrl+Tab (a small PowerShell helper, Windows)
 src/raise.js        Brings Codex's window, or a web chat's browser window, to the front (Windows)
@@ -646,6 +646,7 @@ src/maximize.js     Maximizes the Claude and Codex windows beside the sidebar (W
 src/step-keys.js    Ctrl+Tab through the sidebar while Claude, Codex or the sidebar is in front
 src/marks.js        Folder mode's Mark as Ready: which marks your next message takes off
 src/migrate.js      Brings over what an older install kept under its previous name
+src/onboarding.js   Getting started: the window, the state its steps show, the practice items
 src/hidden.js       Sessions hidden from the sidebar: which ones show again
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)

@@ -33,6 +33,7 @@ const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
 const { moveFolder, previous } = require('./migrate');
+const { GettingStarted } = require('./onboarding');
 
 const DEMO = process.argv.includes('--demo');
 // Debug aid: TTOKTTOK_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
@@ -114,6 +115,8 @@ let claudeUsage = null;         // where Claude's readings come from (see claude
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
 let modBusy = null;             // what the Live Claude usage menu is doing, while it does it
 let userDataNote = null;        // what became of an older install's %APPDATA% folder, for the log (userDataDir)
+let gettingStarted = null;      // the Getting started window and its practice items (see onboarding.js)
+let usageSetupErrors = {};      // Getting started's Claude usage step: place key -> why it couldn't be set up
 const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 const wslAsked = new Set();     // the WSL distros checkWsl has asked this run
 let wslTimer = null;
@@ -360,6 +363,7 @@ function replaceWindow(old) {
 function setVisible(visible) {
   settings.set({ visible });
   applyMode();
+  gettingStarted?.visibilityChanged(visible);
 }
 
 // Shows the floating pet or the folder sidebar, whichever the mode is, if the pet is to be seen.
@@ -483,7 +487,9 @@ function sendSessions() {
   folder?.send('folder:status', sessions[0]?.status || 'idle');
   folder?.send('folder:notices', etlSessions);
   if (!win || win.isDestroyed()) return;
-  win.webContents.send('pet:sessions', { sessions, showActivity: settings.get('showActivity') });
+  // Getting started's practice bubble goes first, and shows even with the bubbles turned off.
+  const practice = gettingStarted?.petItems() ?? [];
+  win.webContents.send('pet:sessions', { sessions: [...practice, ...sessions], showActivity: settings.get('showActivity') || practice.length > 0 });
   if (tray) tray.setToolTip(trayTooltip());
 }
 
@@ -508,6 +514,8 @@ function sendTree() {
     defaultWsl: wslDistros()[0] ?? null,
     marked,
   });
+  const practice = gettingStarted?.folderHost();   // Getting started's practice sessions, on top
+  if (practice) hosts.unshift(practice);
   const key = JSON.stringify(hosts);
   if (key === treeKey) return;
   treeKey = key;
@@ -592,6 +600,101 @@ function rowMenu(target) {
     ]);
   }
   return null;
+}
+
+// ---------------------------------------------------------------- Getting started (see onboarding.js)
+
+function startGettingStarted() {
+  gettingStarted = new GettingStarted({
+    log,
+    state: gettingStartedState,
+    changed: () => {
+      sendSessions();
+      sendTree();
+    },
+    // Its Claude usage step asked, if it had somewhere to set the mod up; otherwise the pet still
+    // asks once Claude Code turns up (offerLiveUsage).
+    closed: () => {
+      if (usagePlaces().length) settings.set({ claudeModOffered: true });
+    },
+    actions: {
+      mode: (mode) => {
+        setMode(mode);
+        setTimeout(() => gettingStarted.raise(), 1500);   // after the sidebar docks and the apps move
+      },
+      usage: setUpUsage,
+      etl: () => etl?.setEnabled(true, { openChat: false }),
+      web: (on) => webchats?.setEnabled(on, { quiet: true }),
+      extensionFolder: () => webchats?.openExtensionFolder(),
+      doc: (name) => name === 'usage' && shell.openExternal(LIVE_USAGE_DOC),
+    },
+  });
+}
+
+function gettingStartedState() {
+  return {
+    mode: settings.get('mode'),
+    pet: currentPet ? { url: sheetUrl(currentPet), pixelArt: currentPet.pixelArt === true } : null,
+    usage: { places: usagePlaces(), busy: modBusy, errors: usageSetupErrors },
+    etl: { available: Boolean(etl), enabled: Boolean(etl?.enabled) },
+    web: {
+      available: Boolean(webchats),
+      on: Boolean(webchats?.enabled),
+      connected: webchats?.chats.connected() ?? 0,
+      folder: webchats?.extensionDir() ?? '',
+    },
+  };
+}
+
+// Where Claude Code is, for the mod: this PC, its WSL distros, the SSH hosts the pet reads.
+function usagePlaces() {
+  if (!localMod) return [];
+  const local = localMod.status();
+  const places = [];
+  if (localMod.hasClaudeCode() || local.version != null) {
+    places.push({ key: 'pc', label: 'This PC', note: 'Claude Code in ~/.claude', set: local.installed });
+  }
+  for (const distro of wslDistros()) {
+    places.push({ key: `wsl:${distro}`, label: `WSL: ${distro}`, note: 'Runs this PC’s copy of the mod', set: settings.get('claudeModWsl')?.[distro] === true });
+  }
+  for (const h of sshHosts()) {
+    places.push({ key: `ssh:${h.key}`, label: `SSH: ${h.name}`, note: h.mod ? 'One of the Claude app’s SSH connections' : 'Connecting…', set: h.mod?.enabled === true });
+  }
+  return places;
+}
+
+// The usage step's button: the mod on each of `keys` (usagePlaces), one after another; what
+// failed says why next to its place.
+async function setUpUsage(keys) {
+  if (modBusy) return;
+  usageSetupErrors = {};
+  modBusy = 'Setting up';
+  gettingStarted?.send();
+  try {
+    for (const key of keys) {
+      try {
+        if (key === 'pc') await setLocal(true);
+        else if (key.startsWith('wsl:')) await setWsl(key.slice('wsl:'.length), true);
+        else if (key.startsWith('ssh:')) {
+          const h = sshHosts().find((x) => `ssh:${x.key}` === key);
+          if (h) await setSsh(h, true);
+        }
+      } catch (err) {
+        log('mod:', err.message);
+        usageSetupErrors = { ...usageSetupErrors, [key]: String(err.message).split('\n')[0].slice(0, 80) };
+      }
+    }
+  } finally {
+    modBusy = null;
+  }
+}
+
+// A practice session's menu, as a real one's: either item settles it, and it goes.
+function practiceRowMenu(id) {
+  return Menu.buildFromTemplate([
+    { label: 'Mark as done', click: () => gettingStarted?.remove(id) },
+    { label: 'Hide from the sidebar', click: () => gettingStarted?.remove(id) },
+  ]);
 }
 
 function codexInstalled() {
@@ -885,6 +988,7 @@ function liveUsageMenu() {
 // Code turns up on this PC or in WSL.
 async function offerLiveUsage() {
   if (DEMO || modBusy || settings.get('claudeModOffered') || modSetUpAnywhere()) return;
+  if (gettingStarted?.isOpen) return;   // its Claude usage step asks; see startGettingStarted's closed
   const here = localMod.hasClaudeCode();
   const distros = wslDistros();
   const hosts = sshHosts().filter((h) => !h.fromConfig);
@@ -1196,6 +1300,10 @@ function registerIpc() {
   });
   ipcMain.on('pet:activate', (e, id) => {
     if (!fromPet(e)) return;
+    if (gettingStarted?.isPractice(id)) {   // the page has the pet wave; nothing to open
+      gettingStarted.tried('click');
+      return;
+    }
     if (typeof id === 'string') {
       if (!openSession(id)) wake();     // terminal sessions have nothing to open
       return;
@@ -1206,6 +1314,11 @@ function registerIpc() {
   });
   ipcMain.on('pet:dismiss', (e, id) => {
     if (!fromPet(e) || typeof id !== 'string') return;
+    if (gettingStarted?.isPractice(id)) {
+      gettingStarted.tried('dismiss');
+      gettingStarted.remove(id);
+      return;
+    }
     trackerFor(id)?.dismiss(id);
     persistDismissed();
   });
@@ -1219,6 +1332,7 @@ function registerIpc() {
   ipcMain.on('pet:context-menu', (e, p) => {
     if (!fromPet(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
+    gettingStarted?.tried('menu');
     tray?.popUpContextMenu(buildMenu(), position);
   });
 
@@ -1252,6 +1366,10 @@ function registerIpc() {
   // or Codex is in front, so the pet takes the focus first, as a click on the floating pet does.
   ipcMain.on('folder:open', (e, id, via) => {
     if (!fromFolder(e) || typeof id !== 'string') return;
+    if (gettingStarted?.isPractice(id)) {   // Ctrl+Tab counts where it's pressed (onStep)
+      if (via !== 'key') gettingStarted.tried('click');
+      return;
+    }
     if (!openSession(id, { handoff: via === 'key', fill: true })) log('folder: nothing to open for', id);
   });
   ipcMain.on('folder:pet-click', (e) => {
@@ -1272,7 +1390,15 @@ function registerIpc() {
   ipcMain.on('folder:context-menu', (e, p) => {
     if (!fromFolder(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
-    tray?.popUpContextMenu(rowMenu(p?.target) ?? buildMenu(), position);
+    const target = p?.target;
+    if (target?.kind === 'session' && gettingStarted?.isPractice(target.id)) {
+      gettingStarted.tried('rowMenu');
+      tray?.popUpContextMenu(practiceRowMenu(target.id), position);
+      return;
+    }
+    const menu = rowMenu(target);
+    if (!menu) gettingStarted?.tried('menu');
+    tray?.popUpContextMenu(menu ?? buildMenu(), position);
   });
 }
 
@@ -1381,6 +1507,7 @@ function buildMenu() {
       click: () => (update ? offerUpdate() : checkUpdates()),
     });
   }
+  if (gettingStarted) items.push({ label: 'Getting started…', click: () => gettingStarted.open() });
   items.push({ type: 'separator' });
   if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
   if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
@@ -1764,7 +1891,8 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_event, argv) => {
     applyLoginFlag(argv);
-    if (!applyModeFlag(argv)) setVisible(true);
+    if (argv.includes('--getting-started')) gettingStarted?.open();
+    else if (!applyModeFlag(argv)) setVisible(true);
   });
   app.setAppUserModelId('TtokttokPet');
 
@@ -1795,7 +1923,10 @@ if (!app.requestSingleInstanceLock()) {
     // Taken while Claude, Codex (ChatGPT.exe) or the sidebar (this app) is in front.
     stepKeys = new StepKeys({
       apps: ['claude', 'chatgpt', path.parse(process.execPath).name],
-      onStep: (direction) => folder.send('folder:step', direction),
+      onStep: (direction) => {
+        gettingStarted?.tried('step', direction);
+        folder.send('folder:step', direction);
+      },
       globalShortcut,
       log,
     });
@@ -1831,7 +1962,10 @@ if (!app.requestSingleInstanceLock()) {
         watchHosts: settings.get('claudeUsageOverSsh'),
       });
       claudeUsage.on('change', (readings) => setUsage({ claude: readings }));
-      claudeUsage.on('hosts', updateHostMods);
+      claudeUsage.on('hosts', () => {
+        updateHostMods();
+        gettingStarted?.send();   // a host's mod turned up, or changed
+      });
       claudeUsage.on('error', (err) => log('claude usage:', err?.message || err));
       claudeUsage.start();
       // once the desktop index (for WSL distros) and the SSH connections have been read
@@ -1852,6 +1986,13 @@ if (!app.requestSingleInstanceLock()) {
     startCodex();
     if (!DEMO) startEtl();
     if (!DEMO) startWebChats();
+    if (!DEMO) {
+      startGettingStarted();
+      // A new install: Getting started has the eTL step, so the one-time eTL offer doesn't come too
+      // (the Claude usage offer waits for it to close). `--getting-started` opens it any time.
+      if (settings.firstRun) settings.set({ etlOnboardingOffered: true });
+      if (settings.firstRun || process.argv.includes('--getting-started')) gettingStarted.open();
+    }
     usageTimer = setInterval(sendUsage, 60_000);
 
     const shortcut = settings.get('shortcut');

@@ -109,7 +109,8 @@ class WebChatsFeature extends EventEmitter {
     this.chats.clear();
   }
 
-  async setEnabled(on) {
+  // `quiet`: without the dialog on loading the extension (Getting started shows those steps).
+  async setEnabled(on, { quiet = false } = {}) {
     this.settings.set({ webChats: on });
     if (!on) {
       this.stop();
@@ -117,6 +118,7 @@ class WebChatsFeature extends EventEmitter {
       return;
     }
     await this.#run();
+    if (quiet) return;
     const { response } = await this.electron.dialog.showMessageBox({
       type: 'info',
       title: 'Ttokttok Pet',

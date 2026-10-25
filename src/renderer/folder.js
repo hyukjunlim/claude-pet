@@ -182,7 +182,9 @@
   function render() {
     const shown = query ? hosts.map(filterHost).filter(Boolean) : hosts;
     const scroll = treeEl.scrollTop;
-    treeEl.replaceChildren(...arranged(MACHINES, shown).map(hostEl));
+    // Getting started's practice sessions stay on top, and out of the order you drag the rest into.
+    const practice = shown.filter((h) => h.key === 'practice');
+    treeEl.replaceChildren(...[...practice, ...arranged(MACHINES, shown.filter((h) => h.key !== 'practice'))].map(hostEl));
     if (!shown.length) treeEl.append(el('div', 'empty', query ? 'No sessions match.' : 'No Claude sessions or Codex threads yet.'));
     treeEl.scrollTop = scroll;
     updateFoldAll();
