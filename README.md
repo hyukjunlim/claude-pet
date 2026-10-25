@@ -3,7 +3,8 @@
 A small animated companion that floats above your windows and shows what your
 Claude desktop **Code** sessions are doing, and your **Codex** threads too. It works like the
 Pets feature in the ChatGPT/Codex desktop app and uses the same pet format, so ChatGPT/Codex
-pets work here too.
+pets work here too. It can also sit as a sidebar that lists every session by machine and folder
+([Folder mode](#folder-mode)).
 
 ![Clay, the default pet](tools/clay-preview.png)
 
@@ -47,7 +48,7 @@ It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* t
 form, or *나중에* to skip it; you can connect later from the tray menu's *eTL* item.
 
 Chats on claude.ai and chatgpt.com can get bubbles too, through an optional browser extension:
-see [Web chats](#web-chats-claudeai-chatgpt).
+see [Web chats](#web-chats-claudeai-chatgpt-gemini).
 
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
@@ -127,7 +128,7 @@ The pet's update dialog lists the notes' bullet points (lines starting with `- `
 
 | Pet animation | Bubble         | Meaning |
 | ------------- | -------------- | ------- |
-| waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, ended its turn on a question in the app's next-step box, or ended it waiting on a decision from you (the app's yellow marker), and you haven't looked at it since |
+| waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, ended its turn on a question in the app's next-step box, or ended it waiting on a decision from you (the app's yellow marker). Opening the session doesn't clear it: it stays until you answer, or click its × |
 | failed        | **Error**      | The turn ended with an API error |
 | review        | **Ready**      | A turn finished and you haven't opened that session since |
 | running       | **Running**    | Claude is working |
@@ -171,6 +172,37 @@ Other things it does:
 - **Reduced motion:** the pet animates even when the Windows *Animation effects* setting is off.
   Untick *Animate even with Windows animation effects off* in the tray menu to get still frames
   then instead.
+
+## Folder mode
+
+Tray menu → *Mode* → *Folder sidebar* (or `--mode=folder` on the command line) turns the pet into
+a sidebar. It docks to the left edge of the monitor as a Windows app bar, so other windows make
+room for it, and lists every Claude Code session and Codex thread, quiet ones too, by machine and
+folder. The pet and the weekly limits sit at its foot. Each time it docks, the Claude and Codex
+windows are maximized beside it, so the conversation you open fills the rest of the screen.
+
+- **Machines and folders:** *Local*, *WSL* and each SSH host, each with its folders. The two apps'
+  names for one server meet under one heading, and a session started in a parent folder stays at
+  the parent. Web chats, when they're on, come first, under *Chat*, with a dot in each site's color.
+- **Order:** the sessions in a folder are newest first. Machines and folders keep the order they
+  first showed in, so a folder doesn't jump when a session in it gets busy. Drag a machine's
+  heading or a folder's row to move it among its neighbors (Escape cancels); a folder that turns
+  up later goes on top.
+- **Status:** each session shows what its bubble would (*Needs you*, *Error*, *Ready*, *Running*,
+  *Background*), or when it was last worked on. A folded folder shows a dot when something in it
+  needs you or is working.
+- **Clicks and keys:** click a session to open it in its app, and a folder or a machine to fold it.
+  The button beside the search box folds every folder but those on the way to the session you
+  opened last, or opens them all. **Ctrl+Tab** and **Ctrl+Shift+Tab** step through the list while
+  Claude, Codex or the sidebar is in front.
+- **Follow-up flag:** point at a session and click the faint flag at its left, or right-click it →
+  *Flag for follow-up*. Opening the session leaves the flag on; your next message to that session
+  takes it off (a background task's turn doesn't), and so does clicking it again.
+- **Width and text size:** drag the sidebar's right edge; double-click it for the default width.
+  **Ctrl+=** and **Ctrl+-** size the text, **Ctrl+0** resets it.
+- **Look:** Inter where it's installed, otherwise Segoe UI. The page, the text and the selected row
+  take the colors of the Claude app's sidebar. Tray menu → *Theme* picks light, dark or the Windows
+  app mode for all of the pet's windows.
 
 ## How it knows what Claude is doing
 
@@ -282,14 +314,14 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
 - **Not shown:** ChatGPT chats in the app (those on chatgpt.com can be, see
-  [Web chats](#web-chats-claudeai-chatgpt)), and Codex's own helper threads such as its auto-reviewer.
+  [Web chats](#web-chats-claudeai-chatgpt-gemini)), and Codex's own helper threads such as its auto-reviewer.
 
-## Web chats (claude.ai, ChatGPT)
+## Web chats (claude.ai, ChatGPT, Gemini)
 
-Chats on claude.ai and chatgpt.com can get bubbles too, from a small browser extension in
-[browser-extension/](browser-extension/) for Chrome, Edge and other Chromium browsers. It's **off**
-until you turn it on: tray menu → *Web chats* → *Show claude.ai and ChatGPT chats*. Their bubbles
-are marked "Claude Chat" or "ChatGPT" (e.g. "ChatGPT · 2m").
+Chats on claude.ai, chatgpt.com and gemini.google.com can get bubbles too, from a small browser
+extension in [browser-extension/](browser-extension/) for Chrome, Edge and other Chromium browsers.
+It's **off** until you turn it on: tray menu → *Web chats* → *Show claude.ai, ChatGPT and Gemini
+chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini" (e.g. "ChatGPT · 2m").
 
 - **Running** while a reply is being written, **Ready** once it's done, unless you were looking at
   the chat's tab (the one shown in a browser window that has the focus) when it finished. Ready goes
@@ -319,8 +351,9 @@ are marked "Claude Chat" or "ChatGPT" (e.g. "ChatGPT · 2m").
   being written carries `data-is-streaming="true"`. ChatGPT serves two different pages: on one, the
   send button carries `data-stop-generating` and the message `data-message-streaming`; on the other,
   which signed-in accounts may get, the only sign is a stop button shown in the message box,
-  labelled in the page's language (a hidden twin of it is always there). All of this is in `WRITING`
-  at the top of [browser-extension/content.js](browser-extension/content.js).
+  labelled in the page's language (a hidden twin of it is always there). On Gemini, the send button
+  turns into a stop button while it writes (`.send-button.stop`, labelled in the page's language).
+  All of this is in `WRITING` at the top of [browser-extension/content.js](browser-extension/content.js).
 - **When bubbles don't come:** tray menu → *Web chats* says *Extension connected* once a browser
   has the extension running, and *Waiting for the extension* until then. If it's connected and a
   site's replies still don't show, the site has changed its page, and `WRITING` is what to fix.
@@ -578,10 +611,17 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 src/main.js         Electron main process: window, drag/throw, tray, deep links
 src/shape.js        The window's shape: which parts take the mouse (the pet and the bubbles)
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
-src/renderer/       Pet page: sprite engine, activity bubbles
+src/renderer/       Pet page (sprite engine, activity bubbles) and the sidebar's page
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
 src/raise.js        Brings Codex's window, or a web chat's browser window, to the front (Windows)
+src/folder-mode.js  Folder mode's sidebar: its window, docked at the screen's left edge
+src/folder-tree.js  Sessions and threads → machine › folder tree, for the sidebar
+src/folder-preload.js What the sidebar's page may ask of the main process
+src/appbar.js       Docks a window as a Windows app bar (a small PowerShell helper)
+src/maximize.js     Maximizes the Claude and Codex windows beside the sidebar (Windows)
+src/step-keys.js    Ctrl+Tab through the sidebar while Claude, Codex or the sidebar is in front
+src/flags.js        Folder mode's follow-up flags: which ones your next message takes off
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
 src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
@@ -598,5 +638,5 @@ src/webchats/       Web chats: the extension's native host, its registration, ta
 tools/make_clay.py  Generates Clay, the built-in pet
 claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
 etl-workspace/      What the eTL chat folder is made from: instructions, skills, etl.js
-browser-extension/  The Chrome/Edge extension that reports claude.ai and ChatGPT tabs to the pet
+browser-extension/  The Chrome/Edge extension that reports claude.ai, ChatGPT and Gemini tabs to the pet
 ```
