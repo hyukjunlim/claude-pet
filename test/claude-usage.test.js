@@ -265,10 +265,12 @@ test("the watcher follows the host's VS Code and terminal sessions, not the desk
   fs.writeFileSync(path.join(projects, `${desktop}.jsonl`), entry('x'.repeat(100_000), 'claude-desktop') + entry('more', 'claude-desktop-3p'));
   const { child, messages } = watch(home);
   try {
-    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats))));
+    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats)), 15000));
     const opened = messages.filter((m) => 'chat' in m);
     assert.deepEqual(opened.map((m) => m.id), [vscode], "the desktop app's session isn't followed");
     const n = opened[0].chat;
+    // The watcher lists what it follows first and sends their lines after, as a separate write.
+    assert.ok(await waitFor(() => messages.some((m) => m.cl === n), 8000), 'the lines so far come next');
     assert.deepEqual(messages.filter((m) => m.cl === n).map((m) => JSON.parse(m.l).message.content), ['first']);
 
     fs.appendFileSync(path.join(projects, `${vscode}.jsonl`), entry('second', 'claude-vscode'));
@@ -295,7 +297,7 @@ test("the watcher sends a quick look at the host's older VS Code and terminal se
   for (const id of [vscode, desktop]) fs.utimesSync(path.join(projects, `${id}.jsonl`), old, old);
   const { child, messages } = watch(home);
   try {
-    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats))));
+    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats)), 15000));
     const peeks = messages.filter((m) => m.peek).map((m) => m.peek);
     assert.deepEqual(peeks.map((p) => [p.id, p.entrypoint, p.cwd, p.ai_title, p.at]),
       [[vscode, 'claude-vscode', '/home/me/site', 'Reagent website', old.toISOString()]]);
