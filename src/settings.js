@@ -22,6 +22,7 @@ const DEFAULTS = {
   claudeSshHosts: [],        // the hosts from ~/.ssh/config picked for the mod (the desktop app's come on their own)
   claudeModOffered: false,   // the pet has asked once whether to set up its Claude Code mod
   claudeModWsl: {},          // distro -> whether the mod is set up there, as last seen
+  claudeModWslToMove: null,  // distros still loading an older install's copy of the mod (main.js moveWsl); null: none were
   claudeCodeWsl: {},         // distro -> whether Claude Code is there, as last seen
   showCodex: true,         // also show Codex threads, when Codex is installed
   codexOverSsh: true,      // and follow the ones running on Codex's SSH hosts

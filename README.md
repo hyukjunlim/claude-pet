@@ -105,6 +105,18 @@ checks when you ask.
 - **Installed before this existed?** That version has no such menu item. Update it by hand once,
   as described under [Install](#install).
 
+### Upgrading from an older install
+
+An install from before 0.5 kept its things under the name `claude-pet`. The first start moves them
+over: settings and the eTL token (`%APPDATA%\claude-pet`), your pets and the live-usage mod
+(`~/.claude-pet`, also in WSL and on SSH hosts), Start at login and the web chats host. Two things
+are yours to do:
+
+- **The browser extension:** on the extensions page, click its reload button. If you moved the
+  pet's folder, remove it and load it again from there.
+- **An installed copy:** the installer puts the pet beside the old one, not over it. Uninstall the
+  old one ("Claude Pet") in Windows Settings → Apps.
+
 ## Building the installer
 
 `npm run dist` builds `Ttokttok-Pet-Setup-<version>.exe` (a per-user installer) and

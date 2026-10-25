@@ -11,6 +11,7 @@ const { PassThrough } = require('node:stream');
 const {
   INSTALLER, LocalMod, bundledVersion, hasMod, modFiles, runInstaller, runningWslDistros, withMod, withoutMod,
 } = require('../src/claude-mod');
+const { previous } = require('../src/migrate');
 const { LOADER } = require('../src/ssh-watcher');
 
 const WIN_DIR = 'C:\\Users\\me\\.ttokttok-pet\\mod\\pet-usage';
@@ -126,6 +127,71 @@ test('a newer pet brings its newer mod, and leaves the settings be', () => {
   }
 });
 
+// An older install's home folder, as it left it with the mod set up: `dirOf(home)` is how the
+// settings name the mod's folder there.
+function olderHome(home, delimiter) {
+  const legacy = path.join(home, previous.homeDir);
+  const legacyMod = path.join(legacy, 'mod', 'pet-usage');
+  for (const [rel, text] of Object.entries(modFiles())) {
+    fs.mkdirSync(path.dirname(path.join(legacyMod, rel)), { recursive: true });
+    fs.writeFileSync(path.join(legacyMod, rel), text.replace(bundledVersion(), '1.0.0'));
+  }
+  fs.mkdirSync(path.join(legacy, 'pets', 'mine'), { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'pets', 'mine', 'pet.json'), '{}');
+  fs.writeFileSync(path.join(legacy, 'install.json'), '{"functionHooksAdded":true}\n');
+  fs.writeFileSync(path.join(legacy, 'usage.json'), '{"version":1}');
+  const settingsFile = path.join(home, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  fs.writeFileSync(settingsFile, JSON.stringify({
+    env: { CLAUDE_CODE_PLUGIN_DIRS: [path.join(home, 'mine'), legacyMod].join(delimiter), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1' },
+  }));
+  return { legacy, legacyMod, settingsFile };
+}
+
+test("an older install's folder on this PC moves over once, its copy of the mod last", () => {
+  const home = tempHome();
+  try {
+    const { legacy, legacyMod, settingsFile } = olderHome(home, ';');
+    const mod = new LocalMod({ home, claudeDir: path.join(home, '.claude'), delimiter: ';' });
+    assert.equal(mod.status().installed, false, "the new folder isn't set up yet");
+    assert.deepEqual(mod.adoptLegacy(), ['pets', 'install.json', 'usage.json', 'mod', 'settings']);
+    assert.equal(fs.existsSync(path.join(mod.petDir, 'pets', 'mine', 'pet.json')), true, 'your pets come along');
+    assert.equal(fs.readFileSync(mod.usageFile, 'utf8'), '{"version":1}');
+    assert.deepEqual(readJson(mod.stateFile), { functionHooksAdded: true });
+    assert.deepEqual(mod.status(), { installed: true, version: bundledVersion() });
+    assert.deepEqual(readJson(settingsFile).env, {
+      CLAUDE_CODE_PLUGIN_DIRS: [path.join(home, 'mine'), mod.dir].join(';'), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
+    });
+    assert.equal(fs.existsSync(legacyMod), true, 'kept for WSL distros still loading it');
+    assert.deepEqual(mod.adoptLegacy(), [], 'again while it stays: nothing changes');
+    assert.deepEqual(mod.status(), { installed: true, version: bundledVersion() });
+
+    mod.dropLegacy();
+    assert.equal(fs.existsSync(legacy), false);
+    assert.deepEqual(mod.adoptLegacy(), []);
+
+    // a session started before the move saves its usage in the old place: newer figures count
+    const old = path.join(legacy, 'usage.json');
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(old, '{"version":2}');
+    fs.utimesSync(old, new Date(), new Date(Date.now() + 60_000));
+    assert.deepEqual(mod.adoptLegacy(), ['usage.json']);
+    assert.equal(fs.readFileSync(mod.usageFile, 'utf8'), '{"version":2}');
+    assert.equal(fs.existsSync(legacy), false);
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(old, '{"version":0}');
+    fs.utimesSync(old, new Date(0), new Date(0));
+    assert.deepEqual(mod.adoptLegacy(), [], 'older figures just go');
+    assert.equal(fs.readFileSync(mod.usageFile, 'utf8'), '{"version":2}');
+    assert.equal(fs.existsSync(legacy), false);
+
+    mod.uninstall();
+    assert.deepEqual(readJson(settingsFile).env, { CLAUDE_CODE_PLUGIN_DIRS: path.join(home, 'mine') }, 'hooks go: the older install turned them on');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 function fakeChild({ stdout = '', stderr = '', code = 0 } = {}) {
   const child = new EventEmitter();
   child.stdin = new PassThrough();
@@ -204,13 +270,13 @@ test('the installer script sets the mod up on a host and takes it away again', {
   const settingsFile = path.join(home, '.claude', 'settings.json');
   const modDir = path.join(home, '.ttokttok-pet', 'mod', 'pet-usage');
   try {
-    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false, claude: false }, 'no Claude Code there');
+    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false, claude: false, legacy: false }, 'no Claude Code there');
     fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
     const original = { model: 'opus', env: { CLAUDE_CODE_PLUGIN_DIRS: path.join(home, 'mine'), LANG: '한국어' } };
     fs.writeFileSync(settingsFile, JSON.stringify(original));
-    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false, claude: true });
+    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: false, claude: true, legacy: false });
 
-    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true });
+    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true, legacy: false });
     for (const [rel, text] of Object.entries(modFiles())) {
       assert.equal(fs.readFileSync(path.join(modDir, ...rel.split('/')), 'utf8'), text);
     }
@@ -220,11 +286,11 @@ test('the installer script sets the mod up on a host and takes it away again', {
     assert.equal(after.env.LANG, '한국어');
     assert.deepEqual(readJson(`${settingsFile}.ttokttok-pet.bak`), original);
 
-    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true });
+    assert.deepEqual(await run({ action: 'install', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true, legacy: false });
     assert.equal(readJson(settingsFile).env.CLAUDE_CODE_PLUGIN_DIRS.split(path.delimiter).length, 2, 'set up once');
 
     fs.writeFileSync(path.join(home, '.ttokttok-pet', 'usage.json'), '{}');
-    assert.deepEqual(await run({ action: 'uninstall' }), { ok: true, version: null, enabled: false, claude: true });
+    assert.deepEqual(await run({ action: 'uninstall' }), { ok: true, version: null, enabled: false, claude: true, legacy: false });
     assert.deepEqual(readJson(settingsFile), original);
     assert.equal(fs.existsSync(path.join(home, '.ttokttok-pet', 'mod')), false);
     assert.equal(fs.existsSync(path.join(home, '.ttokttok-pet', 'usage.json')), false);
@@ -234,6 +300,33 @@ test('the installer script sets the mod up on a host and takes it away again', {
     assert.equal(refused.ok, false);
     assert.match(refused.error, /isn't valid JSON/);
     assert.equal(fs.readFileSync(settingsFile, 'utf8'), '{ "model": ');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the installer's update moves a host off an older install's folder", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const home = tempHome();
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CLAUDE_CONFIG_DIR;
+  const run = (request) => runInstaller({
+    command: python,
+    args: ['-u', '-c', LOADER],
+    spawnFn: (cmd, args, opts) => require('node:child_process').spawn(cmd, args, { ...opts, env }),
+  }, request);
+  try {
+    const { legacy, settingsFile } = olderHome(home, path.delimiter);
+    const pet = path.join(home, '.ttokttok-pet');
+    const modDir = path.join(pet, 'mod', 'pet-usage');
+    assert.deepEqual(await run({ action: 'status' }), { ok: true, version: null, enabled: true, claude: true, legacy: true });
+    assert.deepEqual(await run({ action: 'update', files: modFiles() }), { ok: true, version: bundledVersion(), enabled: true, claude: true, legacy: false });
+    assert.deepEqual(readJson(settingsFile).env, {
+      CLAUDE_CODE_PLUGIN_DIRS: [path.join(home, 'mine'), modDir].join(path.delimiter), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
+    });
+    assert.deepEqual(readJson(path.join(pet, 'install.json')), { functionHooksAdded: true });
+    assert.equal(fs.readFileSync(path.join(pet, 'usage.json'), 'utf8'), '{"version":1}');
+    assert.equal(fs.existsSync(path.join(legacy, 'mod')), false);
+    assert.equal(fs.existsSync(path.join(legacy, 'pets')), true, "a host's own pets aren't the pet's to move");
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

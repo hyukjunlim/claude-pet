@@ -22,12 +22,15 @@ const { EventEmitter } = require('node:events');
 const { execFile } = require('node:child_process');
 const { defaultPipePath } = require('./host');
 const { WebChats } = require('./chats');
+const { previous } = require('../migrate');
 
 const HOST_NAME = 'com.hyukjunlim.ttokttok_pet';
-const REGISTRY = {
-  chrome: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`,
-  edge: `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${HOST_NAME}`,
-};
+const registryKeys = (name) => ({
+  chrome: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${name}`,
+  edge: `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${name}`,
+});
+const REGISTRY = registryKeys(HOST_NAME);
+const LEGACY_REGISTRY = registryKeys(previous.hostName);   // an older install's, which goes
 const MAX_LINE = 64 * 1024;
 const MAX_HOSTS = 16;          // one per browser profile with the extension
 
@@ -148,13 +151,16 @@ class WebChatsFeature extends EventEmitter {
       allowed_origins: [`chrome-extension://${this.extensionId()}/`],
     }, null, 2)}\n`);
     for (const key of Object.values(REGISTRY)) await this.#reg(['add', key, '/ve', '/t', 'REG_SZ', '/d', manifest, '/f']);
+    await this.#unregisterKeys(Object.values(LEGACY_REGISTRY));
   }
 
   async unregister() {
     if (this.platform !== 'win32') return;
-    for (const key of Object.values(REGISTRY)) {
-      await this.#reg(['delete', key, '/f']).catch(() => {});   // already gone
-    }
+    await this.#unregisterKeys([...Object.values(REGISTRY), ...Object.values(LEGACY_REGISTRY)]);
+  }
+
+  async #unregisterKeys(keys) {
+    for (const key of keys) await this.#reg(['delete', key, '/f']).catch(() => {});   // already gone
   }
 
   dismiss(id) {
@@ -267,4 +273,4 @@ class WebChatsFeature extends EventEmitter {
   }
 }
 
-module.exports = { HOST_NAME, REGISTRY, WebChatsFeature, batchPath, extensionId, launcher };
+module.exports = { HOST_NAME, LEGACY_REGISTRY, REGISTRY, WebChatsFeature, batchPath, extensionId, launcher };
