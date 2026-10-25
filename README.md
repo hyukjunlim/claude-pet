@@ -130,7 +130,7 @@ The pet's update dialog lists the notes' bullet points (lines starting with `- `
 | ------------- | -------------- | ------- |
 | waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, ended its turn on a question in the app's next-step box, or ended it waiting on a decision from you (the app's yellow marker). Opening the session doesn't clear it: it stays until you answer, or click its × |
 | failed        | **Error**      | The turn ended with an API error |
-| review        | **Ready**      | A turn finished and you haven't opened that session since |
+| review        | **Ready**      | A turn finished. It stays until you mark it done or send the session a message; opening it doesn't count |
 | running       | **Running**    | Claude is working |
 | idle          | **Background** | Claude isn't working, but a command, agent or monitor it sent to the background is still going |
 | idle          | none           | Nothing to report |
@@ -138,7 +138,8 @@ The pet's update dialog lists the notes' bullet points (lines starting with `- `
 Every active session gets its own bubble, most urgent first: Needs you, then Error, then Ready,
 then Running (the same order as ChatGPT's pet), and Background last. The pet's animation follows
 the top one. There's no limit: the stack grows as sessions come in, and scrolls (mouse wheel over
-a bubble) once it reaches the edge of the screen. The **×** on a bubble dismisses it.
+a bubble) once it reaches the edge of the screen. The **×** on a bubble marks it done, and tray menu →
+*Mark all Ready as done* does that for every Ready and Error at once.
 
 A bubble shows the status and the session's title, and under them the app, the project and how
 long it has been in that state, e.g. "Claude · tokenizer · 5m". The project is the session's folder name; it's
@@ -197,14 +198,21 @@ conversation you open fills the rest of the screen.
   The button beside the search box folds every folder but those on the way to the session you
   opened last, or opens them all. **Ctrl+Tab** and **Ctrl+Shift+Tab** step through the list while
   Claude, Codex or the sidebar is in front.
-- **Follow-up flag:** point at a session and click the faint flag at its left, or right-click it →
-  *Flag for follow-up*. Opening the session leaves the flag on; your next message to that session
-  takes it off (a background task's turn doesn't), and so does clicking it again.
+- **Mark as done, Mark as Ready:** opening a session leaves its *Ready*, *Error* or *Needs you*.
+  Right-click it → *Mark as done* settles it, as a bubble's × does. *Mark as Ready* undoes that, so a
+  question still in the next-step box is *Needs you* again; on a quiet session it puts it in Ready to
+  come back to, until you mark it done or send it a message.
+- **Hide:** right-click a session → *Hide from the sidebar*, or a folder or a machine to hide
+  everything in it (its menu also has *Collapse* or *Expand*). Only the sidebar leaves it out; a
+  hidden session shows again when something new happens in it, or from the tray menu's *Hidden from
+  the sidebar*.
 - **Width and text size:** drag the sidebar's right edge; double-click it for the default width.
   **Ctrl+=** and **Ctrl+-** size the text, **Ctrl+0** resets it.
 - **Look:** Inter where it's installed, otherwise Segoe UI. The page, the text and the selected row
   take the colors of the Claude app's sidebar. Tray menu → *Theme* picks light, dark or the Windows
   app mode for all of the pet's windows.
+- **Saved:** the order, folding, text size, hidden sessions and marks are in
+  `%APPDATA%\claude-pet\settings.json`.
 
 ## How it knows what Claude is doing
 
@@ -228,16 +236,13 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   transcript has the question, the bubble says "Has a question for you" rather than the question
   itself.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
-  that clock is off from the copies and corrects for it, so "Ready" still clears once you've
-  looked at a session.
-- **The session you have open:** the index notes when you switch to a session, not when you look
-  at the one already open. So when a turn ends in the session selected in the app (the log says
-  which), the pet checks whether the Claude window is in front. If it is, you've seen it and
-  there's no bubble; if not, "Ready" (or "Needs you") stays until the Claude window comes to the
-  front, or you switch away from that session in the app (it was on screen until then). A small
-  PowerShell helper reports the front window, event-driven, only while that's in question
-  ([src/foreground.js](src/foreground.js); Windows only). What it saw is saved, so a restart of
-  the pet doesn't bring those bubbles back.
+  that clock is off from the copies and corrects for it, so a turn's end and the moment you marked
+  it done compare on one clock.
+- **Ready until done:** a turn's Ready (and Error) stays until you mark it done (a bubble's ×, the
+  sidebar's *Mark as done*, *Mark all Ready as done*) or start another turn. Opening the session, or
+  looking at it in the app, leaves it, and the pet follows a session's transcript for as long as
+  that holds. Turns that ended before you first ran a version with this rule cleared once you looked
+  at them; settings.json keeps when that was (`readyFrom`).
 - **Background tasks:** when Claude sends a command, an agent or a monitor to the background, its
   turn ends at once and the task's notice starts the next one when it finishes. To keep the bubble
   from going Ready, gone, Running again, the pet follows each task from the transcript entry that
@@ -266,7 +271,7 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 **Limitations:**
 - **SSH turns.** If the app has to start the session's CLI first, the bubble appears when the
   first reply arrives.
-- **Mark as read / unread isn't followed.** "Ready" goes by when you last opened the session. The
+- **Mark as read / unread isn't followed.** Ready goes by what you mark done in the pet. The
   sidebar's unread dots, including the ones you set by hand, live only in the localStorage of the
   app's window (item `epitaxy-unread-v1`, with `unreadIds` and `explicitUnreadIds`, in a LevelDB
   database under `%APPDATA%\Claude\Local Storage\leveldb`). The app's browser engine writes that
@@ -284,9 +289,11 @@ project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
 (`codex://threads/<id>?hostId=<host>`), and tray menu → *Open Codex* opens the app. Codex works
 without Claude too: then clicking the pet opens Codex, and the menu has no Claude items.
 
-- **Ready:** a thread that finished while you weren't looking at it. This is Codex's own unread
-  list (`~/.codex/.codex-global-state.json`), so it covers threads on every host, and the
-  bubble goes away once you open the thread in Codex.
+- **Ready:** a thread that finished, until you mark it done or send it a message, read in Codex or
+  not. Once its history isn't followed any more (an hour on), the time Codex's thread list last
+  changed stands in for when it finished. For threads on hosts the pet doesn't watch, it goes by
+  Codex's own unread list (`~/.codex/.codex-global-state.json`) and goes away once you open the
+  thread in Codex.
 - **Running, Needs you, Error:** read from each thread's history (its rollout file), the way
   Codex writes it. For threads on this PC (Codex's local host and the Codex CLI) that's
   `~/.codex/sessions`.
@@ -339,10 +346,9 @@ chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini Chat" (e.g.
   host as it starts. The extension's folder is `browser-extension` in the source folder, or
   `resources\app\browser-extension` next to `Claude Pet.exe` in a downloaded copy. Loading it
   (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
-- **Running** while a reply is being written, **Ready** once it's done, unless you were looking at
-  the chat's tab (the one shown in a browser window that has the focus) when it finished. Ready goes
-  away when you look at the chat, click its bubble or close it with ×. A conversation open in
-  several tabs gets one bubble.
+- **Running** while a reply is being written, **Ready** once it's done. Ready stays until you close
+  it with × (or the sidebar's *Mark as done*) or send another message, looked at or not. A
+  conversation open in several tabs gets one bubble.
 - **Clicking** brings the chat's tab and its browser window to the front. If the tab is gone, the
   chat's address opens in your default browser.
 - **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
@@ -615,7 +621,7 @@ src/shape.js        The window's shape: which parts take the mouse (the pet and 
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
 src/renderer/       Pet page (sprite engine, activity bubbles) and the sidebar's page
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
-src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
+src/foreground.js   Which app's window is in front, for Ctrl+Tab (a small PowerShell helper, Windows)
 src/raise.js        Brings Codex's window, or a web chat's browser window, to the front (Windows)
 src/folder-mode.js  Folder mode's sidebar: its window, docked at the screen's left edge
 src/folder-tree.js  Sessions and threads → machine › folder tree, for the sidebar
@@ -623,7 +629,8 @@ src/folder-preload.js What the sidebar's page may ask of the main process
 src/appbar.js       Docks a window as a Windows app bar (a small PowerShell helper)
 src/maximize.js     Maximizes the Claude and Codex windows beside the sidebar (Windows)
 src/step-keys.js    Ctrl+Tab through the sidebar while Claude, Codex or the sidebar is in front
-src/flags.js        Folder mode's follow-up flags: which ones your next message takes off
+src/marks.js        Folder mode's Mark as Ready: which marks your next message takes off
+src/hidden.js       Sessions hidden from the sidebar: which ones show again
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
 src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
