@@ -19,7 +19,7 @@ const UUID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
 const SITES = {
   claude: {
     origin: 'https://claude.ai',
-    name: 'claude.ai',
+    name: 'Claude Chat',            // what the pet calls its chats: the Claude app's sessions are "Claude"
     conversation: new RegExp(`^/chat/${UUID}(?:/|$)`, 'i'),
     suffix: /\s*[-–]\s*Claude$/,
     home: 'Claude',
@@ -34,7 +34,7 @@ const SITES = {
   // A conversation is /app/<16 hex digits>; its tab is "<title> - Google Gemini".
   gemini: {
     origin: 'https://gemini.google.com',
-    name: 'Gemini',
+    name: 'Gemini Chat',
     conversation: /^\/app\/([0-9a-f]{12,32})(?:\/|$)/i,
     suffix: /\s*[-–]\s*Google Gemini$/,
     home: 'Google Gemini',

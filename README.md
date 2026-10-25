@@ -323,7 +323,7 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 Chats on claude.ai, chatgpt.com and gemini.google.com can get bubbles too, from a small browser
 extension in [browser-extension/](browser-extension/) for Chrome, Edge and other Chromium browsers.
 It's **off** until you turn it on: tray menu → *Web chats* → *Show claude.ai, ChatGPT and Gemini
-chats*. Their bubbles are marked "claude.ai", "ChatGPT" or "Gemini" (e.g. "ChatGPT · 2m").
+chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini Chat" (e.g. "ChatGPT · 2m").
 
 - **Setting up:** turning it on writes a native messaging host (a manifest and a small launcher) to
   `%APPDATA%\claude-pet\webchats` and registers it for Chrome and Edge under

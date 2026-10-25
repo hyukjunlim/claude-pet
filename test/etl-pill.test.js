@@ -151,12 +151,12 @@ test('the eTL 비서 bubble has a × to turn it off; a running session still has
 test('a web chat says which chat it is, and only a Ready one has a ×', () => {
   const [ready, running] = page()([
     { id: 'web:chatgpt:1', kind: 'web', site: 'chatgpt', siteName: 'ChatGPT', status: 'review', title: 'Essay outline', detail: 'Reply ready', since: Date.now() },
-    { id: 'web:claude:2', kind: 'web', site: 'claude', siteName: 'claude.ai', status: 'running', title: 'Trip ideas', detail: 'Writing a reply', since: Date.now() },
+    { id: 'web:claude:2', kind: 'web', site: 'claude', siteName: 'Claude Chat', status: 'running', title: 'Trip ideas', detail: 'Writing a reply', since: Date.now() },
   ]);
   assert.equal(find(ready, 'what').textContent, 'ChatGPT');
   assert.equal(ready.getAttribute('aria-label'), 'Essay outline, Reply ready, Click to open in the browser');
   assert.ok(find(ready, 'close'));
-  assert.equal(find(running, 'what').textContent, 'claude.ai');
+  assert.equal(find(running, 'what').textContent, 'Claude Chat');
   assert.equal(find(running, 'close'), null);
 });
 
