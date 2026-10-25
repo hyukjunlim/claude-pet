@@ -1,6 +1,6 @@
 /* Folder mode: a sidebar in the manner of the Claude app's, with the pet and the weekly limits
-   docked at the bottom. Colors are the pet's own (pet.css), on an opaque page; in light mode the
-   page, the text and the selected row are the Claude app's sidebar's. */
+   docked at the bottom. Colors are the pet's own (pet.css), on an opaque page; the page, the text
+   and the selected row are the Claude app's sidebar's, light and dark. */
 
 :root {
   color-scheme: light dark;
@@ -25,11 +25,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: #262624;
+    --page: #1f1f1f;
     --hover: rgba(255, 255, 255, 0.06);
-    --selected: rgba(255, 255, 255, 0.11);
+    --selected: rgba(255, 255, 255, 0.147);   /* #404040 on the page */
     --surface: #30302e;
-    --text: #f3efe9;
+    --text: #efefef;
     --muted: #b2aaa1;
     --faint: #8a837b;
     --border: rgba(255, 255, 255, 0.10);
