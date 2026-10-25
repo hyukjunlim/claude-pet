@@ -1,14 +1,14 @@
 /* Folder mode: a sidebar in the manner of the Claude app's, with the pet and the weekly limits
    docked at the bottom. Colors are the pet's own (pet.css), on an opaque page; in light mode the
-   page and the text are the Claude app's. */
+   page, the text and the selected row are the Claude app's sidebar's. */
 
 :root {
   color-scheme: light dark;
-  --page: #f7f8f8;
-  --hover: rgba(31, 30, 29, 0.06);
-  --selected: rgba(31, 30, 29, 0.10);
+  --page: #fafafa;
+  --hover: rgba(25, 25, 25, 0.06);
+  --selected: rgba(25, 25, 25, 0.11);   /* #e1e1e1 on the page, as the app's selected row */
   --surface: #ffffff;
-  --text: #1f2328;
+  --text: #191919;
   --muted: #6f6a64;
   --faint: #9a948d;
   --border: rgba(31, 30, 29, 0.10);
