@@ -20,7 +20,7 @@
   const FOLD_KEY = 'claude-pet:folder-fold';   // folder key -> open, where you changed it
   const ORDER_KEY = 'claude-pet:folder-order'; // parent key -> its folders' keys, in your order
   const MACHINES = '*';                        // ... where the parent is the list of machines
-  const BASE_ZOOM = 1.2;                       // the text size at 100% (Ctrl 0), over folder.css's px
+  const BASE_ZOOM = 1.44;                      // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
 
   let hosts = [];
@@ -587,14 +587,14 @@
 
   // ---------------------------------------------------------- text size: Ctrl +, Ctrl -, Ctrl 0
 
-  const ZOOM_KEY = 'claude-pet:folder-zoom';
+  const ZOOM_KEY = 'claude-pet:sidebar-zoom';   // new with the 1.44: what was 120% is 100% now
   const ZOOMS = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
   const zoomLevelEl = document.getElementById('zoom-level');
   let zoomTimer = null;
 
   function setZoom(z, show) {
     zoom = Math.min(ZOOMS.at(-1), Math.max(ZOOMS[0], Number(z) || 1));
-    // The whole sidebar, as a browser's zoom does, from a 100% that is 1.2 times the CSS's sizes.
+    // The whole sidebar, as a browser's zoom does, from a 100% that is 1.44 times the CSS's sizes.
     document.documentElement.style.zoom = String(BASE_ZOOM * zoom);
     sizePet();
     try {

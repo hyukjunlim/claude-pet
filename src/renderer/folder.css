@@ -1,13 +1,14 @@
 /* Folder mode: a sidebar in the manner of the Claude app's, with the pet and the weekly limits
-   docked at the bottom. Colors are the pet's own (pet.css), on an opaque page. */
+   docked at the bottom. Colors are the pet's own (pet.css), on an opaque page; in light mode the
+   page and the text are the Claude app's. */
 
 :root {
   color-scheme: light dark;
-  --page: #f8f7f4;
+  --page: #f7f8f8;
   --hover: rgba(31, 30, 29, 0.06);
   --selected: rgba(31, 30, 29, 0.10);
   --surface: #ffffff;
-  --text: #1f1e1d;
+  --text: #1f2328;
   --muted: #6f6a64;
   --faint: #9a948d;
   --border: rgba(31, 30, 29, 0.10);
@@ -50,7 +51,7 @@ body {
   overflow: hidden;
   background: var(--page);
   color: var(--text);
-  font: 13.5px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font: 13.5px/1.35 "Inter Variable", Inter, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   user-select: none;
 }
 

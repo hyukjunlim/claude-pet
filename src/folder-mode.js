@@ -22,7 +22,7 @@ function clampWidth(width) {
 
 // The page's background (folder.css --page), light or dark.
 function pageColor() {
-  return nativeTheme.shouldUseDarkColors ? '#262624' : '#f8f7f4';
+  return nativeTheme.shouldUseDarkColors ? '#262624' : '#f7f8f8';
 }
 
 class FolderWindow {
