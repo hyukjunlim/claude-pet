@@ -74,14 +74,14 @@ test('WSL is one host whether the path came as a distro, a share, Codex\'s local
 
 test('Windows paths match without case, /mnt/c is this PC, and an inner folder is shown below its parent', () => {
   const [pc] = build(
-    [claude('home', 'C:\\Users\\Me'), claude('pet', 'c:\\users\\me\\claude-pet', { lastActivityAt: ago(0.5) })],
-    [codex('etl', '/mnt/c/Users/Me/claude-pet')],
+    [claude('home', 'C:\\Users\\Me'), claude('pet', 'c:\\users\\me\\ttokttok-pet', { lastActivityAt: ago(0.5) })],
+    [codex('etl', '/mnt/c/Users/Me/ttokttok-pet')],
   );
   assert.equal(pc.key, 'pc');
   const [me] = pc.folders;
   assert.equal(me.label, 'C:\\Users\\Me');
   assert.deepEqual(titles(me), ['home']);
-  assert.deepEqual(me.children.map((c) => [c.label, titles(c)]), [['claude-pet', ['pet', 'etl']]]);
+  assert.deepEqual(me.children.map((c) => [c.label, titles(c)]), [['ttokttok-pet', ['pet', 'etl']]]);
 });
 
 test('sessions without a folder of their own go under No folder', () => {

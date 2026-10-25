@@ -1,13 +1,13 @@
 import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
-// Claude Pet's mod for Claude Code. After each reply, Claude Code knows how much of the plan's
+// Ttokttok Pet's mod for Claude Code. After each reply, Claude Code knows how much of the plan's
 // limits the account has used (the 5-hour and the weekly window, and when each resets). This
 // saves those figures for the pet, and does nothing else:
 //
-//   <home>/.claude-pet/usage.json
+//   <home>/.ttokttok-pet/usage.json
 //   { "version": 1, "at": <ms>, "limits": [{ "kind": "seven_day", "percent": 45, "resetsAt": <ms> }, …] }
 //
-// The pet installs the mod at <home>/.claude-pet/mod/pet-usage, so the file is two folders
+// The pet installs the mod at <home>/.ttokttok-pet/mod/pet-usage, so the file is two folders
 // up from it. A WSL session runs the copy on the Windows side (/mnt/c/…) and so writes the file
 // the pet reads there.
 

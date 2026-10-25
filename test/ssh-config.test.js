@@ -33,7 +33,7 @@ test('the hosts are the Host names without wildcards, with their settings', () =
 });
 
 test("~/.ssh/config's hosts follow Includes, merge repeats, and leave out git hosting", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-ssh-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-ssh-'));
   const sshDir = path.join(home, '.ssh');
   try {
     assert.deepEqual(sshConfigHosts({ home }), [], 'no config');

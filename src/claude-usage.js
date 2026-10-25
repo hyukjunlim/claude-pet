@@ -1,8 +1,8 @@
 'use strict';
 
-// Gathers Claude's plan usage from everywhere Claude Pet's mod (claude-mod/) saves it, for the
+// Gathers Claude's plan usage from everywhere Ttokttok Pet's mod (claude-mod/) saves it, for the
 // weekly-limit meter (usage.js reads the file, and combineClaudeUsage picks the newest):
-//   - 'local': ~/.claude-pet/usage.json, which the mod writes after each reply of a Claude Code
+//   - 'local': ~/.ttokttok-pet/usage.json, which the mod writes after each reply of a Claude Code
 //     session on this PC or in WSL.
 //   - 'ssh:<host>:<port>': the same file on each SSH host the desktop app works on, sent by a
 //     ClaudeRemote watcher, which also says whether the mod is set up there.

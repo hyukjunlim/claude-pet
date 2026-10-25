@@ -31,7 +31,7 @@ const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const EXIT_TIMEOUT_MS = 30_000;
 const MAX_CHANGES = 12;          // commit subjects listed in the dialog
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
-const REPO = 'hyukjunlim/claude-pet';
+const REPO = 'hyukjunlim/ttokttok-pet';
 const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 
@@ -84,7 +84,7 @@ const blocked = (message) => ({ status: 'blocked', message });
 //  | { status: 'blocked' | 'error', message }
 async function checkForUpdate(root) {
   if (!fs.existsSync(path.join(root, '.git'))) {
-    return blocked("This copy of Claude Pet wasn't installed with git, so it can't update itself. Download the latest version from GitHub instead.");
+    return blocked("This copy of Ttokttok Pet wasn't installed with git, so it can't update itself. Download the latest version from GitHub instead.");
   }
   try {
     const branch = await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -94,7 +94,7 @@ async function checkForUpdate(root) {
     const edited = await editedFiles(root);
     if (edited.length) {
       const shown = edited.slice(0, 3).join(', ') + (edited.length > 3 ? `, and ${edited.length - 3} more` : '');
-      return blocked(`These files have been changed in this copy: ${shown}. An update would overwrite them, so undo or save your changes first (a custom pet belongs in ~/.claude-pet/pets).`);
+      return blocked(`These files have been changed in this copy: ${shown}. An update would overwrite them, so undo or save your changes first (a custom pet belongs in ~/.ttokttok-pet/pets).`);
     }
     await git(root, ['fetch', '--quiet', REMOTE, `+refs/heads/${BRANCH}:${TRACKING}`], { timeout: FETCH_TIMEOUT_MS });
     const head = await git(root, ['rev-parse', 'HEAD']);
@@ -226,7 +226,7 @@ function fileLog(file) {
     const pad = (n) => String(n).padStart(2, '0');
     const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${now.toTimeString().slice(0, 8)}`;
     try {
-      fs.appendFileSync(file, `[claude-pet ${stamp}] updater: ${message}\n`);
+      fs.appendFileSync(file, `[ttokttok-pet ${stamp}] updater: ${message}\n`);
     } catch {
       // nowhere to report it
     }
@@ -268,7 +268,7 @@ function releaseChanges(body) {
 async function checkForRelease(version, { fetch = globalThis.fetch, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
   try {
     const res = await fetch(LATEST_RELEASE_API, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'claude-pet' },
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ttokttok-pet' },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.status === 404) return { status: 'none', message: 'Nothing has been published to download yet.', url: RELEASES_PAGE };

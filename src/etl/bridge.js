@@ -3,8 +3,8 @@
 // The eTL query bridge: a local, read-only channel that the chat folder's `node etl.js` uses to
 // ask the pet about eTL (PLAN 6.5). The pet holds the token; the chat AI only ever sees results.
 //
-// Transport: a named pipe on Windows (\\.\pipe\claude-pet-etl-<user>), a unix socket elsewhere
-// (~/.claude-pet/etl.sock, in a 0700 folder). Never TCP, so nothing is reachable from the network.
+// Transport: a named pipe on Windows (\\.\pipe\ttokttok-pet-etl-<user>), a unix socket elsewhere
+// (~/.ttokttok-pet/etl.sock, in a 0700 folder). Never TCP, so nothing is reachable from the network.
 // Protocol: the client sends one JSON line, {"cmd": "...", "args": {...}}; the bridge answers with
 // one JSON line, {"notice": NOTICE, "data": ...} or {"error": "..."}, and closes the connection.
 //
@@ -157,8 +157,8 @@ function userTag() {
 
 // etl-workspace/etl.js repeats this; keep the two in step.
 function defaultPipePath() {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\claude-pet-etl-${userTag()}`;
-  return path.join(os.homedir(), '.claude-pet', 'etl.sock');
+  if (process.platform === 'win32') return `\\\\.\\pipe\\ttokttok-pet-etl-${userTag()}`;
+  return path.join(os.homedir(), '.ttokttok-pet', 'etl.sock');
 }
 
 const isWindowsPipe = (p) => /^\\\\[.?]\\pipe\\/i.test(p);
@@ -173,7 +173,7 @@ function probe(p) {
 }
 
 function inUseError(p) {
-  const err = new Error(`eTL 조회 브리지를 시작할 수 없습니다. 다른 Claude Pet이 이미 실행 중인 것 같습니다 (${p}).`);
+  const err = new Error(`eTL 조회 브리지를 시작할 수 없습니다. 다른 Ttokttok Pet이 이미 실행 중인 것 같습니다 (${p}).`);
   err.code = 'EADDRINUSE';
   return err;
 }

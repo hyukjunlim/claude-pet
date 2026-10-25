@@ -209,7 +209,7 @@ const report = { type: 'chat', site: 'claude', url: `https://claude.ai/chat/${CO
 
 test("the background script adds the tab and window to each tab's report and passes it to the pet's host", () => {
   const b = background();
-  assert.equal(b.ports[0].name, 'com.hyukjunlim.claude_pet');
+  assert.equal(b.ports[0].name, 'com.hyukjunlim.ttokttok_pet');
   b.on.message(report, fromTab(7));
   b.on.message(report, {});                       // not from a tab
   b.on.message({ type: 'other' }, fromTab(7));

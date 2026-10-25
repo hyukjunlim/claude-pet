@@ -5,7 +5,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { app, BrowserWindow } = require('electron');
 const { watchWindowOrder } = require(path.resolve(__dirname, '../../src/window-order'));
-app.setPath('userData', path.join(app.getPath('temp'), `claude-pet-order-test-${process.pid}`));
+app.setPath('userData', path.join(app.getPath('temp'), `ttokttok-pet-order-test-${process.pid}`));
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const records = [], checks = [];
 const check = (name, pass) => { checks.push({ name, pass }); console.log(JSON.stringify({name,pass})); };

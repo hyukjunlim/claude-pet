@@ -7,7 +7,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
-const { REGISTRY, WebChatsFeature, batchPath, extensionId, launcher } = require('../src/webchats/feature');
+const { LEGACY_REGISTRY, REGISTRY, WebChatsFeature, batchPath, extensionId, launcher } = require('../src/webchats/feature');
 const { createHost, frame, frameReader } = require('../src/webchats/host');
 const { END_GRACE_MS } = require('../src/webchats/chats');
 
@@ -20,14 +20,14 @@ function feature(t, saved = {}) {
   const settings = { get: (k) => data[k], set: (p) => Object.assign(data, p) };
   const reg = [];
   const pipePath = process.platform === 'win32'
-    ? `\\\\.\\pipe\\claude-pet-webchats-test-${process.pid}-${Math.random().toString(36).slice(2)}`
+    ? `\\\\.\\pipe\\ttokttok-pet-webchats-test-${process.pid}-${Math.random().toString(36).slice(2)}`
     : path.join(dir, 'webchats.sock');
   const f = new WebChatsFeature({
     electron: { dialog: { showMessageBox: async () => ({ response: 1 }) }, shell: { openPath() {} } },
     settings,
     appRoot: ROOT,
     userData: dir,
-    exe: 'C:\\Users\\민수\\AppData\\Local\\Programs\\claude-pet\\Claude Pet.exe',
+    exe: 'C:\\Users\\민수\\AppData\\Local\\Programs\\ttokttok-pet\\Ttokttok Pet.exe',
     platform: 'win32',
     env: { LOCALAPPDATA: 'C:\\Users\\민수\\AppData\\Local', USERPROFILE: 'C:\\Users\\민수' },
     pipePath,
@@ -47,35 +47,41 @@ test("the extension's id comes from the key in its manifest", () => {
 
 test('a batch file names folders under the user profile through %VARIABLES%, so a non-ASCII user name stays out of it', () => {
   const env = { LOCALAPPDATA: 'C:\\Users\\민수\\AppData\\Local', APPDATA: 'C:\\Users\\민수\\AppData\\Roaming', USERPROFILE: 'C:\\Users\\민수' };
-  assert.equal(batchPath('C:\\Users\\민수\\AppData\\Local\\Programs\\claude-pet\\Claude Pet.exe', env), '%LOCALAPPDATA%\\Programs\\claude-pet\\Claude Pet.exe');
-  assert.equal(batchPath('c:\\users\\민수\\claude-pet\\src\\webchats\\host.js', env), '%USERPROFILE%\\claude-pet\\src\\webchats\\host.js');
+  assert.equal(batchPath('C:\\Users\\민수\\AppData\\Local\\Programs\\ttokttok-pet\\Ttokttok Pet.exe', env), '%LOCALAPPDATA%\\Programs\\ttokttok-pet\\Ttokttok Pet.exe');
+  assert.equal(batchPath('c:\\users\\민수\\ttokttok-pet\\src\\webchats\\host.js', env), '%USERPROFILE%\\ttokttok-pet\\src\\webchats\\host.js');
   assert.equal(batchPath('D:\\pet\\100%\\host.js', env), 'D:\\pet\\100%%\\host.js');
   assert.equal(batchPath('C:\\Users\\민수2\\x.exe', env), 'C:\\Users\\민수2\\x.exe');   // only a whole folder name counts
   const text = launcher({ exe: 'D:\\pet\\pet.exe', script: 'D:\\pet\\host.js', env });
   assert.equal(text, '@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"D:\\pet\\pet.exe" "D:\\pet\\host.js" %*\r\n');
 });
 
-test('turning web chats on registers one host with Chrome and Edge for this extension only; off removes it', async (t) => {
+test("turning web chats on registers one host with Chrome and Edge for this extension only, in place of Claude Pet's; off removes it", async (t) => {
   const { f, data, reg, dir } = feature(t);
   await f.register();
   const manifestPath = path.join(dir, 'webchats', 'host.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  assert.equal(manifest.name, 'com.hyukjunlim.claude_pet');
+  assert.equal(manifest.name, 'com.hyukjunlim.ttokttok_pet');
   assert.equal(manifest.type, 'stdio');
   assert.deepEqual(manifest.allowed_origins, ['chrome-extension://habdcjjcoianlobddinmnmmcpgolmohh/']);
   assert.equal(manifest.path, path.join(dir, 'webchats', 'host.cmd'));
   const cmd = fs.readFileSync(manifest.path, 'utf8');
-  assert.match(cmd, /^"%LOCALAPPDATA%\\Programs\\claude-pet\\Claude Pet\.exe" ".*host\.js" %\*\r$/m);
+  assert.match(cmd, /^"%LOCALAPPDATA%\\Programs\\ttokttok-pet\\Ttokttok Pet\.exe" ".*host\.js" %\*\r$/m);
   assert.deepEqual(reg, [
     ['reg.exe', 'add', REGISTRY.chrome, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f'],
     ['reg.exe', 'add', REGISTRY.edge, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f'],
+    ['reg.exe', 'delete', LEGACY_REGISTRY.chrome, '/f'],
+    ['reg.exe', 'delete', LEGACY_REGISTRY.edge, '/f'],
   ]);
-  assert.match(REGISTRY.chrome, /^HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\/);
-  assert.match(REGISTRY.edge, /^HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\/);
+  assert.match(REGISTRY.chrome, /^HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com\.hyukjunlim\.ttokttok_pet$/);
+  assert.match(REGISTRY.edge, /^HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com\.hyukjunlim\.ttokttok_pet$/);
+  assert.match(LEGACY_REGISTRY.chrome, /\\com\.hyukjunlim\.claude_pet$/);
   reg.length = 0;
   await f.setEnabled(false);
   assert.equal(data.webChats, false);
-  assert.deepEqual(reg, [['reg.exe', 'delete', REGISTRY.chrome, '/f'], ['reg.exe', 'delete', REGISTRY.edge, '/f']]);
+  assert.deepEqual(reg, [
+    ['reg.exe', 'delete', REGISTRY.chrome, '/f'], ['reg.exe', 'delete', REGISTRY.edge, '/f'],
+    ['reg.exe', 'delete', LEGACY_REGISTRY.chrome, '/f'], ['reg.exe', 'delete', LEGACY_REGISTRY.edge, '/f'],
+  ]);
 });
 
 test('off by default: nothing is registered and nothing listens', async (t) => {

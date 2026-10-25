@@ -1,4 +1,4 @@
-"""Generate "Clay", a terracotta pet for Claude Pet, as a Codex-compatible v2 atlas.
+"""Generate "Clay", a terracotta pet for Ttokttok Pet, as a Codex-compatible v2 atlas.
 
 Chunky pixel art (48x52 logical pixels per cell, scaled 4x into 192x208 cells), with
 selective two-tone outlines, smoother shading with

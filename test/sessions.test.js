@@ -274,7 +274,7 @@ test("clock skew is estimated from the last day's copies", () => {
 });
 
 test('terminal sessions skip SSH copies, deleted sessions and earlier IDs of desktop sessions', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   try {
     const projects = path.join(root, 'projects');
     const index = path.join(root, 'sessions', 'acct', 'org');
@@ -314,7 +314,7 @@ test('terminal sessions skip SSH copies, deleted sessions and earlier IDs of des
 });
 
 test('a running SSH session is named after its saved connection', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   try {
     const index = path.join(root, 'sessions', 'acct', 'org');
     fs.mkdirSync(index, { recursive: true });
@@ -340,7 +340,7 @@ test('a running SSH session is named after its saved connection', async () => {
 });
 
 test('the full list has every session in the index, quiet ones included, with where it runs', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   try {
     const index = path.join(root, 'sessions', 'acct', 'org');
     fs.mkdirSync(index, { recursive: true });
@@ -374,7 +374,7 @@ test('the full list has every session in the index, quiet ones included, with wh
 });
 
 test('file changes reach the pet right away, without waiting for the timer', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   const index = path.join(root, 'sessions', 'acct', 'org');
   const project = path.join(root, 'projects', 'C--repo');
   fs.mkdirSync(index, { recursive: true });

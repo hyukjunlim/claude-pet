@@ -1,4 +1,4 @@
-# Claude Pet
+# Ttokttok Pet
 
 A small animated companion that floats above your windows and shows what your
 Claude desktop **Code** sessions are doing, and your **Codex** threads too. It works like the
@@ -13,10 +13,10 @@ pets work here too. It can also sit as a sidebar that lists every session by mac
 The pet is built and tested on Windows. There are two ways to get it:
 
 - **Download it.** This needs no Node.js or npm. On the
-  [releases page](https://github.com/hyukjunlim/claude-pet/releases/latest), take
-  `Claude-Pet-Setup-<version>.exe` or `Claude-Pet-<version>-win.zip`. The installer puts the
+  [releases page](https://github.com/hyukjunlim/ttokttok-pet/releases/latest), take
+  `Ttokttok-Pet-Setup-<version>.exe` or `Ttokttok-Pet-<version>-win.zip`. The installer puts the
   pet in your user folder (no admin rights needed) and starts it; the zip you unzip anywhere and
-  start with `Claude Pet.exe`. The app isn't code-signed, so Windows SmartScreen may warn the
+  start with `Ttokttok Pet.exe`. The app isn't code-signed, so Windows SmartScreen may warn the
   first time: choose *More info* → *Run anyway*.
 - **Run it from the source**, as below. That's also the copy that updates itself with one click,
   and the one to hack on.
@@ -34,8 +34,8 @@ fine; `npm install` downloads Electron itself), and optionally Python, only to r
 built-in pet.
 
 ```bash
-git clone https://github.com/hyukjunlim/claude-pet.git
-cd claude-pet
+git clone https://github.com/hyukjunlim/ttokttok-pet.git
+cd ttokttok-pet
 npm install
 npm start
 ```
@@ -54,7 +54,7 @@ To update, use **Check for updates…** in the tray menu ([Updating](#updating))
 
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
 > do it by hand once: quit the pet from the tray menu, run `git pull` and then `npm install` in
-> its folder, and start it again (`npm start`, or double-click `Claude Pet.lnk`). Your settings
+> its folder, and start it again (`npm start`, or double-click `Ttokttok Pet.lnk`). Your settings
 > and pets are kept. If `git pull` complains about files you changed, undo those changes first.
 > After this, updates are one click.
 
@@ -64,22 +64,22 @@ To update, use **Check for updates…** in the tray menu ([Updating](#updating))
 npm start          # the pet appears in the bottom-right corner, plus a tray icon
 npm run demo       # cycles through every status with fake sessions
 npm test           # unit tests for the status logic
-npm run shortcut   # creates "Claude Pet.lnk" in this folder (Windows)
+npm run shortcut   # creates "Ttokttok Pet.lnk" in this folder (Windows)
 node src/sessions.js   # print what the pet currently sees, then exit
 npm run dist       # builds the installer and the zip into dist/ (Windows)
 ```
 
 From its first run on, the pet starts at login; untick *Start at login* in the tray menu to stop
-that. To start it yourself without a console window, double-click **Claude Pet.lnk** in this
+that. To start it yourself without a console window, double-click **Ttokttok Pet.lnk** in this
 folder. The flags `--start-at-login` and `--no-start-at-login` set the same option from the
 command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
-(or click the tray icon) for the menu, which also has *Restart Claude Pet* (after you edit its
+(or click the tray icon) for the menu, which also has *Restart Ttokttok Pet* (after you edit its
 code, say). Its settings are in two submenus: *Appearance* (pet, size, theme, weekly limits,
 animation) and *Sources* (Codex, Live Claude usage, Web chats, eTL).
 
-The pet logs what goes wrong (a crash, a link that wouldn't open) to `claude-pet.log` in
-`%APPDATA%\claude-pet\logs` (`~/Library/Logs/claude-pet` on macOS). Past 1 MB it starts over and
-keeps the previous log as `claude-pet.old.log`.
+The pet logs what goes wrong (a crash, a link that wouldn't open) to `ttokttok-pet.log` in
+`%APPDATA%\ttokttok-pet\logs` (`~/Library/Logs/ttokttok-pet` on macOS). Past 1 MB it starts over and
+keeps the previous log as `ttokttok-pet.old.log`.
 
 ## Updating
 
@@ -96,8 +96,8 @@ says it worked, or why it didn't (the old version is kept, and the log has the d
 checks when you ask.
 
 - **Your things are kept.** Settings, your pets and the log live outside this folder
-  (`%APPDATA%\claude-pet` and `~/.claude-pet/pets`), so an update never touches them. Keep a
-  customized pet in `~/.claude-pet/pets`, not in this folder's `pets/`.
+  (`%APPDATA%\ttokttok-pet` and `~/.ttokttok-pet/pets`), so an update never touches them. Keep a
+  customized pet in `~/.ttokttok-pet/pets`, not in this folder's `pets/`.
 - **It needs git** (the pet is a clone of this repo) and Node on your PATH, which the source
   install already asked for. It says why when it can't update: the folder isn't a git clone, isn't on
   `main`, has commits that aren't on GitHub's `main`, or has edited files that an update would
@@ -105,10 +105,32 @@ checks when you ask.
 - **Installed before this existed?** That version has no such menu item. Update it by hand once,
   as described under [Install](#install).
 
+### Coming from Claude Pet
+
+Ttokttok Pet was called Claude Pet until 0.5. The first time 0.5 starts, it moves what Claude Pet
+kept, so nothing is lost:
+
+- `%APPDATA%\claude-pet` (settings, the eTL token, marks, the log) becomes `%APPDATA%\ttokttok-pet`.
+- `~/.claude-pet` (your pets and the [live usage](#live-claude-usage) mod) becomes
+  `~/.ttokttok-pet`: on this PC right away, in WSL and on SSH hosts as the pet next reaches them.
+  Claude Code sessions that were already running keep saving usage to the old place until you
+  restart them, so the meter may show older figures until then.
+- Start at login and the web chats host take the new name.
+
+Two things are yours to do:
+
+- **The browser extension:** reload it on the extensions page, or restart the browser. If you
+  moved the pet's folder, load it again from there.
+- **A downloaded copy:** the installer puts Ttokttok Pet beside Claude Pet, not over it. Uninstall
+  Claude Pet in Windows Settings → Apps.
+
+A copy from the source keeps updating where it is (GitHub sends the old address on), and its
+folder can keep the name `claude-pet`.
+
 ## Building the installer
 
-`npm run dist` builds `Claude-Pet-Setup-<version>.exe` (a per-user installer) and
-`Claude-Pet-<version>-win.zip` (unzip and run) into `dist/`, with
+`npm run dist` builds `Ttokttok-Pet-Setup-<version>.exe` (a per-user installer) and
+`Ttokttok-Pet-<version>-win.zip` (unzip and run) into `dist/`, with
 [electron-builder](https://www.electron.build/); the settings are under `build` in
 [package.json](package.json). The first build downloads a few tools and takes a while. The app is
 packed as plain files, not an `app.asar`: the pet copies its Claude Code mod and the eTL workspace
@@ -212,7 +234,7 @@ conversation you open fills the rest of the screen.
   take the colors of the Claude app's sidebar. Tray menu → *Appearance* → *Theme* picks light, dark
   or the Windows app mode for all of the pet's windows.
 - **Saved:** the order, folding, text size, hidden sessions and marks are in
-  `%APPDATA%\claude-pet\settings.json`.
+  `%APPDATA%\ttokttok-pet\settings.json`.
 
 ## How it knows what Claude is doing
 
@@ -333,8 +355,8 @@ It's **off** until you turn it on: tray menu → *Sources* → *Web chats* → *
 and Gemini chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini Chat" (e.g. "ChatGPT · 2m").
 
 - **Setting up:** turning it on writes a native messaging host (a manifest and a small launcher) to
-  `%APPDATA%\claude-pet\webchats` and registers it for Chrome and Edge under
-  `HKCU\Software\…\NativeMessagingHosts\com.hyukjunlim.claude_pet`, which needs no admin rights;
+  `%APPDATA%\ttokttok-pet\webchats` and registers it for Chrome and Edge under
+  `HKCU\Software\…\NativeMessagingHosts\com.hyukjunlim.ttokttok_pet`, which needs no admin rights;
   other Chromium browsers, such as Aside, read Chrome's. Then load the extension once: open the
   browser's extensions page (`chrome://extensions`, `edge://extensions`), turn on *Developer mode*,
   choose *Load unpacked* and pick the folder that *Open the extension folder* shows. The key in the
@@ -342,9 +364,9 @@ and Gemini chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini 
   is. Turning web chats off removes the registration.
 
   Without the tray menu (say, an assistant setting the pet up for you): quit the pet, set
-  `"webChats": true` in `%APPDATA%\claude-pet\settings.json`, and start it again; it registers the
+  `"webChats": true` in `%APPDATA%\ttokttok-pet\settings.json`, and start it again; it registers the
   host as it starts. The extension's folder is `browser-extension` in the source folder, or
-  `resources\app\browser-extension` next to `Claude Pet.exe` in a downloaded copy. Loading it
+  `resources\app\browser-extension` next to `Ttokttok Pet.exe` in a downloaded copy. Loading it
   (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
 - **Running** while a reply is being written, **Ready** once it's done. Ready stays until you close
   it with × (or the sidebar's *Mark as done*) or send another message, looked at or not. A
@@ -354,7 +376,7 @@ and Gemini chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini 
 - **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
   reply is being written and whether you're looking at it. Never the messages. The extension only
   reads the page and makes no requests of its own; the host hands the tabs' reports to the pet over
-  a local named pipe (`\\.\pipe\claude-pet-webchats-<user>`), not the network.
+  a local named pipe (`\\.\pipe\ttokttok-pet-webchats-<user>`), not the network.
 - **How it knows a reply is being written:** by the site's stop control. On claude.ai the message
   being written carries `data-is-streaming="true"`. ChatGPT serves two different pages: on one, the
   send button carries `data-stop-generating` and the message `data-message-streaming`; on the other,
@@ -402,16 +424,16 @@ the meter off. The pet reads the figures from files; it contacts no server itsel
 
 The pet comes with a small mod for Claude Code ([claude-mod/](claude-mod)). After each reply, Claude
 Code knows how much of your plan's limits the account has used, and when they reset; the mod
-saves those figures to `~/.claude-pet/usage.json`, and does nothing else. The weekly-limit meter
+saves those figures to `~/.ttokttok-pet/usage.json`, and does nothing else. The weekly-limit meter
 then follows your usage as it happens, from any session, whether you're at the PC or not.
 
 **Setting it up.** The pet asks once, on its first start, or as soon as it finds Claude Code in WSL.
 Later, use tray menu → *Sources* → *Live Claude usage*, which has a checkbox per machine. The
 desktop app isn't needed: Claude Code reads the same settings whether you start it from a terminal or the app does.
 
-- **This PC:** the pet copies the mod to `~/.claude-pet/mod/pet-usage` and adds two entries to
+- **This PC:** the pet copies the mod to `~/.ttokttok-pet/mod/pet-usage` and adds two entries to
   the `env` of Claude Code's settings (`~/.claude/settings.json`, backed up first to
-  `settings.json.claude-pet.bak`):
+  `settings.json.ttokttok-pet.bak`):
   - `CLAUDE_CODE_PLUGIN_DIRS`: the mod's folder, after any folders you already list there.
   - `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`: `1`, which mods need. This turns function hooks on for
     every Claude Code session on the machine.
@@ -487,7 +509,7 @@ an **eTL 비서** bubble at the end of the others: clicking it goes back to the 
 the folder, or starts one (without Codex, it opens the folder). The folder holds instructions for Claude and Codex
 (`AGENTS.md`, `CLAUDE.md`), a few skills (`/briefing`, `/deadlines`, `/todo`) and `etl.js`, a small
 command the AI runs to ask the pet. The AI never sees the token: `etl.js` sends the question to
-the running pet over a local named pipe (`~/.claude-pet/etl.sock` on macOS and Linux), the pet
+the running pet over a local named pipe (`~/.ttokttok-pet/etl.sock` on macOS and Linux), the pet
 asks eTL, and only the answer goes back. With the pet closed or eTL off, the AI says so. When
 the pet updates, the folder's files are updated too, except `todos.md`.
 
@@ -566,8 +588,8 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
 - **Rows 0–8** are the animations, with these frame counts: `idle` 6, `running-right` 8,
   `running-left` 8, `waving` 4, `jumping` 5, `failed` 8, `waiting` 6, `running` 6, `review` 6.
 - **Rows 9–10** hold 16 clockwise look directions, the first looking straight up. ChatGPT's pet
-  uses them to follow the cursor; Claude Pet doesn't.
-- **Pixel art:** add `"pixelArt": true` to keep it crisp at every size (this is a Claude Pet
+  uses them to follow the cursor; Ttokttok Pet doesn't.
+- **Pixel art:** add `"pixelArt": true` to keep it crisp at every size (this is a Ttokttok Pet
   extension to the format).
 - **Tray icon (optional):** put a `tray.png` (16 px) next to the sprite sheet, optionally with
   `tray@1.5x.png` (24 px) and `tray@2x.png` (32 px). The tray icon then switches whenever that
@@ -576,7 +598,7 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
 Pets are loaded from these folders:
 
 1. `pets/` in this project, for the built-in pet, Clay.
-2. `~/.claude-pet/pets/` for your own pets. Tray menu → *Appearance* → *Pet* → *Open my pets folder* opens it.
+2. `~/.ttokttok-pet/pets/` for your own pets. Tray menu → *Appearance* → *Pet* → *Open my pets folder* opens it.
 3. `~/.codex/pets/`, where pets you hatch in ChatGPT/Codex with the `hatch-pet` skill show up
    automatically.
 
@@ -594,12 +616,12 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 
 - **A separate overlay window.** It's frameless, transparent, always on top, off the taskbar,
   shadowless and never takes focus: `frame:false, transparent:true, alwaysOnTop,
-  skipTaskbar, focusable:false`, then `setAlwaysOnTop(true,'floating')`. On Windows Claude Pet
+  skipTaskbar, focusable:false`, then `setAlwaysOnTop(true,'floating')`. On Windows Ttokttok Pet
   uses `'pop-up-menu'` instead: there `'floating'` also puts the window just behind the taskbar,
   and when the taskbar isn't on top at that moment, the pet isn't either.
 - **Clicks pass through.** The window runs `setIgnoreMouseEvents(true,{forward:true})` so it
   still receives mouse movement. The page tests whether the cursor is over the pet and only then
-  asks for real clicks. Claude Pet doesn't do that, because it needs two programs to agree on
+  asks for real clicks. Ttokttok Pet doesn't do that, because it needs two programs to agree on
   whether the window is taking clicks, and they can stop agreeing: on Windows the forwarded mouse
   moves can stop coming, and watching the cursor from the main process instead left the pet deaf
   until the mouse moved, after a virtual-desktop switch. Instead the window is cut to what's
@@ -608,13 +630,13 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
   nothing to track, and a click anywhere else goes to the window behind. The cost is that the
   bubbles' shadows, and the weekly-limit bubble, take clicks too.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
-  plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
+  plays three times, then settles into an idle loop running at one-sixth speed. Ttokttok Pet
   instead plays it twice and rests on its first frame. Its reactions to you (the jump on hover,
   the wave on a click) play twice, each frame held 25% longer, so they're easy to see.
 - **Look directions.** While calm, the eyes follow the cursor: `atan2(dx, -dy)` is split into
-  sixteen 22.5° sectors, which select a cell in rows 9–10. Claude Pet leaves this out.
+  sixteen 22.5° sectors, which select a cell in rows 9–10. Ttokttok Pet leaves this out.
 - **Throw physics.** 16 ms ticks, friction 0.88 per tick, bounce 0.7, and a stop below 65 px/s
-  or after 900 ms. Claude Pet uses the same numbers.
+  or after 900 ms. Ttokttok Pet uses the same numbers.
 
 ## Project layout
 

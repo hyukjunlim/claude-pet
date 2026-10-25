@@ -47,7 +47,7 @@
   api.onUsage((items) => renderMeter(Array.isArray(items) ? items : []));
   api.onPet((pet) => {
     player.setSheet(pet);
-    petEl.setAttribute('aria-label', `${pet.displayName}, your Claude pet`);
+    petEl.setAttribute('aria-label', `${pet.displayName}, your pet`);
     petScale = Number(pet.scale) || 0.5;
     sizePet();
   });

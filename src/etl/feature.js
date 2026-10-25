@@ -186,7 +186,7 @@ class EtlFeature extends EventEmitter {
     if (isInside(to, this.appRoot)) {
       const { response } = await dialog.showMessageBox({
         type: 'warning',
-        title: 'Claude Pet',
+        title: 'Ttokttok Pet',
         message: '펫 폴더 안을 채팅 폴더로 고르셨습니다.',
         detail: '채팅 AI가 펫의 코드와 설정까지 보게 되고, 펫을 다시 설치하면 할 일 목록(todos.md)도 함께 지워질 수 있습니다. 그래도 이 위치를 쓸까요?',
         buttons: ['이 위치 사용', '취소'],
@@ -202,7 +202,7 @@ class EtlFeature extends EventEmitter {
       this.electron.shell.openPath(to);
     } catch (err) {
       this.log('etl workspace move:', err.message);
-      dialog.showErrorBox('Claude Pet', `채팅 폴더를 만들지 못했습니다.\n${err.message}`);
+      dialog.showErrorBox('Ttokttok Pet', `채팅 폴더를 만들지 못했습니다.\n${err.message}`);
     }
   }
 
@@ -303,7 +303,7 @@ class EtlFeature extends EventEmitter {
     const where = this.codexInstalled() ? 'Codex의 eTL 비서 대화' : 'eTL 채팅 폴더';
     const { response } = await this.electron.dialog.showMessageBox({
       type: 'question',
-      title: 'Claude Pet',
+      title: 'Ttokttok Pet',
       message: 'eTL 비서 말풍선을 켤까요?',
       detail: `펫 위에 "eTL 비서" 말풍선을 늘 띄워 두고, 누르면 ${where}로 바로 갑니다. 나중에 트레이 메뉴의 Sources → eTL에서 바꿀 수 있습니다.`,
       buttons: ['켜기', '나중에'],

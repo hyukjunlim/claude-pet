@@ -1,8 +1,8 @@
 'use strict';
 
 // Reads Claude's plan usage on an SSH host. A Claude Code session the desktop app runs over SSH,
-// or that you start there from a terminal, runs on the host, so Claude Pet's mod (claude-mod/, set
-// up there from the tray menu) saves the usage there, to ~/.claude-pet/usage.json. The pet keeps a small read-only watcher running on the
+// or that you start there from a terminal, runs on the host, so Ttokttok Pet's mod (claude-mod/, set
+// up there from the tray menu) saves the usage there, to ~/.ttokttok-pet/usage.json. The pet keeps a small read-only watcher running on the
 // host (see ssh-watcher.js) that sends the file whenever it changes, and whether the mod is set up.
 
 const { SshWatcher } = require('./ssh-watcher');
@@ -23,8 +23,9 @@ def exit_with_the_pet():
 threading.Thread(target=exit_with_the_pet, daemon=True).start()
 
 HOME = os.path.expanduser('~')
-USAGE = os.path.join(HOME, '.claude-pet', 'usage.json')
-MANIFEST = os.path.join(HOME, '.claude-pet', 'mod', 'pet-usage', '.claude-plugin', 'plugin.json')
+USAGE = os.path.join(HOME, '.ttokttok-pet', 'usage.json')
+# the mod, and Claude Pet's copy from before the rename, which the pet's next 'update' moves over
+MANIFESTS = [os.path.join(HOME, d, 'mod', 'pet-usage', '.claude-plugin', 'plugin.json') for d in ('.ttokttok-pet', '.claude-pet')]
 SETTINGS = os.path.join(os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude'), 'settings.json')
 
 def send(obj):
@@ -48,9 +49,9 @@ def read_json(path):
 def mod_state():
     env = (read_json(SETTINGS) or {}).get('env') or {}
     dirs = [d.replace(chr(92), '/').rstrip('/') for d in str(env.get('CLAUDE_CODE_PLUGIN_DIRS') or '').split(os.pathsep) if d]
-    ours = any(d.endswith('/.claude-pet/mod/pet-usage') for d in dirs)
-    return {'version': (read_json(MANIFEST) or {}).get('version'),
-            'enabled': ours and env.get('CLAUDE_CODE_ENABLE_FUNCTION_HOOKS') == '1'}
+    ours = any(d.endswith('/.ttokttok-pet/mod/pet-usage') or d.endswith('/.claude-pet/mod/pet-usage') for d in dirs)
+    version = next((v for v in ((read_json(m) or {}).get('version') for m in MANIFESTS) if v), None)
+    return {'version': version, 'enabled': ours and env.get('CLAUDE_CODE_ENABLE_FUNCTION_HOOKS') == '1'}
 
 seen = {}
 last_beat = 0
@@ -65,7 +66,7 @@ while True:
         if s is None or usage is not None:   # else half written: read it again next round
             seen['usage'] = s
             send({'usage': usage})
-    s = [stamp(MANIFEST), stamp(SETTINGS)]
+    s = [stamp(m) for m in MANIFESTS] + [stamp(SETTINGS)]
     if s != seen.get('mod', 0):
         seen['mod'] = s
         send({'mod': mod_state()})

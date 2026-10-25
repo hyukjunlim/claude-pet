@@ -5,7 +5,7 @@
 //   v1: 1536x1872, 8x9 cells of 192x208 (no look directions)
 //   v2: 1536x2288, 8x11 cells of 192x208 (rows 9-10 = 16 look directions)
 //
-// Search order: bundled pets, ~/.claude-pet/pets, ${CODEX_HOME:-~/.codex}/pets.
+// Search order: bundled pets, ~/.ttokttok-pet/pets, ${CODEX_HOME:-~/.codex}/pets.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -21,7 +21,7 @@ function petRoots(appRoot) {
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
   return [
     { source: 'built-in', dir: path.join(appRoot, 'pets') },
-    { source: 'user', dir: path.join(os.homedir(), '.claude-pet', 'pets') },
+    { source: 'user', dir: path.join(os.homedir(), '.ttokttok-pet', 'pets') },
     { source: 'codex', dir: path.join(codexHome, 'pets') },
   ];
 }

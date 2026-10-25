@@ -58,7 +58,7 @@ class FolderWindow {
       y: wa.y,
       width: this.width,
       height: wa.height,
-      title: 'Claude Pet',
+      title: 'Ttokttok Pet',
       frame: false,
       resizable: false,
       minimizable: false,

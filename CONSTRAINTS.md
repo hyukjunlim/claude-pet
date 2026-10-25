@@ -1,6 +1,6 @@
 # Constraints
 
-Hard constraints for Claude Pet. Change them only with the owner's approval.
+Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
 
 ## Platform and runtime
 - Windows 10/11 x64 only.

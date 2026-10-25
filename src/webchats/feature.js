@@ -9,7 +9,7 @@
 //     (webchats\), and points Chrome's and Edge's HKCU\Software\…\NativeMessagingHosts at it, which
 //     needs no admin rights (other Chromium browsers, such as Aside, read Chrome's). Only the
 //     extension with this key may start the host;
-//   - listens on a local named pipe, \\.\pipe\claude-pet-webchats-<user>, which the hosts (host.js)
+//   - listens on a local named pipe, \\.\pipe\ttokttok-pet-webchats-<user>, which the hosts (host.js)
 //     connect to. Nothing is reachable from the network, and the pet contacts no server.
 // The extension is loaded by hand (Developer mode, then Load unpacked) from the folder that the
 // menu's "Open the extension folder" shows. Turning web chats off removes the registration.
@@ -23,11 +23,13 @@ const { execFile } = require('node:child_process');
 const { defaultPipePath } = require('./host');
 const { WebChats } = require('./chats');
 
-const HOST_NAME = 'com.hyukjunlim.claude_pet';
-const REGISTRY = {
-  chrome: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`,
-  edge: `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${HOST_NAME}`,
-};
+const HOST_NAME = 'com.hyukjunlim.ttokttok_pet';
+const registryKeys = (name) => ({
+  chrome: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${name}`,
+  edge: `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${name}`,
+});
+const REGISTRY = registryKeys(HOST_NAME);
+const LEGACY_REGISTRY = registryKeys('com.hyukjunlim.claude_pet');   // Claude Pet's, before the rename
 const MAX_LINE = 64 * 1024;
 const MAX_HOSTS = 16;          // one per browser profile with the extension
 
@@ -116,8 +118,8 @@ class WebChatsFeature extends EventEmitter {
     await this.#run();
     const { response } = await this.electron.dialog.showMessageBox({
       type: 'info',
-      title: 'Claude Pet',
-      message: 'Load the Claude Pet extension in Chrome or Edge',
+      title: 'Ttokttok Pet',
+      message: 'Load the Ttokttok Pet extension in Chrome or Edge',
       detail: 'Open the extensions page (chrome://extensions or edge://extensions), turn on Developer mode, '
         + 'choose "Load unpacked" and pick the folder the pet opens. A browser that already has it picks the pet '
         + 'up within half a minute.',
@@ -142,19 +144,22 @@ class WebChatsFeature extends EventEmitter {
     fs.writeFileSync(cmd, launcher({ exe: this.exe, script, env: this.env }));
     fs.writeFileSync(manifest, `${JSON.stringify({
       name: HOST_NAME,
-      description: 'Claude Pet web chats',
+      description: 'Ttokttok Pet web chats',
       path: cmd,
       type: 'stdio',
       allowed_origins: [`chrome-extension://${this.extensionId()}/`],
     }, null, 2)}\n`);
     for (const key of Object.values(REGISTRY)) await this.#reg(['add', key, '/ve', '/t', 'REG_SZ', '/d', manifest, '/f']);
+    await this.#unregisterKeys(Object.values(LEGACY_REGISTRY));
   }
 
   async unregister() {
     if (this.platform !== 'win32') return;
-    for (const key of Object.values(REGISTRY)) {
-      await this.#reg(['delete', key, '/f']).catch(() => {});   // already gone
-    }
+    await this.#unregisterKeys([...Object.values(REGISTRY), ...Object.values(LEGACY_REGISTRY)]);
+  }
+
+  async #unregisterKeys(keys) {
+    for (const key of keys) await this.#reg(['delete', key, '/f']).catch(() => {});   // already gone
   }
 
   dismiss(id) {
@@ -267,4 +272,4 @@ class WebChatsFeature extends EventEmitter {
   }
 }
 
-module.exports = { HOST_NAME, REGISTRY, WebChatsFeature, batchPath, extensionId, launcher };
+module.exports = { HOST_NAME, LEGACY_REGISTRY, REGISTRY, WebChatsFeature, batchPath, extensionId, launcher };

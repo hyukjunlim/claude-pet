@@ -184,7 +184,7 @@ test('links open the thread on its host', () => {
 });
 
 test('the tracker combines running threads here with unread threads on other hosts', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   try {
     const hash = 'b'.repeat(64);
     const remoteThread = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6c';
@@ -232,7 +232,7 @@ test('the tracker combines running threads here with unread threads on other hos
 });
 
 test('the full list has the threads the app lists, quiet ones included, but not helpers or chats', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   try {
     fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
       'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab', alias: 'lab-server' }],
@@ -319,7 +319,7 @@ test("a dot's name, last activity and subtasks come from the app's persisted sta
 // clock, rewrites the app's state file with `state` (or what `state(clock)` returns) and gives
 // back the sessions the pet would show.
 function dotTracker(first) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   const file = path.join(home, '.codex-global-state.json');
   let clock = T0;
   let version = 0;
@@ -413,7 +413,7 @@ test('an unread dot is Ready only when a turn came before the flag', async () =>
 });
 
 test('a dot that is mid-turn when the pet starts is working, and one that stopped is not', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   try {
     const file = path.join(home, '.codex-global-state.json');
     const statusAt = async (activity, unread = []) => {
@@ -538,7 +538,7 @@ test('the SSH watcher keeps the newest rate limits it has seen on the host', asy
 });
 
 test('the tracker shows threads running on an SSH host', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   const fake = new EventEmitter();
   Object.assign(fake, { files: new Map(), skew: SKEW, target: 'lab-server', port: null, identity: null, start() {}, stop() {} });
   const tracker = new CodexTracker({ ...pathsIn(home), remoteFactory: () => fake });
@@ -565,7 +565,7 @@ test('the tracker shows threads running on an SSH host', async () => {
 });
 
 test('the rate limits are the newest ones, from an old rollout here or from an SSH host', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   const fake = new EventEmitter();
   Object.assign(fake, { files: new Map(), skew: SKEW, limits: null, target: 'lab-server', port: null, identity: null, start() {}, stop() {} });
   const tracker = new CodexTracker({ ...pathsIn(home), remoteFactory: () => fake });
@@ -602,7 +602,7 @@ test('the rate limits are the newest ones, from an old rollout here or from an S
 const python = ['python3', 'python'].find((cmd) => spawnSync(cmd, ['-c', 'import sys; sys.exit(sys.version_info[0] != 3)']).status === 0);
 
 test('the watcher script streams a rollout and the lines added to it', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   const day = path.join(home, 'sessions', '2026', '09', '25');
   fs.mkdirSync(day, { recursive: true });
   const file = path.join(day, `rollout-2026-09-25T13-00-00-${THREAD}.jsonl`);
@@ -646,7 +646,7 @@ test('the watcher script streams a rollout and the lines added to it', { skip: !
 });
 
 test('the watcher script finds a new thread in the folder of the day at once, without walking the rest', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
   const child = spawn(python, ['-u', '-c', LOADER], { env: { ...process.env, CODEX_HOME: home }, windowsHide: true });
   try {
@@ -684,7 +684,7 @@ test('the watcher script finds a new thread in the folder of the day at once, wi
 });
 
 test('the watcher script sends the newest rate limits, even from a rollout too old to follow', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   const day = path.join(home, 'sessions', '2026', '09', '24');
   fs.mkdirSync(day, { recursive: true });
   const old = path.join(day, `rollout-2026-09-24T10-00-00-${THREAD}.jsonl`);

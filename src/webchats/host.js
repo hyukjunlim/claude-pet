@@ -1,6 +1,6 @@
 'use strict';
 
-// Claude Pet's native messaging host for the browser extension (browser-extension/). Chrome or
+// Ttokttok Pet's native messaging host for the browser extension (browser-extension/). Chrome or
 // Edge starts it when the extension connects, through the launcher the pet writes when web chats
 // are turned on (feature.js), and talks to it over stdin and stdout: each message is 4 bytes of
 // length (little-endian), then that much UTF-8 JSON. The host passes the tabs' reports on to the
@@ -33,8 +33,8 @@ function userTag() {
 }
 
 function defaultPipePath() {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\claude-pet-webchats-${userTag()}`;
-  return path.join(os.homedir(), '.claude-pet', 'webchats.sock');
+  if (process.platform === 'win32') return `\\\\.\\pipe\\ttokttok-pet-webchats-${userTag()}`;
+  return path.join(os.homedir(), '.ttokttok-pet', 'webchats.sock');
 }
 
 function frame(msg) {

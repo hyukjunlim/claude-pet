@@ -8,7 +8,7 @@ const path = require('node:path');
 const { Settings, DEFAULTS } = require('../src/settings');
 
 function settingsFile(t, content) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-settings-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-settings-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'settings.json');
   if (content !== undefined) fs.writeFileSync(file, content);

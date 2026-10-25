@@ -1,11 +1,11 @@
 'use strict';
 
-// Hands what each chat tab reports (content.js) to Claude Pet through its native messaging host,
+// Hands what each chat tab reports (content.js) to Ttokttok Pet through its native messaging host,
 // and brings a chat's tab and window forward when the pet asks. The host is a small program the
 // pet registers with Chrome and Edge when you turn web chats on; it talks to the running pet over
 // a local named pipe. While the pet isn't set up, connecting fails and is tried again later.
 
-const HOST = 'com.hyukjunlim.claude_pet';
+const HOST = 'com.hyukjunlim.ttokttok_pet';
 const RETRY_MS = 30_000;
 
 let port = null;

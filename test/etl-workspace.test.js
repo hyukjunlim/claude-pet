@@ -10,7 +10,7 @@ const {
 } = require('../src/etl/workspace');
 
 function tempDir(t, name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `claude-pet-etl-${name}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `ttokttok-pet-etl-${name}-`));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -227,11 +227,11 @@ test('isInside treats a folder as inside itself and resolves ..', () => {
 
 test('isInside ignores case on Windows and never matches across drives', () => {
   const opts = { platform: 'win32' };
-  assert.equal(isInside('C:\\Users\\A\\claude-pet\\x', 'c:\\users\\a\\CLAUDE-PET', opts), true);
-  assert.equal(isInside('c:/users/a/claude-pet/etl-workspace', 'C:\\Users\\A\\claude-pet\\', opts), true);
-  assert.equal(isInside('C:\\Users\\A\\claude-pet\\..\\Documents', 'C:\\Users\\A\\claude-pet', opts), false);
-  assert.equal(isInside('C:\\Users\\A\\claude-pet2', 'C:\\Users\\A\\claude-pet', opts), false);
-  assert.equal(isInside('D:\\Users\\A\\claude-pet', 'C:\\Users\\A\\claude-pet', opts), false);
+  assert.equal(isInside('C:\\Users\\A\\ttokttok-pet\\x', 'c:\\users\\a\\TTOKTTOK-PET', opts), true);
+  assert.equal(isInside('c:/users/a/ttokttok-pet/etl-workspace', 'C:\\Users\\A\\ttokttok-pet\\', opts), true);
+  assert.equal(isInside('C:\\Users\\A\\ttokttok-pet\\..\\Documents', 'C:\\Users\\A\\ttokttok-pet', opts), false);
+  assert.equal(isInside('C:\\Users\\A\\ttokttok-pet2', 'C:\\Users\\A\\ttokttok-pet', opts), false);
+  assert.equal(isInside('D:\\Users\\A\\ttokttok-pet', 'C:\\Users\\A\\ttokttok-pet', opts), false);
 });
 
 test('isInside follows the real paths of folders that exist', (t) => {

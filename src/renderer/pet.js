@@ -35,7 +35,7 @@
 
   api.onPet((pet) => {
     player.setSheet(pet);
-    petEl.setAttribute('aria-label', `${pet.displayName}, your Claude pet`);
+    petEl.setAttribute('aria-label', `${pet.displayName}, your pet`);
   });
   api.onMotion(({ alwaysAnimate }) => player.setAlwaysAnimate(alwaysAnimate));
 

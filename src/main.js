@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
@@ -31,13 +32,14 @@ const { settleMarks } = require('./marks');
 const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
+const { moveFolder } = require('./move-folder');
 
 const DEMO = process.argv.includes('--demo');
-// Debug aid: CLAUDE_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
+// Debug aid: TTOKTTOK_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
 // there, so a second copy can run next to the one you use.
-const DEBUG_USER_DATA = process.env.CLAUDE_PET_USER_DATA || null;
-const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
-const DEBUG_OPEN_AFTER_MS = Number(process.env.CLAUDE_PET_DEBUG_OPEN_AFTER_MS) || 0;
+const DEBUG_USER_DATA = process.env.TTOKTTOK_PET_USER_DATA || null;
+const DEBUG_CAPTURE_DIR = process.env.TTOKTTOK_PET_CAPTURE_DIR || null;
+const DEBUG_OPEN_AFTER_MS = Number(process.env.TTOKTTOK_PET_DEBUG_OPEN_AFTER_MS) || 0;
 
 const APP_ROOT = path.join(__dirname, '..');
 // A clone runs as `electron <folder>`, so the folder goes on the command line whenever the pet
@@ -70,7 +72,7 @@ const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // br
 const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;   // the only pages an eTL bubble opens
 const WEB_LINK = /^https:\/\/(claude\.ai|chatgpt\.com|gemini\.google\.com)\//;   // and a web chat's
 const FOREGROUND_HANDOFF_MS = 1500;
-const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as claude-pet.old.log
+const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as ttokttok-pet.old.log
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'pet', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -108,6 +110,7 @@ const usage = { claude: [], codex: null };   // Claude's readings from each plac
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
 let modBusy = null;             // what the Live Claude usage menu is doing, while it does it
+let userDataNote = null;        // what became of Claude Pet's %APPDATA% folder, for the log (userDataDir)
 const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 const wslAsked = new Set();     // the WSL distros checkWsl has asked this run
 let wslTimer = null;
@@ -118,17 +121,17 @@ let logBytes = 0;
 let update = null;              // what the last check found, when there's an update waiting
 let updateBusy = null;          // 'checking' while looking, 'asking' while a dialog is up
 
-// The pet usually runs without a console, so lines also go to claude-pet.log in the app's logs
-// folder (%APPDATA%\claude-pet\logs on Windows).
+// The pet usually runs without a console, so lines also go to ttokttok-pet.log in the app's logs
+// folder (%APPDATA%\ttokttok-pet\logs on Windows).
 function log(...args) {
   const now = new Date();
   const pad = (n, width = 2) => String(n).padStart(width, '0');
   const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const line = `[claude-pet ${day} ${now.toTimeString().slice(0, 8)}.${pad(now.getMilliseconds(), 3)}] ${format(...args)}`;
+  const line = `[ttokttok-pet ${day} ${now.toTimeString().slice(0, 8)}.${pad(now.getMilliseconds(), 3)}] ${format(...args)}`;
   console.log(line);
   try {
     if (!logFile) {
-      logFile = path.join(app.getPath('logs'), 'claude-pet.log');
+      logFile = path.join(app.getPath('logs'), 'ttokttok-pet.log');
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       logBytes = fs.statSync(logFile, { throwIfNoEntry: false })?.size || 0;
     }
@@ -292,7 +295,7 @@ function finishMove() {
 function createWindow() {
   win = new BrowserWindow({
     ...windowBounds(),
-    title: 'Claude Pet',
+    title: 'Ttokttok Pet',
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -711,7 +714,7 @@ function usageLabel(u) {
 
 // ---------------------------------------------------------------- live Claude usage (see claude-mod.js)
 
-const LIVE_USAGE_DOC = 'https://github.com/hyukjunlim/claude-pet#live-claude-usage';
+const LIVE_USAGE_DOC = 'https://github.com/hyukjunlim/ttokttok-pet#live-claude-usage';
 const WSL_CHECK_MS = 5 * 60_000;
 
 // The WSL distros Claude Code is known to be in: those the desktop app has run sessions in, and
@@ -816,7 +819,7 @@ async function runModTask(label, task) {
   } catch (err) {
     log('mod:', err.message);
     await dialog.showMessageBox({
-      type: 'warning', title: 'Claude Pet', message: "Couldn't change Claude Pet's mod for Claude Code.", detail: err.message,
+      type: 'warning', title: 'Ttokttok Pet', message: "Couldn't change Ttokttok Pet's mod for Claude Code.", detail: err.message,
     });
   } finally {
     modBusy = null;
@@ -887,14 +890,14 @@ async function offerLiveUsage() {
   settings.set({ claudeModOffered: true });   // before the dialog: checkWsl may call again while it's up
   const answer = await dialog.showMessageBox({
     type: 'question',
-    title: 'Claude Pet',
+    title: 'Ttokttok Pet',
     message: "Show Claude's weekly limit?",
     detail: [
-      "Claude Pet reads Claude's usage from a small mod for Claude Code, which saves your plan's",
+      "Ttokttok Pet reads Claude's usage from a small mod for Claude Code, which saves your plan's",
       "usage after each reply, as Claude reports it: how much of the weekly limit you've used,",
       'and when the week resets.',
       '',
-      'It puts the mod in ~/.claude-pet and adds two entries to the "env" of ~/.claude/settings.json',
+      'It puts the mod in ~/.ttokttok-pet and adds two entries to the "env" of ~/.claude/settings.json',
       `${here ? '' : `in ${elsewhere.join(', ')} `}(a backup is kept). Sessions you start from now on use it.`,
       '',
       'Tray menu → Sources → Live Claude usage changes this later.',
@@ -928,7 +931,7 @@ async function offerEtlConnection() {
 
   const answer = await dialog.showMessageBox({
     type: 'question',
-    title: 'Claude Pet',
+    title: 'Ttokttok Pet',
     message: 'eTL에 연결할까요?',
     detail: [
       '서울대 eTL을 쓰는 경우 과제 마감과 공지를 펫 알림으로 받을 수 있습니다.',
@@ -978,6 +981,7 @@ async function checkWsl() {
     wslAsked.add(distro);
     const r = await wslInstaller(distro, { action: 'status', windowsDir: localMod.dir });
     if (!r.ok) continue;
+    await moveWsl(distro, r.legacy === true);
     rememberWsl(distro, r.enabled);
     const had = settings.get('claudeCodeWsl')?.[distro] === true;
     if (r.claude === had) continue;
@@ -988,9 +992,9 @@ async function checkWsl() {
 }
 
 function trayTooltip() {
-  if (!sessions.length) return 'Claude Pet: all quiet';
+  if (!sessions.length) return 'Ttokttok Pet: all quiet';
   const top = sessions[0];
-  return `Claude Pet: ${top.badge || STATUS_LABEL[top.status]} · ${top.title}`.slice(0, 120);
+  return `Ttokttok Pet: ${top.badge || STATUS_LABEL[top.status]} · ${top.title}`.slice(0, 120);
 }
 
 // Claude's claude://code/continue?session=… links sit behind a server-side flag and quietly
@@ -1032,7 +1036,7 @@ function focusHandoffWindow() {
       resizable: false,
       skipTaskbar: true,
       show: false,
-      title: 'Claude Pet focus helper',
+      title: 'Ttokttok Pet focus helper',
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
   }
@@ -1377,8 +1381,8 @@ function buildMenu() {
   items.push({ type: 'separator' });
   if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
   if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
-  items.push({ label: 'Restart Claude Pet', click: restart });
-  items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
+  items.push({ label: 'Restart Ttokttok Pet', click: restart });
+  items.push({ label: 'Quit Ttokttok Pet', click: () => app.quit() });
   return Menu.buildFromTemplate(items);
 }
 
@@ -1530,7 +1534,7 @@ function createTray() {
   tray.on('right-click', show);
 }
 
-// Debug aid: CLAUDE_PET_CAPTURE_DIR=<dir> saves a PNG of the pet window after each change.
+// Debug aid: TTOKTTOK_PET_CAPTURE_DIR=<dir> saves a PNG of the pet window after each change.
 let captureCount = 0;
 function debugCapture(list) {
   const n = ++captureCount;
@@ -1552,7 +1556,7 @@ function truncate(s, n) {
 // ---------------------------------------------------------------- updates (see updater.js)
 
 const updateResultFile = () => path.join(app.getPath('userData'), 'update-result.json');
-const updateBox = (options) => dialog.showMessageBox({ title: 'Claude Pet', buttons: ['OK'], ...options });
+const updateBox = (options) => dialog.showMessageBox({ title: 'Ttokttok Pet', buttons: ['OK'], ...options });
 
 function updateLabel() {
   if (updateBusy === 'checking') return 'Checking for updates…';
@@ -1574,10 +1578,10 @@ async function checkUpdates() {
   if (update) return offerUpdate();
   if (found.status === 'current') {
     const at = app.isPackaged ? `Version ${app.getVersion()}.` : `Version ${app.getVersion()} (${found.head.slice(0, 7)}).`;
-    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: at });
+    return updateBox({ type: 'info', message: 'Ttokttok Pet is up to date.', detail: at });
   }
   if (found.status === 'none') {
-    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: `Version ${app.getVersion()}. ${found.message}` });
+    return updateBox({ type: 'info', message: 'Ttokttok Pet is up to date.', detail: `Version ${app.getVersion()}. ${found.message}` });
   }
   return updateBox({ type: 'warning', message: "Couldn't check for updates.", detail: found.message });
 }
@@ -1590,7 +1594,7 @@ async function offerRelease() {
   try {
     answer = await updateBox({
       type: 'question',
-      message: `Claude Pet ${version} is available to download.`,
+      message: `Ttokttok Pet ${version} is available to download.`,
       detail: [
         ...(changes.length ? ["What's new:", ...changes.map((line) => `• ${line}`), ''] : []),
         `This copy (${app.getVersion()}) was installed from a download, so it can't update itself. Get the new ` +
@@ -1616,7 +1620,7 @@ async function offerUpdate() {
   try {
     answer = await updateBox({
       type: 'question',
-      message: 'A new version of Claude Pet is available.',
+      message: 'A new version of Ttokttok Pet is available.',
       detail: [
         "What's new:",
         ...changes.map((subject) => `• ${subject}`),
@@ -1658,25 +1662,97 @@ async function showUpdateResult() {
     return;   // no update was run
   }
   if (result.ok) {
-    await updateBox({ type: 'info', message: 'Claude Pet was updated.', detail: `Now at ${String(result.to).slice(0, 7)}.` });
+    await updateBox({ type: 'info', message: 'Ttokttok Pet was updated.', detail: `Now at ${String(result.to).slice(0, 7)}.` });
   } else {
     await updateBox({
       type: 'warning',
       message: "The update didn't work.",
-      detail: `${result.message}\n\nClaude Pet is still on the old version. The log has the details.`,
+      detail: `${result.message}\n\nTtokttok Pet is still on the old version. The log has the details.`,
     });
   }
 }
 
+// ---------------------------------------------------------------- coming from Claude Pet
+
+// Until 0.5 the pet was Claude Pet, in %APPDATA%\claude-pet. The folder comes along whole (the
+// eTL token's key is in its Local State), copied if a browser's web chats host holds it. If even
+// that fails, this run stays there and the next one tries again.
+function userDataDir() {
+  const dir = path.join(app.getPath('appData'), 'ttokttok-pet');
+  const legacy = path.join(app.getPath('appData'), 'claude-pet');
+  try {
+    userDataNote = moveFolder(legacy, dir);
+    return dir;
+  } catch (err) {
+    userDataNote = `couldn't move ${legacy} (${err.code || err.message})`;
+    return fs.existsSync(dir) ? dir : legacy;
+  }
+}
+
+// The rest of Claude Pet's, once: Start at login under its name, and ~/.claude-pet
+// (LocalMod.adoptLegacy). Its copy of the mod stays until the WSL distros set up with it have
+// moved over too (moveWsl).
+function adoptClaudePet() {
+  if (userDataNote) log(userDataNote);
+  moveLoginItem();
+  try {
+    if (!localMod.adoptLegacy()) return;
+    log('moved ~/.claude-pet to ~/.ttokttok-pet');
+    if (settings.get('claudeModWslToMove') == null) {
+      const wsl = settings.get('claudeModWsl');
+      settings.set({ claudeModWslToMove: Object.keys(wsl).filter((d) => wsl[d]) });
+    }
+    if (!settings.get('claudeModWslToMove').length) localMod.dropLegacy();
+  } catch (err) {
+    log("couldn't move ~/.claude-pet:", err.message);
+  }
+}
+
+// Claude Pet started at login under its own name; if it did, this pet does in its place.
+function moveLoginItem() {
+  if (process.platform !== 'win32') return;
+  const run = ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'ClaudePet'];
+  try {
+    execFileSync('reg.exe', ['query', ...run], { stdio: 'ignore', windowsHide: true });
+  } catch {
+    return;   // not there
+  }
+  try {
+    execFileSync('reg.exe', ['delete', ...run, '/f'], { stdio: 'ignore', windowsHide: true });
+    app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: true });
+    log("Start at login: Claude Pet's entry replaced");
+  } catch (err) {
+    log("couldn't replace Claude Pet's Start at login:", err.message);
+  }
+}
+
+// A distro still loading Claude Pet's copy of the mod loads the new one from now on. Once none
+// is left to move, Claude Pet's copy goes.
+async function moveWsl(distro, legacy) {
+  const left = settings.get('claudeModWslToMove');
+  if (!legacy && !left?.includes(distro)) return;
+  if (legacy) {
+    const r = await wslInstaller(distro, { action: 'update', windowsDir: localMod.dir });
+    if (!r.ok) {
+      log(`mod move in WSL ${distro} failed: ${r.error}`);
+      return;
+    }
+    log(`mod moved to ~/.ttokttok-pet in WSL ${distro}`);
+  }
+  const rest = (left ?? []).filter((d) => d !== distro);
+  settings.set({ claudeModWslToMove: rest });
+  if (!rest.length) localMod.dropLegacy();
+}
+
 // ---------------------------------------------------------------- lifecycle
 
-// A downloaded copy is named "Claude Pet", which would give it its own %APPDATA%\Claude Pet.
-// Settings, pets and the log stay where a clone keeps them (%APPDATA%\claude-pet, and
-// ~/Library/Logs/claude-pet on macOS), so going from one kind of install to the other loses
+// A downloaded copy is named "Ttokttok Pet", which would give it its own %APPDATA%\Ttokttok Pet.
+// Settings, pets and the log stay where a clone keeps them (%APPDATA%\ttokttok-pet, and
+// ~/Library/Logs/ttokttok-pet on macOS), so going from one kind of install to the other loses
 // nothing. Set before the single-instance lock, which lives in that folder too.
-app.setPath('userData', DEBUG_USER_DATA || path.join(app.getPath('appData'), 'claude-pet'));
+app.setPath('userData', DEBUG_USER_DATA || userDataDir());
 app.setAppLogsPath(process.platform === 'darwin'
-  ? path.join(app.getPath('home'), 'Library', 'Logs', 'claude-pet')
+  ? path.join(app.getPath('home'), 'Library', 'Logs', 'ttokttok-pet')
   : path.join(app.getPath('userData'), 'logs'));
 
 if (!app.requestSingleInstanceLock()) {
@@ -1686,7 +1762,7 @@ if (!app.requestSingleInstanceLock()) {
     applyLoginFlag(argv);
     if (!applyModeFlag(argv)) setVisible(true);
   });
-  app.setAppUserModelId('ClaudePet');
+  app.setAppUserModelId('TtokttokPet');
 
   app.whenReady().then(() => {
     settings = new Settings(path.join(app.getPath('userData'), 'settings.json'));
@@ -1697,6 +1773,10 @@ if (!app.requestSingleInstanceLock()) {
     }
     applyLoginFlag(process.argv);
     protocol.handle('pet', handleProtocol);
+    if (!DEMO) {
+      localMod = new LocalMod();
+      adoptClaudePet();   // before loadPets: your own pets may still be in ~/.claude-pet
+    }
     loadPets();
     const saved = settings.get('position');
     petPos = clampPet(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : defaultPosition());
@@ -1739,7 +1819,6 @@ if (!app.requestSingleInstanceLock()) {
     if (DEMO) {
       tracker.on('usage', ({ claude, codex }) => setUsage({ claude: claude ? [claude] : [], codex }));
     } else {
-      localMod = new LocalMod();
       updateLocalMod();
       claudeUsage = new ClaudeUsage({
         usageFile: localMod.usageFile,
@@ -1784,7 +1863,7 @@ if (!app.requestSingleInstanceLock()) {
       petPos = clampPet(petPos);
       finishMove();
     };
-    // Debug aid: CLAUDE_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
+    // Debug aid: TTOKTTOK_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
     if (DEBUG_OPEN_AFTER_MS) {
       setTimeout(() => {
         log('debug: simulating a pet click (openApp)');
