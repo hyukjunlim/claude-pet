@@ -25,9 +25,8 @@ Both need something to watch:
 
 - **The Claude desktop app** (with Code sessions), **Codex** ([Codex](#codex)), or both. That's
   what the pet watches. With only one of them, the tray menu leaves out the other's items, and
-  clicking the pet opens the one you have. If you run Claude Code from a terminal instead (the
-  `claude` CLI, here, in WSL or over SSH), there are no session bubbles for it, but the weekly
-  limit still works ([Live Claude usage](#live-claude-usage)).
+  clicking the pet opens the one you have. Claude Code and Codex in VS Code or in a terminal
+  count too, here, in WSL and over SSH ([How it knows](#how-it-knows-what-claude-is-doing)).
 
 To run it from the source you also need **Git** and **Node.js 22.12 or newer** (the current LTS is
 fine; `npm install` downloads Electron itself), and optionally Python, only to rebuild the
@@ -198,6 +197,8 @@ conversation you open fills the rest of the screen.
   names for one server meet under one heading, and a session started in a parent folder stays at
   the parent. Web chats come first, under *Chat*, with a dot in each site's color, once you've
   turned them on and loaded the browser extension ([Web chats](#web-chats-claudeai-chatgpt-gemini)).
+  Claude Code sessions and Codex chats run in VS Code or a terminal have a hollow dot in their
+  app's color.
 - **Order:** the sessions in a folder are newest first. Machines and folders keep the order they
   first showed in, so a folder doesn't jump when a session in it gets busy. Drag a machine's
   heading or a folder's row to move it among its neighbors (Escape cancels); a folder that turns
@@ -217,6 +218,11 @@ conversation you open fills the rest of the screen.
   everything in it (its menu also has *Collapse* or *Expand*). Only the sidebar leaves it out; a
   hidden session shows again when something new happens in it, or from the tray menu's *Hidden from
   the sidebar*.
+- **Delete:** right-click a chat run in VS Code or a terminal → *Delete…*, and confirm. A Claude
+  Code session's transcript and its folder go: to the Recycle Bin on this PC; for good in WSL and
+  on an SSH host (one SSH command removes them). A Codex chat is archived by Codex itself (its
+  app-server's `thread/archive`), so you can bring it back from Codex's archived chats. Not while
+  the chat is working, or in the two minutes after it was last written, when it may still be open.
 - **Width and text size:** drag the sidebar's right edge; double-click it for the default width.
   **Ctrl+=** and **Ctrl+-** size the text, **Ctrl+0** resets it.
 - **Look:** Inter where it's installed, otherwise Segoe UI. The page, the text and the selected row
@@ -264,9 +270,17 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   session isn't counted, since it never finishes. A task that never reports back (its session was
   closed) stops counting after 4 hours, and a dev server left running in the background keeps the
   bubble on "Background" for those 4 hours too.
-- **Terminal sessions:** `claude` sessions run in a terminal are picked up from recently written
-  transcripts. They're listed as "(terminal)" and can't be opened with a click. Sessions you
-  deleted in the app are skipped.
+- **VS Code and terminal sessions:** Claude Code run in VS Code, or `claude` in a terminal, on this
+  PC, in WSL or on an SSH host the pet reads, gets a bubble and a sidebar row like the app's,
+  marked "VS Code" or "Terminal". The sidebar lists every one Claude Code still keeps: the last
+  week's are followed as they're written, older ones are listed quiet. WSL is read only while the
+  distro runs, so the pet never starts it. Clicking a VS Code session brings the VS Code window
+  for its machine to the front (by the `[WSL: …]` or `[SSH: …]` in its title) and opens the
+  session there; VS Code asks once whether to let the extension open it. With no window for that
+  machine open, the session's folder opens there first, and a second click opens the session. A
+  terminal session has nothing to open. A turn's Ready stays until you mark it done, as the
+  app's does. Sessions you deleted in the app, the desktop app's own (a scheduled task's earlier
+  runs included) and programs' (Agent SDK) runs are skipped.
 - **Timing:** the pet reacts as soon as Windows reports that one of these files changed, and
   re-checks on a timer as a backup. What's left is Claude's own timing. It saves the session
   index 1–3 s after a change, and writes a turn's summary a few seconds after the turn ends.
@@ -315,7 +329,8 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 - **SSH hosts:** a thread on an SSH host keeps its history on that host. For each host Codex
   works on, the pet keeps one SSH connection open, using your `~/.ssh/config`, and runs a
   small read-only Python watcher there. The watcher sends the new lines of rollouts written in
-  the last hour, plus the host's clock so the times line up, and once, when it starts, the
+  the last hour (a VS Code or terminal chat's, in the last week), the list of those chats with
+  their names, plus the host's clock so the times line up, and once, when it starts, the
   newest reply's rate limits (for the [weekly limits](#weekly-limits)). It checks every second,
   but only the rollouts it follows and the folders of the last two days; it looks through all of
   them every 30 s, so a resumed old thread can take that long to show. It exits as soon as the
@@ -333,6 +348,15 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
+- **VS Code and terminal chats:** chats in the Codex VS Code extension, or `codex` in a terminal,
+  on this PC, in WSL or on a host Codex works on, get a bubble and a sidebar row, marked
+  "Codex · VS Code" or "Codex · Terminal". The sidebar lists every one Codex hasn't archived: the
+  last week's are followed as they're written, older ones are listed quiet. WSL is read only while
+  the distro runs. Clicking a VS Code chat opens it in VS Code
+  (`vscode://openai.chatgpt/local/<id>`), in the window for its machine, as for Claude Code's; a
+  terminal chat has nothing to open. A turn's Ready
+  stays until you mark it done. Their names come from each machine's
+  `~/.codex/session_index.jsonl`.
 - **Not shown:** ChatGPT chats in the app (those on chatgpt.com can be, see
   [Web chats](#web-chats-claudeai-chatgpt-gemini)), and Codex's own helper threads such as its auto-reviewer.
 

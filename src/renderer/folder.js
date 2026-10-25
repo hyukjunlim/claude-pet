@@ -16,7 +16,14 @@
   const player = new window.SpritePlayer(spriteEl);
 
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
-  const APP_NAME = { claude: 'Claude', codex: 'Codex' };   // a web chat names its site itself
+  // A web chat names its site itself.
+  const APP_NAME = {
+    claude: 'Claude', codex: 'Codex', vscode: 'VS Code', terminal: 'Terminal', 'codex-vscode': 'VS Code', 'codex-terminal': 'Terminal',
+  };
+  // The ones outside the apps: Claude Code's and Codex's chats in VS Code or a terminal.
+  const CLIENT_TITLE = {
+    vscode: 'Claude Code in VS Code', terminal: 'Claude Code in a terminal', 'codex-vscode': 'Codex in VS Code', 'codex-terminal': 'Codex in a terminal',
+  };
   const MACHINES = '*';                        // ... where the parent is the list of machines
   const BASE_ZOOM = 1.296;                     // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
@@ -262,7 +269,9 @@
     row.setAttribute('role', 'treeitem');
     const state = LABELS[s.status];
     const app = s.siteName || APP_NAME[s.app];
-    row.setAttribute('aria-label', [s.title, app, state, `Click to open in ${app}`].filter(Boolean).join(', '));
+    const action = APP_NAME[s.app] === 'Terminal' ? 'Terminal session, nothing to open' : `Click to open in ${app}`;
+    row.setAttribute('aria-label', [s.title, CLIENT_TITLE[s.app] || app, state, action].filter(Boolean).join(', '));
+    if (CLIENT_TITLE[s.app]) row.title = CLIENT_TITLE[s.app];
     row.append(el('span', 'chevron'), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
     if (state) row.append(el('span', 'state', state));
     else {

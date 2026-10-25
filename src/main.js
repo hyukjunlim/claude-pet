@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFile, execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
@@ -22,7 +22,8 @@ const { isSameHost, sshConfigHosts } = require('./ssh-config');
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
-const { raiseBrowserWindow, raiseCodexWindow } = require('./raise');
+const { raiseBrowserWindow, raiseCodexWindow, raiseVsCodeWindow, vsCodePlace } = require('./raise');
+const { archiveCodexChat, canDelete, deleteClaudeSession, isChat } = require('./chat-delete');
 const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
@@ -72,6 +73,7 @@ const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const CLI_SESSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;   // a VS Code or terminal session's
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;   // the only pages an eTL bubble opens
 const WEB_LINK = /^https:\/\/(claude\.ai|chatgpt\.com|gemini\.google\.com)\//;   // and a web chat's
@@ -108,6 +110,7 @@ let stepKeys = null;            // Ctrl+Tab through the sidebar (see step-keys.j
 let claudeAll = [];             // every Claude session, Codex thread and web chat, quiet ones too, for folder mode
 let codexAll = [];
 let webAll = [];
+const deleted = new Map();      // id -> when: chats deleted in the sidebar, left out until the trackers see them go
 let treeKey = '';
 let quitting = false;
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
@@ -120,6 +123,10 @@ let usageSetupErrors = {};      // Getting started's Claude usage step: place ke
 const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 const wslAsked = new Set();     // the WSL distros checkWsl has asked this run
 let wslTimer = null;
+let wslChatsTimer = null;       // syncWslChats, while the pet runs
+const wslHomes = new Map();     // WSL distro -> its $HOME, asked while it ran
+let wslRunning = new Set();     // the distros running at syncWslChats's last look
+let wslChatsKey = '';
 let usageKey = '';
 let usageTimer = null;
 let logFile = null;
@@ -494,7 +501,7 @@ function sendSessions() {
 }
 
 function mergeSessions() {
-  sessions = [...claudeSessions, ...codexSessions, ...etlSessions, ...webSessions].sort(compareSessions);
+  sessions = [...claudeSessions, ...codexSessions, ...etlSessions, ...webSessions].filter((s) => !isDeleted(s.id)).sort(compareSessions);
   sendSessions();
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
 }
@@ -504,7 +511,7 @@ function sendTree() {
   const marked = currentMarks();
   const hidden = currentHidden();
   if (!folder?.open) return;
-  const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id));
+  const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id) && !isDeleted(s.id));
   const hosts = buildTree({
     claude: shown(claudeAll),
     codex: shown(codexAll),
@@ -576,17 +583,21 @@ function setHidden(ids, on) {
   sendTree();
 }
 
-// A sidebar row's own menu: a session's (mark it done or Ready, hide it), or a machine's or a
-// folder's (fold it, hide what's in it). Null for anywhere else, which gets the tray menu.
+// A sidebar row's own menu: a session's (mark it done or Ready, hide it, delete a VS Code or
+// terminal chat), or a machine's or a folder's (fold it, hide what's in it). Null for anywhere
+// else, which gets the tray menu.
 function rowMenu(target) {
   const known = (id) => typeof id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === id));
   if (target?.kind === 'session' && known(target.id)) {
     const { id } = target;
-    const status = [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null)?.status;
+    const s = listedSession(id);
+    const status = s?.status;
     const pending = Object.hasOwn(currentMarks(), id) || status === 'review' || status === 'failed' || status === 'waiting';
     return Menu.buildFromTemplate([
       pending ? { label: 'Mark as done', click: () => markDone([id]) } : { label: 'Mark as Ready', click: () => markReady(id) },
       { label: 'Hide from the sidebar', click: () => setHidden([id], true) },
+      // Not while it's working or was written to just now: it may still be open.
+      ...(isChat(s) ? [{ type: 'separator' }, { label: 'Delete…', enabled: canDelete(s), click: () => deleteChat(id) }] : []),
     ]);
   }
   if (target?.kind === 'folder' && typeof target.key === 'string' && Array.isArray(target.ids)) {
@@ -600,6 +611,99 @@ function rowMenu(target) {
     ]);
   }
   return null;
+}
+
+// A session as the full lists have it (with its machine), whether or not it has a bubble.
+function listedSession(id) {
+  return [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null);
+}
+
+// Left out for two minutes after you deleted it, by when its tracker has looked again. One still
+// there after that wasn't deleted, and shows again.
+function isDeleted(id) {
+  const at = deleted.get(id);
+  if (at && Date.now() - at > 2 * 60_000) deleted.delete(id);
+  return deleted.has(id);
+}
+
+// The sidebar's Delete, once you confirm it (chat-delete.js): a Claude Code session's files go,
+// a Codex chat is archived by Codex.
+async function deleteChat(id) {
+  const s = listedSession(id);
+  if (!canDelete(s)) return;
+  const job = deleteJob(s);
+  if (!job) {
+    dialog.showMessageBox({ type: 'error', title: 'Ttokttok Pet', message: `Couldn't find where "${s.title}" is kept.`, buttons: ['OK'] });
+    return;
+  }
+  const options = {
+    type: 'warning',
+    title: 'Ttokttok Pet',
+    message: job.archive ? `Archive "${s.title}" in Codex?` : `Delete "${s.title}"?`,
+    detail: job.detail,
+    buttons: [job.archive ? 'Archive' : 'Delete', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const parent = folder?.open ? folder.win : null;
+  const answer = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  if (answer.response !== 0) return;
+  try {
+    await job.run();
+  } catch (err) {
+    log(`delete ${id}:`, err.message);
+    dialog.showMessageBox({ type: 'error', title: 'Ttokttok Pet', message: `Couldn't delete "${s.title}"`, detail: err.message, buttons: ['OK'] });
+    return;
+  }
+  log(`deleted ${id} (${job.where})`);
+  deleted.set(id, Date.now());
+  const marked = { ...currentMarks() };
+  delete marked[id];
+  settings.set({ marked });
+  setHidden([id], false);   // sends the tree
+  mergeSessions();
+  if (s.kind === 'codex') codex?.rescan();
+  else tracker?.kick?.({ projects: true });
+}
+
+// What deleting `s` takes, and what the confirmation says: null if it can't be found.
+function deleteJob(s) {
+  const record = "Claude Code's record of this session (its transcript and folder)";
+  const gone = "It won't be in /resume or in VS Code's past sessions any more.";
+  if (s.kind === 'codex') {
+    const threadId = s.id.slice('codex:'.length);
+    const at = codex?.chatPlace(threadId);
+    if (!at) return null;
+    const where = at.place === 'wsl' ? `WSL (${at.distro})` : at.place === 'ssh' ? at.host.name : 'this PC';
+    return {
+      archive: true,
+      where,
+      detail: `Codex on ${where} archives this chat. You can bring it back from Codex's archived chats.`,
+      run: () => archiveCodexChat({ threadId, ...at }),
+    };
+  }
+  const sessionId = s.sessionId;
+  const ssh = /^ssh:/.test(s.machineKey || '');
+  if (ssh) {
+    const host = claudeUsage?.hostFor(s.machineKey);
+    if (!host) return null;
+    return {
+      where: host.name,
+      detail: `${record} is deleted on ${host.name}, for good. ${gone}`,
+      run: () => deleteClaudeSession({ sessionId, place: 'ssh', host }),
+    };
+  }
+  const c = tracker?.cliSessions?.get(sessionId);
+  if (!c?.file) return null;
+  const wsl = /^wsl:(.+)$/.exec(c.machineKey || '')?.[1];
+  return {
+    where: wsl ? `WSL (${wsl})` : 'this PC',
+    detail: wsl
+      ? `${record} is deleted in WSL (${wsl}), for good: the Recycle Bin can't take files from WSL. ${gone}`
+      : `${record} goes to the Recycle Bin. ${gone}`,
+    run: () => deleteClaudeSession({ sessionId, place: wsl ? 'wsl' : 'local', file: c.file, trashItem: (p) => shell.trashItem(p) }),
+  };
 }
 
 // ---------------------------------------------------------------- Getting started (see onboarding.js)
@@ -721,7 +825,9 @@ function startCodex() {
     watchHosts: settings.get('codexOverSsh'),
     dismissed: settings.get('dismissed') || {},
     readyFrom: readyFrom(),
+    cliReadyFrom: cliReadyFrom(),
   });
+  codex.setChatRoots(wslRoots('.codex\\sessions'));
   codex.on('change', (list) => {
     codexSessions = list;
     mergeSessions();
@@ -1098,6 +1204,48 @@ async function checkWsl() {
   return found;
 }
 
+// WSL's VS Code and terminal sessions: the trackers read each distro's ~/.claude/projects and
+// ~/.codex/sessions from here (\\wsl.localhost\…), but only while the distro runs, which this
+// checks every 15 s. Reading a stopped distro's files would start it, and with the pet reading
+// every second it would never stop again (SessionTracker.setCliRoots, CodexTracker.setChatRoots).
+const WSL_CHATS_MS = 15_000;
+
+async function syncWslChats() {
+  if (process.platform !== 'win32' || DEMO) return;
+  const running = await runningWslDistros();
+  for (const distro of running) {
+    if (wslHomes.has(distro)) continue;
+    const home = await wslHome(distro);
+    if (home) wslHomes.set(distro, home);
+  }
+  wslRunning = running;
+  const key = JSON.stringify(wslRoots(''));
+  if (key === wslChatsKey) return;
+  wslChatsKey = key;
+  tracker?.setCliRoots?.(wslRoots('.claude\\projects'));
+  codex?.setChatRoots(wslRoots('.codex\\sessions'));
+}
+
+// `folder` (Windows-style) in the home folder of each WSL distro seen running, and whether it runs.
+function wslRoots(folder) {
+  return [...wslHomes].map(([distro, home]) => ({
+    root: `\\\\wsl.localhost\\${distro}${home.replace(/\//g, '\\')}\\${folder}`,
+    machineKey: `wsl:${distro}`,
+    machine: distro,
+    active: wslRunning.has(distro),
+  }));
+}
+
+// A running distro's home folder, e.g. /home/me; null if it won't say.
+function wslHome(distro) {
+  return new Promise((resolve) => {
+    execFile('wsl.exe', ['-d', distro, '-e', 'sh', '-c', 'printf %s "$HOME"'], { windowsHide: true, timeout: 10_000 }, (err, stdout) => {
+      const home = String(stdout || '').trim();
+      resolve(!err && /^\/[^\\]*$/.test(home) ? home.replace(/\/+$/, '') : null);
+    });
+  });
+}
+
 function trayTooltip() {
   if (!sessions.length) return 'Ttokttok Pet: all quiet';
   const top = sessions[0];
@@ -1109,12 +1257,18 @@ function trayTooltip() {
 // desktop session (local_<uuid>), it opens that session as-is, SSH sessions included. Only
 // sessions that are still in the desktop index get a link, so resume never imports a copy.
 function sessionUrl(s) {
-  if (s?.kind === 'codex') return s.url || null;   // codex://threads/<id>?hostId=…
+  // codex://threads/<id>?hostId=…, or the VS Code extension's vscode://openai.chatgpt/local/<id>
+  if (s?.kind === 'codex') return s.url || null;
   if (s?.kind === 'etl' && s.assistant) return etl?.assistantLinks().at(-1) || null;   // the eTL chat
   if (s?.kind === 'etl') return ETL_LINK.test(s.url || '') ? s.url : null;
   if (s?.kind === 'web') {
     const url = webchats?.target(s.id)?.url || '';
     return WEB_LINK.test(url) ? url : null;
+  }
+  // Claude Code in VS Code opens its session itself, in the window that runs it (a WSL or SSH
+  // window for a session there); a terminal session has nothing to open.
+  if (s?.kind === 'cli') {
+    return s.client === 'vscode' && CLI_SESSION_RE.test(s.sessionId || '') ? `vscode://anthropic.claude-code/open?session=${s.sessionId}` : null;
   }
   const m = DESKTOP_SESSION_RE.exec(s?.hostSessionId || '');
   if (!m || !tracker.desktop?.has(s.hostSessionId)) return null;
@@ -1186,6 +1340,23 @@ function openWebChat(s, { handoff = true } = {}) {
   return true;
 }
 
+// A VS Code extension's link goes to the VS Code window you used last, and the extension there
+// knows only its own machine's chats. So the window for the chat's machine comes to the front
+// first (raise.js). With none open, that machine's folder opens in VS Code instead, and a second
+// click, once it's connected, opens the chat.
+async function openInVsCode(s, url, { handoff }) {
+  if (handoff) handOffFocus();
+  const where = vsCodePlace(s, { connections: codex?.connections ?? [], sshHosts: sshConfigHosts() });
+  const raised = await raiseVsCodeWindow({ marks: where.marks });
+  if (raised === false && where.folder) {
+    log(`VS Code: no window for ${where.marks.join(' or ') || 'this PC'}; opening the folder there`);
+    shell.openExternal(where.folder).catch((err) => log('could not open vscode:', err.message));
+    return;
+  }
+  if (raised) await new Promise((resolve) => setTimeout(resolve, 300));   // VS Code notes which window is in front
+  shell.openExternal(url).catch((err) => log('could not open vscode:', err.message));
+}
+
 // A bubble's session, or (from folder mode) any session in the full lists. `fill`: maximize the
 // app beside the sidebar.
 function openSession(id, { handoff = true, fill = false } = {}) {
@@ -1195,8 +1366,9 @@ function openSession(id, { handoff = true, fill = false } = {}) {
   if (s?.kind === 'web') return openWebChat(s, { handoff });
   const url = s && sessionUrl(s);
   if (!url) return false;
-  open(url);
-  if (fill && (s.kind === 'desktop' || s.kind === 'codex')) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
+  if (url.startsWith('vscode://')) openInVsCode(listedSession(id) ?? s, url, { handoff });
+  else open(url);
+  if (fill && (s.kind === 'desktop' || (s.kind === 'codex' && !s.client))) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
   // Opening a session doesn't settle it: Ready, Error and Needs you stay until you mark it done
   // (its ×, or the sidebar's Mark as done) or send it a message. A one-off eTL notice is done with
   // once opened; a class bubble (`keepOnOpen`, etl/timetable.js) stays until the class ends or its
@@ -1213,6 +1385,12 @@ function openSession(id, { handoff = true, fill = false } = {}) {
 function readyFrom() {
   if (!settings.get('readyFrom')) settings.set({ readyFrom: Date.now() });
   return settings.get('readyFrom');
+}
+
+// The same for VS Code and terminal sessions, which were Ready for only a few minutes before.
+function cliReadyFrom() {
+  if (!settings.get('cliReadyFrom')) settings.set({ cliReadyFrom: Date.now() });
+  return settings.get('cliReadyFrom');
 }
 
 function persistDismissed() {
@@ -1941,6 +2119,7 @@ if (!app.requestSingleInstanceLock()) {
       : new SessionTracker({
         ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {},
         readyFrom: readyFrom(),
+        cliReadyFrom: cliReadyFrom(),
       });
     tracker.on('change', (list) => {
       claudeSessions = list;
@@ -1966,6 +2145,7 @@ if (!app.requestSingleInstanceLock()) {
         updateHostMods();
         gettingStarted?.send();   // a host's mod turned up, or changed
       });
+      claudeUsage.on('chats', (chats) => tracker.setRemoteChats?.(chats));
       claudeUsage.on('error', (err) => log('claude usage:', err?.message || err));
       claudeUsage.start();
       // once the desktop index (for WSL distros) and the SSH connections have been read
@@ -1980,6 +2160,8 @@ if (!app.requestSingleInstanceLock()) {
             .then((found) => found && offerLiveUsage())
             .catch((err) => log('WSL check:', err.message));
         }, WSL_CHECK_MS);
+        syncWslChats().catch((err) => log('WSL sessions:', err.message));
+        wslChatsTimer = setInterval(() => syncWslChats().catch((err) => log('WSL sessions:', err.message)), WSL_CHATS_MS);
       }, 8000);
     }
     tracker.start();
@@ -2047,6 +2229,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     clearInterval(usageTimer);
     clearInterval(wslTimer);
+    clearInterval(wslChatsTimer);
     stopMomentum();
     stepKeys?.stop();
     tracker?.stop();

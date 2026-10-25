@@ -160,11 +160,12 @@ test('a web chat says which chat it is, and only a Ready one has a ×', () => {
   assert.equal(find(running, 'close'), null);
 });
 
-test('Claude and Codex bubbles are as before', () => {
-  const [claude, codex, cli] = page()([
+test('Claude and Codex bubbles are as before; Claude Code outside the app says where it runs', () => {
+  const [claude, codex, cli, vscode] = page()([
     { id: 'a', status: 'review', title: 'Refactor auth', detail: 'All tests pass', project: 'auth-service', remote: 'lab', since: Date.now() },
     { id: 'b', kind: 'codex', status: 'waiting', title: 'Port tokenizer', detail: 'Which crate?', project: 'tokenizer', remote: 'lab', since: Date.now(), url: 'codex://threads/1' },
-    { id: 'c', kind: 'cli', status: 'failed', title: 'Dataset cleanup', project: 'datasets', since: Date.now() },
+    { id: 'c', kind: 'cli', client: 'terminal', status: 'failed', title: 'Dataset cleanup', project: 'datasets', since: Date.now() },
+    { id: 'd', kind: 'cli', client: 'vscode', status: 'review', title: 'Model identifier', project: 'projects', remote: 'lab', since: Date.now() },
   ]);
   assert.equal(find(claude, 'what').textContent, 'Claude · auth-service');
   assert.equal(find(claude, 'label').textContent, 'Ready');
@@ -172,6 +173,19 @@ test('Claude and Codex bubbles are as before', () => {
   assert.equal(find(codex, 'what').textContent, 'Codex · tokenizer');
   assert.equal(find(codex, 'label').textContent, 'Needs you');
   assert.equal(codex.getAttribute('aria-label'), 'Port tokenizer, Which crate?, on lab, Click to open in Codex');
-  assert.equal(find(cli, 'what').textContent, 'Claude · datasets');
+  assert.equal(find(cli, 'what').textContent, 'Terminal · datasets');
   assert.equal(cli.getAttribute('aria-label'), 'Dataset cleanup, Terminal session (no link)');
+  assert.equal(find(vscode, 'what').textContent, 'VS Code · projects');
+  assert.equal(vscode.getAttribute('aria-label'), 'Model identifier, SSH · lab, Click to open in VS Code');
+});
+
+test("Codex's chats in VS Code or a terminal say so", () => {
+  const [ext, tui] = page()([
+    { id: 'e', kind: 'codex', client: 'vscode', status: 'review', title: 'Reframe', project: 'urban-map', since: Date.now(), url: 'vscode://openai.chatgpt/local/x' },
+    { id: 't', kind: 'codex', client: 'terminal', status: 'review', title: 'Notes', project: 'notes', remote: 'lab', since: Date.now(), url: null },
+  ]);
+  assert.equal(find(ext, 'what').textContent, 'Codex · VS Code · urban-map');
+  assert.equal(ext.getAttribute('aria-label'), 'Reframe, Click to open in VS Code');
+  assert.equal(find(tui, 'what').textContent, 'Codex · Terminal · notes');
+  assert.equal(tui.getAttribute('aria-label'), 'Notes, on lab, Terminal session (no link)');
 });

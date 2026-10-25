@@ -251,3 +251,58 @@ test("the watcher counts an older install's copy of the mod as the mod, so the p
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }
 });
+
+test("the watcher follows the host's VS Code and terminal sessions, not the desktop app's", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const { home } = watcherHome('.ttokttok-pet/mod/pet-usage');
+  const projects = path.join(home, '.claude', 'projects', '-home-me-repo');
+  fs.mkdirSync(projects, { recursive: true });
+  const vscode = '11111111-1111-4111-8111-111111111111';
+  const desktop = '22222222-2222-4222-8222-222222222222';
+  const entry = (text, entrypoint) => `${JSON.stringify({ type: 'user', cwd: '/home/me/repo', message: { role: 'user', content: text }, entrypoint })}\n`;
+  fs.writeFileSync(path.join(projects, `${vscode}.jsonl`), entry('first', 'claude-vscode'));
+  // The desktop app's: its first entry so long that what started it (at the entry's end) is past
+  // the first 64 KB; the file's last bytes still say.
+  fs.writeFileSync(path.join(projects, `${desktop}.jsonl`), entry('x'.repeat(100_000), 'claude-desktop') + entry('more', 'claude-desktop-3p'));
+  const { child, messages } = watch(home);
+  try {
+    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats))));
+    const opened = messages.filter((m) => 'chat' in m);
+    assert.deepEqual(opened.map((m) => m.id), [vscode], "the desktop app's session isn't followed");
+    const n = opened[0].chat;
+    assert.deepEqual(messages.filter((m) => m.cl === n).map((m) => JSON.parse(m.l).message.content), ['first']);
+
+    fs.appendFileSync(path.join(projects, `${vscode}.jsonl`), entry('second', 'claude-vscode'));
+    assert.ok(await waitFor(() => messages.some((m) => m.cl === n && m.l.includes('second')), 8000), 'a new line comes as it is written');
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the watcher sends a quick look at the host's older VS Code and terminal sessions", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const { home } = watcherHome('.ttokttok-pet/mod/pet-usage');
+  const projects = path.join(home, '.claude', 'projects', '-home-me-site');
+  fs.mkdirSync(projects, { recursive: true });
+  const vscode = '33333333-3333-4333-8333-333333333333';
+  const desktop = '44444444-4444-4444-8444-444444444444';
+  const old = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  const entry = (e) => `${JSON.stringify(e)}\n`;
+  fs.writeFileSync(path.join(projects, `${vscode}.jsonl`),
+    entry({ type: 'user', entrypoint: 'claude-vscode', cwd: '/home/me/site', timestamp: old.toISOString(), message: { role: 'user', content: 'hi' } })
+    + entry({ type: 'ai-title', aiTitle: 'Reagent website' }));
+  fs.writeFileSync(path.join(projects, `${desktop}.jsonl`),
+    entry({ type: 'user', entrypoint: 'claude-desktop', cwd: '/home/me/site', timestamp: old.toISOString(), message: { role: 'user', content: 'app' } }));
+  for (const id of [vscode, desktop]) fs.utimesSync(path.join(projects, `${id}.jsonl`), old, old);
+  const { child, messages } = watch(home);
+  try {
+    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats))));
+    const peeks = messages.filter((m) => m.peek).map((m) => m.peek);
+    assert.deepEqual(peeks.map((p) => [p.id, p.entrypoint, p.cwd, p.ai_title, p.at]),
+      [[vscode, 'claude-vscode', '/home/me/site', 'Reagent website', old.toISOString()]]);
+    assert.equal(messages.some((m) => 'chat' in m), false, 'not followed: a quick look is all');
+    assert.deepEqual(messages.find((m) => Array.isArray(m.chats)).peeked, [vscode]);
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});

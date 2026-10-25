@@ -92,6 +92,7 @@ function placeClaude(s, ctx) {
 
 // { host, place } for a Codex thread from CodexTracker.all.
 function placeCodex(s, ctx) {
+  if (s.machineKey) return placeClaude(s, ctx);   // a VS Code or terminal chat in WSL
   const where = splitPath(s.cwd, ctx);
   if (!s.hostId || s.hostId === 'local') {
     // The app runs its local threads on Windows, or in WSL (then its paths are Linux paths).
@@ -102,10 +103,13 @@ function placeCodex(s, ctx) {
   return { host: sshHost({ target, port: c?.port ?? null, labels: [c?.name, s.remote] }, ctx), where };
 }
 
+// `app`: claude or codex, or a web chat's site; a Claude Code session outside the desktop app
+// says which app it runs in instead (vscode or terminal, sessions.js's clientOf), and a Codex chat
+// outside the Codex app does too (codex-vscode or codex-terminal, rollout.js's clientOf).
 function itemOf(s, app) {
   return {
     id: s.id,
-    app,
+    app: s.client ? (app === 'codex' ? `codex-${s.client}` : s.client) : app,
     title: s.title,
     status: s.status,
     detail: s.detail || '',

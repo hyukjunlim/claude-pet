@@ -13,6 +13,11 @@
 //   - The same rollouts on each SSH host, streamed by a small watcher (see codex-remote.js).
 //     Each reply in a rollout also records the account's rate limits, for the weekly-limit meter.
 //   - The same state file again for the app's "dots", which have no rollout (see parseAeons).
+//   - The chats of the Codex VS Code extension and of the Codex CLI in a terminal, which the app
+//     doesn't list: from the same rollouts (each says in its first line what started it), from
+//     those in WSL (its ~/.codex/sessions, read from here only while the distro runs; see
+//     setChatRoots), and from the SSH hosts' watchers. Their names are in each machine's
+//     session_index.jsonl.
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -21,7 +26,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { FileFollower, folderName, projectName, readdirSafe, statSafe } = require('./sessions');
 const { UNREAD_WINDOW_MS, compareSessions } = require('./transcript');
-const { applyRolloutEntry, createRolloutState, rateLimitsOf, rolloutStatus } = require('./rollout');
+const { applyRolloutEntry, clientOf, createRolloutState, rateLimitsOf, rolloutStatus } = require('./rollout');
 const { CodexRemote } = require('./codex-remote');
 
 const ROLLOUT_RE = /^rollout-.+[-_][0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
@@ -40,6 +45,10 @@ const DOT_WORKING_MS = 45 * 1000;                // a turn with no new stamp thi
 const DOT_TURN_MS = 60 * 1000;                   // a stamp this soon after a turn's last belongs to it
 const DOT_READY_MS = 20 * 1000;                  // an unread flag this soon after a turn's stamp is its reply
 const USER_THREAD = 'user';                      // the catalog's thread_source for threads you started
+const CHAT_FOLLOW_MS = 7 * 24 * 60 * 60 * 1000;  // a VS Code or terminal chat written this recently is followed
+const CHAT_SCAN_MS = 15 * 1000;                  // look through WSL's rollouts this often
+const THREAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CHAT_TITLE = { vscode: 'Codex (VS Code)', terminal: 'Codex (terminal)' };
 
 function codexPaths() {
   const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -78,30 +87,45 @@ class RolloutFollower extends FileFollower {
     return changed;
   }
 
-  // The first line (session_meta) carries the thread's id; it can be long (base instructions).
   async readMeta() {
-    try {
-      const fh = await fsp.open(this.file, 'r');
-      try {
-        const chunks = [];
-        const buf = Buffer.alloc(64 * 1024);
-        for (let pos = 0; pos < 4 * 1024 * 1024;) {
-          const { bytesRead } = await fh.read(buf, 0, buf.length, pos);
-          if (!bytesRead) break;
-          const nl = buf.subarray(0, bytesRead).indexOf(0x0a);
-          chunks.push(Buffer.from(buf.subarray(0, nl >= 0 ? nl : bytesRead)));
-          if (nl >= 0) break;
-          pos += bytesRead;
-        }
-        const entry = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        if (entry?.type === 'session_meta') applyRolloutEntry(this.state, entry);   // only sets the thread's details
-      } finally {
-        await fh.close();
-      }
-    } catch {
-      // A partial write; try again when the file changes.
-    }
+    const entry = await firstEntry(this.file);
+    if (entry?.type === 'session_meta') applyRolloutEntry(this.state, entry);   // only sets the thread's details
   }
+}
+
+// A rollout's first line (session_meta) carries the thread's id, folder and what started it; it
+// can be long (base instructions). Null while it's still being written.
+async function firstEntry(file) {
+  try {
+    const fh = await fsp.open(file, 'r');
+    try {
+      const chunks = [];
+      const buf = Buffer.alloc(64 * 1024);
+      for (let pos = 0; pos < 4 * 1024 * 1024;) {
+        const { bytesRead } = await fh.read(buf, 0, buf.length, pos);
+        if (!bytesRead) break;
+        const nl = buf.subarray(0, bytesRead).indexOf(0x0a);
+        chunks.push(Buffer.from(buf.subarray(0, nl >= 0 ? nl : bytesRead)));
+        if (nl >= 0) return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        pos += bytesRead;
+      }
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    // A partial write, or gone
+  }
+  return null;
+}
+
+// What a rollout's first line says about the thread: { threadId, client, cwd }, `client` null for
+// one that isn't a VS Code or terminal chat. Null if it can't be read yet.
+async function chatMetaOf(file) {
+  const entry = await firstEntry(file);
+  if (!entry) return null;
+  const state = createRolloutState();
+  if (entry.type === 'session_meta') applyRolloutEntry(state, entry);
+  return { threadId: state.threadId, client: state.threadId ? clientOf(state) : null, cwd: state.cwd };
 }
 
 // Reads the newest rate limits from the tail of a rollout we don't follow.
@@ -216,6 +240,26 @@ function threadUrl(threadId, hostId) {
   return hostId && hostId !== 'local' ? `${url}?hostId=${encodeURIComponent(hostId)}` : url;
 }
 
+// The VS Code extension opens its own chats, in the window that runs it (a WSL or SSH window for a
+// chat there); a terminal chat has nothing to open.
+function chatUrl(threadId, client) {
+  return client === 'vscode' && THREAD_ID_RE.test(threadId) ? `vscode://openai.chatgpt/local/${threadId}` : null;
+}
+
+// session_index.jsonl: one { id, thread_name } a line.
+function readNames(text) {
+  const names = new Map();
+  for (const line of text.split('\n')) {
+    try {
+      const j = JSON.parse(line);
+      if (typeof j?.id === 'string' && typeof j.thread_name === 'string') names.set(j.id, j.thread_name);
+    } catch {
+      // skip
+    }
+  }
+  return names;
+}
+
 let DatabaseSync;
 
 function readCatalog(file) {
@@ -246,6 +290,7 @@ class CodexTracker extends EventEmitter {
   constructor({
     home, appState, catalog, sessionsRoot, sessionIndex,
     watchHosts = true, remoteFactory = (o) => new CodexRemote(o), pollMs = 1000, now = Date.now, dismissed = {}, readyFrom = null,
+    cliReadyFrom = null,
   } = {}) {
     super();
     this.home = home;
@@ -259,6 +304,7 @@ class CodexTracker extends EventEmitter {
     this.now = now;
     this.dismissed = new Map(Object.entries(dismissed).filter(([id]) => id.startsWith('codex:')));
     this.readyFrom = readyFrom;       // turns ending from then on are Ready until dismissed (rollout.js)
+    this.cliReadyFrom = cliReadyFrom; // ... in a VS Code or terminal chat
     this.unread = new Map();          // threadId -> hostId, from the app's unread list
     this.unreadSince = new Map();     // threadId -> when it became unread while we watched
     this.aeons = new Map();           // dot threadId -> { name, activity, working, since, activeAt }
@@ -270,6 +316,12 @@ class CodexTracker extends EventEmitter {
     this.catalog = new Map();         // threadId -> { hostId, title, updatedAt, cwd }
     this.threadNames = new Map();     // threadId -> a name from session_index.jsonl
     this.followers = new Map();       // rollout path -> RolloutFollower
+    this.recentFiles = new Set();     // the rollouts here written in the last hour, all followed
+    this.chatRoots = [];              // WSL's sessions folders: { root, machineKey, machine, active }
+    this.metas = new Map();           // rollout path -> chatMetaOf (a first line doesn't change)
+    this.localChats = new Map();      // threadId -> { threadId, client, cwd, file, mtimeMs, followed }: the VS Code and terminal chats here
+    this.rootChats = new Map();       // ... and in WSL, with the root's { root, machineKey, machine }
+    this.rootNames = new Map();       // root -> { stamp, names } from that machine's session_index.jsonl
     this.limits = null;               // the newest rate limits Codex recorded, on our clock
     this.pastLimits = null;           // ... found in a rollout too old to follow
     this.limitsChecked = new Set();   // older rollouts read for them, as "path|mtime|size"
@@ -277,6 +329,7 @@ class CodexTracker extends EventEmitter {
     this.lastAppStateRead = 0;
     this.lastCatalogRead = 0;
     this.lastScan = 0;
+    this.lastChatScan = 0;
     this.scanDirty = false;
     this.lastEmitted = '';
     this.sessions = [];
@@ -319,6 +372,39 @@ class CodexTracker extends EventEmitter {
   setWatchHosts(on) {
     this.watchHosts = on;
     this.syncRemotes();
+  }
+
+  // WSL's sessions folders, [{ root, machineKey, machine, active }]. A distro's files are read only
+  // while it runs (`active`): reading them starts it, and it would never stop again. Its chats stay
+  // as last seen meanwhile.
+  setChatRoots(roots) {
+    this.chatRoots = roots;
+    this.lastChatScan = 0;
+    this.kick();
+  }
+
+  asleep(file) {
+    return this.chatRoots.some((r) => !r.active && file.startsWith(r.root + path.sep));
+  }
+
+  // Where a VS Code or terminal chat is, for the sidebar's Delete: { place: 'local' } on this PC,
+  // { place: 'wsl', distro } in WSL, { place: 'ssh', host } on an SSH host; null if it isn't one.
+  chatPlace(threadId) {
+    if (this.localChats.has(threadId)) return { place: 'local' };
+    const c = this.rootChats.get(threadId);
+    if (c) return { place: 'wsl', distro: c.machine };
+    for (const [hostId, remote] of this.remotes) {
+      if (!remote.chats?.has(threadId)) continue;
+      const name = this.hostNames.get(hostId) || remote.target;
+      return { place: 'ssh', host: { target: remote.target, port: remote.port, identity: remote.identity, name } };
+    }
+    return null;
+  }
+
+  // Looks through the rollouts again at once (after a chat was archived).
+  rescan() {
+    this.lastChatScan = 0;
+    this.kick({ scan: true });
   }
 
   dismiss(id) {
@@ -364,6 +450,7 @@ class CodexTracker extends EventEmitter {
       return;
     }
     const file = path.join(this.sessionsRoot, name);
+    this.recentFiles.add(file);
     if (!this.followers.has(file)) this.followers.set(file, new RolloutFollower(file));
     this.kick({ file });
   }
@@ -407,7 +494,12 @@ class CodexTracker extends EventEmitter {
         this.lastScan = now;
         await this.scanRollouts(now);
       }
+      if (now - this.lastChatScan >= CHAT_SCAN_MS) {
+        this.lastChatScan = now;
+        await this.scanChatRoots(now);
+      }
       for (const [file, f] of this.followers) {
+        if (this.asleep(file)) continue;
         if (!only || only.has(file) || f.offset < 0) await f.poll().catch(() => {});
       }
       this.recompute();
@@ -523,20 +615,15 @@ class CodexTracker extends EventEmitter {
     const stamp = await this.stampOf(this.sessionIndexFile);
     if (stamp === this.stamps.names) return;
     this.stamps.names = stamp;
-    const names = new Map();
-    try {
-      for (const line of (await fsp.readFile(this.sessionIndexFile, 'utf8')).split('\n')) {
-        try {
-          const j = JSON.parse(line);
-          if (typeof j?.id === 'string' && typeof j.thread_name === 'string') names.set(j.id, j.thread_name);
-        } catch {
-          // skip
-        }
-      }
-    } catch {
-      // no index yet
-    }
-    this.threadNames = names;
+    this.threadNames = readNames(await fsp.readFile(this.sessionIndexFile, 'utf8').catch(() => ''));
+  }
+
+  // A thread's name, from the index of the machine it's on (this PC, a WSL distro or an SSH host).
+  nameOf(threadId) {
+    let name = this.threadNames.get(threadId);
+    for (const { names } of this.rootNames.values()) name ??= names.get(threadId);
+    for (const remote of this.remotes.values()) name ??= remote.names?.get(threadId);
+    return name;
   }
 
   async loadCatalog(now) {
@@ -556,24 +643,67 @@ class CodexTracker extends EventEmitter {
   }
 
   async scanRollouts(now) {
-    const wanted = new Set();
+    const recent = new Set();
     const older = [];
-    const walk = async (dir, depth) => {
-      for (const e of await readdirSafe(dir, { withFileTypes: true })) {
-        const full = path.join(dir, e.name);
-        if (e.isDirectory() && depth < 3) await walk(full, depth + 1);
-        else if (e.isFile() && ROLLOUT_RE.test(e.name)) {
-          const st = await statSafe(full);
-          if (!st) continue;
-          if (now - st.mtimeMs <= ROLLOUT_RECENT_MS) wanted.add(full);
-          else older.push({ file: full, mtimeMs: st.mtimeMs, size: st.size });
-        }
+    const chats = new Map();
+    for (const { file, st } of await rolloutsIn(this.sessionsRoot)) {
+      if (now - st.mtimeMs <= ROLLOUT_RECENT_MS) recent.add(file);
+      else older.push({ file, mtimeMs: st.mtimeMs, size: st.size });
+      await this.noteChat(chats, file, st, now);
+    }
+    this.recentFiles = recent;
+    this.localChats = chats;
+    this.syncFollowers();
+    await this.loadPastLimits(older);
+  }
+
+  // The VS Code and terminal chats in the WSL distros that run, and their names; a stopped
+  // distro's stay as they were.
+  async scanChatRoots(now) {
+    const chats = new Map();
+    for (const r of this.chatRoots) {
+      if (!r.active) {
+        for (const [id, c] of this.rootChats) if (c.root === r.root) chats.set(id, c);
+        continue;
       }
-    };
-    await walk(this.sessionsRoot, 0);
+      for (const { file, st } of await rolloutsIn(r.root)) await this.noteChat(chats, file, st, now, r);
+      const index = path.join(path.dirname(r.root), 'session_index.jsonl');
+      const stamp = await this.stampOf(index);
+      if (this.rootNames.get(r.root)?.stamp !== stamp) {
+        this.rootNames.set(r.root, { stamp, names: readNames(await fsp.readFile(index, 'utf8').catch(() => '')) });
+      }
+    }
+    for (const root of this.rootNames.keys()) if (!this.chatRoots.some((r) => r.root === root)) this.rootNames.delete(root);
+    this.rootChats = chats;
+    this.syncFollowers();
+  }
+
+  // Into `chats`: `file` if it's a VS Code or terminal chat. One written in the last week is followed.
+  async noteChat(chats, file, st, now, where = null) {
+    let meta = this.metas.get(file);
+    if (!meta) {
+      meta = await chatMetaOf(file);
+      if (!meta) return;   // still being written
+      this.metas.set(file, meta);
+    }
+    if (!meta.client) return;
+    chats.set(meta.threadId, {
+      ...meta,
+      file,
+      mtimeMs: st.mtimeMs,
+      followed: now - st.mtimeMs <= CHAT_FOLLOW_MS,
+      root: where?.root ?? null,
+      machineKey: where?.machineKey ?? null,
+      machine: where?.machine ?? null,
+    });
+  }
+
+  // Followed: what was written here in the last hour, and the chats of the last week.
+  syncFollowers() {
+    const wanted = new Set(this.recentFiles);
+    for (const c of [...this.localChats.values(), ...this.rootChats.values()]) if (c.followed) wanted.add(c.file);
     for (const file of wanted) if (!this.followers.has(file)) this.followers.set(file, new RolloutFollower(file));
     for (const file of [...this.followers.keys()]) if (!wanted.has(file)) this.followers.delete(file);
-    await this.loadPastLimits(older);
   }
 
   // Rate limits come with every reply. When Codex hasn't run here for a while, the latest ones
@@ -595,39 +725,50 @@ class CodexTracker extends EventEmitter {
     }
   }
 
+  // A thread as a bubble or a sidebar row. A dot's is named for the dot. A VS Code or terminal chat
+  // (`client`) that the app lists too is the app's.
+  session(threadId, hostId, cwd, derived, client = null) {
+    const c = this.catalog.get(threadId);
+    const host = c?.hostId || hostId;
+    const dot = this.aeons.get(threadId);
+    const chat = c || dot ? null : client;
+    return {
+      id: `codex:${threadId}`,
+      kind: 'codex',
+      ...(chat && { client: chat }),
+      hostSessionId: null,
+      title: dot?.name || c?.title || this.nameOf(threadId) || folderName(c?.cwd || cwd) || CHAT_TITLE[chat] || 'Codex thread',
+      remote: dot ? null : hostName(host, this.hostNames),
+      project: projectName(c?.cwd || cwd),
+      cwd: c?.cwd || cwd,
+      url: chat ? chatUrl(threadId, chat) : threadUrl(threadId, host),
+      ...derived,
+    };
+  }
+
   recompute(force = false) {
     const now = this.now();
     const byThread = new Map();
-    const followed = new Set();
+    const followed = new Map();   // threadId -> { state, skew }: its turn state, and its machine's clock skew
     const prompted = new Map();   // threadId -> when you last sent it a message, on our clock
-    // A dot's bubble is named for the dot.
-    const session = (threadId, hostId, cwd, derived) => {
-      const c = this.catalog.get(threadId);
-      const host = c?.hostId || hostId;
-      const dot = this.aeons.get(threadId);
-      return {
-        id: `codex:${threadId}`,
-        kind: 'codex',
-        hostSessionId: null,
-        title: dot?.name || c?.title || this.threadNames.get(threadId) || folderName(c?.cwd || cwd) || 'Codex thread',
-        remote: dot ? null : hostName(host, this.hostNames),
-        project: projectName(c?.cwd || cwd),
-        cwd: c?.cwd || cwd,
-        url: threadUrl(threadId, host),
-        ...derived,
-      };
-    };
+    const session = (...args) => this.session(...args);
     // Threads whose history we can see, here or on an SSH host, say what they're doing.
     const follow = (s, hostId, skew) => {
       if (!s.threadId || s.subagent) return;
-      followed.add(s.threadId);
+      followed.set(s.threadId, { state: s, skew });
       if (s.lastPromptAt) prompted.set(s.threadId, s.lastPromptAt - skew);
+      const client = clientOf(s);
       const derived = rolloutStatus(s, {
-        now, skew, unread: this.unread.has(s.threadId), dismissedAt: this.dismissed.get(`codex:${s.threadId}`), readyFrom: this.readyFrom,
+        now,
+        skew,
+        unread: this.unread.has(s.threadId),
+        dismissedAt: this.dismissed.get(`codex:${s.threadId}`),
+        readyFrom: this.readyFrom,
+        cliReadyFrom: client ? this.cliReadyFrom : null,
       });
-      if (derived.status !== 'idle') byThread.set(s.threadId, session(s.threadId, hostId, s.cwd, derived));
+      if (derived.status !== 'idle') byThread.set(s.threadId, session(s.threadId, hostId, s.cwd, derived, client));
     };
-    for (const f of this.followers.values()) follow(f.state, 'local', 0);
+    for (const [file, f] of this.followers) if (!this.asleep(file)) follow(f.state, 'local', 0);
     for (const [hostId, remote] of this.remotes) {
       for (const f of remote.files.values()) follow(f.state, hostId, remote.skew);
     }
@@ -668,7 +809,7 @@ class CodexTracker extends EventEmitter {
       this.lastEmitted = key;
       this.emit('change', out);
     }
-    this.recomputeAll(byThread, prompted, force);
+    this.recomputeAll(byThread, prompted, force, followed);
     this.updateLimits();
   }
 
@@ -676,13 +817,36 @@ class CodexTracker extends EventEmitter {
   // on SSH hosts. A dot lives in the cloud with no folder, and helper threads (the auto-reviewer,
   // a thread's subagents) aren't yours, so neither is listed.
   // `prompted`: when you last sent each followed thread a message (folder mode's marks go by it).
-  recomputeAll(byThread, prompted = new Map(), force = false) {
+  recomputeAll(byThread, prompted = new Map(), force = false, followed = new Map()) {
     const all = [];
     for (const [threadId, c] of this.catalog) {
       if (c.missing || (c.threadSource != null && c.threadSource !== USER_THREAD)) continue;
       if (this.aeons.has(threadId) || this.subtasks.has(threadId) || this.dreams.has(threadId)) continue;
       const s = byThread.get(threadId) ?? this.listed(threadId, c);
       all.push({ ...s, hostId: c.hostId, lastActivityAt: c.updatedAt, lastPromptAt: prompted.get(threadId) || 0 });
+    }
+    // The VS Code and terminal chats the app doesn't list, here, in WSL and on the SSH hosts, quiet
+    // ones included. `at`: when the rollout was last written, on our clock.
+    const listed = new Set();
+    const chat = (threadId, { client, cwd, at }, hostId = 'local', where = null) => {
+      if (!client || this.catalog.has(threadId) || listed.has(threadId)) return;
+      listed.add(threadId);
+      const f = followed.get(threadId);
+      const lastActivityAt = Math.max(at || 0, f?.state.lastEventAt ? f.state.lastEventAt - f.skew : 0);
+      const s = byThread.get(threadId) ?? this.session(threadId, hostId, cwd, { status: 'idle', detail: '', since: lastActivityAt }, client);
+      all.push({
+        ...s,
+        hostId,
+        machineKey: where?.machineKey ?? null,
+        machine: where?.machine ?? null,
+        lastActivityAt,
+        lastPromptAt: prompted.get(threadId) || 0,
+      });
+    };
+    for (const c of this.localChats.values()) chat(c.threadId, { ...c, at: c.mtimeMs });
+    for (const c of this.rootChats.values()) chat(c.threadId, { ...c, at: c.mtimeMs }, 'local', c);
+    for (const [hostId, remote] of this.remotes) {
+      for (const [threadId, t] of remote.chats ?? []) chat(threadId, { ...t, at: t.mtimeMs - remote.skew }, hostId);
     }
     all.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     this.all = all;
@@ -725,4 +889,21 @@ class CodexTracker extends EventEmitter {
   }
 }
 
-module.exports = { CodexTracker, codexPaths, parseAeons, parseConnections, parseUnread, readCatalog, threadUrl };
+// Every rollout under `root` (sessions/<y>/<m>/<d>/), with its stat.
+async function rolloutsIn(root) {
+  const out = [];
+  const walk = async (dir, depth) => {
+    for (const e of await readdirSafe(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory() && depth < 3) await walk(full, depth + 1);
+      else if (e.isFile() && ROLLOUT_RE.test(e.name)) {
+        const st = await statSafe(full);
+        if (st) out.push({ file: full, st });
+      }
+    }
+  };
+  await walk(root, 0);
+  return out;
+}
+
+module.exports = { CodexTracker, chatUrl, codexPaths, parseAeons, parseConnections, parseUnread, readCatalog, threadUrl };

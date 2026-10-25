@@ -10,14 +10,23 @@ Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
 
 ## Claude and Codex
 - Read their files only (session index, transcripts, logs, Codex state and thread catalog).
-  Never write to them or change their settings. The one exception is the opt-in Claude Code
-  mod for live usage, installed only when the user turns it on.
-- Open sessions only through the apps' own links: `claude://resume?session=<id>` and
-  `codex://threads/<id>?hostId=<host>`.
+  Never write to them or change their settings. Two exceptions: the opt-in Claude Code mod for
+  live usage, installed only when the user turns it on, and the sidebar's Delete for a chat run
+  in VS Code or a terminal, only after the user confirms it. A Claude Code session's transcript
+  and its folder are deleted (to the Recycle Bin on this PC); a Codex chat is archived through
+  Codex's own app-server (`thread/archive`), never by editing its files.
+- Open sessions only through the apps' own links: `claude://resume?session=<id>`,
+  `codex://threads/<id>?hostId=<host>`, and the VS Code extensions' links:
+  Claude Code's `vscode://anthropic.claude-code/open?session=<id>` and Codex's
+  `vscode://openai.chatgpt/local/<id>`, sent once the VS Code window for that session's machine
+  is in front. With no such window, VS Code's own `vscode://vscode-remote/<wsl+distro or
+  ssh-remote+host><folder>` (or `vscode://file/<folder>` on this PC) opens the folder there first.
 
 ## Network
-- No server contact of its own, except SSH hosts from `~/.ssh/config` with key auth
-  (read-only Python watchers) and SNU eTL once the user turns it on.
+- No server contact of its own, except SSH hosts from `~/.ssh/config` with key auth and SNU eTL
+  once the user turns it on. On SSH hosts the pet runs read-only Python watchers, plus one
+  command per Delete the user confirms in the sidebar (remove that Claude Code session's files,
+  or archive that Codex chat through Codex's app-server).
 
 ## Floating pet
 - The pet's window never takes focus.

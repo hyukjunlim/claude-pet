@@ -254,6 +254,12 @@ header {
 .app.codex,
 .app.chatgpt { background: var(--codex); }   /* claude.ai's chats keep Claude's color */
 .app.gemini { background: var(--gemini); }
+/* Claude Code outside the desktop app (in VS Code or a terminal): Claude's color, as a ring. */
+.app.vscode,
+.app.terminal { background: transparent; box-shadow: inset 0 0 0 1.25px var(--claude); }
+/* Codex outside its app, the same way in Codex's color. */
+.app.codex-vscode,
+.app.codex-terminal { background: transparent; box-shadow: inset 0 0 0 1.25px var(--codex); }
 
 .session .app { margin: 0 3px 0 2px; }
 

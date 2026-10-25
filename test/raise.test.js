@@ -3,7 +3,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { BROWSER_HELPER, HELPER, raiseBrowserWindow, raiseCodexWindow } = require('../src/raise');
+const { spawn } = require('node:child_process');
+const {
+  BROWSER_HELPER, HELPER, VSCODE_HELPER, raiseBrowserWindow, raiseCodexWindow, raiseVsCodeWindow, vsCodePlace,
+} = require('../src/raise');
 
 function fakeSpawn() {
   const runs = [];
@@ -40,7 +43,7 @@ test('both helpers send Alt only when the window is not in front, with an unassi
     'keybd_event(0x12, 0, 2,',                   // Alt up
     'return SetForegroundWindow(h)',
   ];
-  for (const script of [HELPER, BROWSER_HELPER]) {
+  for (const script of [HELPER, BROWSER_HELPER, VSCODE_HELPER]) {
     const raise = script.slice(script.indexOf('public static bool Raise('));
     const at = steps.map((s) => raise.indexOf(s));
     assert.ok(at.every((i) => i >= 0), `missing step in Raise: ${steps[at.indexOf(-1)]}`);
@@ -75,4 +78,45 @@ test("a web chat's window is found from its host's browser and its tab's title, 
   assert.equal(raiseBrowserWindow({ hostPid: null, title, spawnFn, platform: 'win32' }), null);
   assert.equal(raiseBrowserWindow({ hostPid: 4321, title: '', spawnFn, platform: 'win32' }), null);
   assert.equal(runs.length, 1);
+});
+
+test("a VS Code window is raised by its machine's mark in the title, which reaches the helper as data", async () => {
+  const { runs, spawnFn } = fakeSpawn();
+  const raised = raiseVsCodeWindow({ marks: ['[SSH: lab]', '[SSH: 192.0.2.10]', 'bad\nline'], spawnFn, platform: 'win32', env: {} });
+  const { opts, args } = runs[0];
+  assert.equal(Buffer.from(args.at(-1), 'base64').toString('utf16le'), VSCODE_HELPER);
+  assert.equal(Buffer.from(opts.env.PET_RAISE_MARKS, 'base64').toString('utf8'), '[SSH: lab]\n[SSH: 192.0.2.10]');
+  runs[0].child.emit('exit', 0);
+  assert.equal(await raised, true);
+  const none = raiseVsCodeWindow({ marks: [], spawnFn, platform: 'win32', env: {} });
+  runs[1].child.emit('exit', 2);
+  assert.equal(await none, false, 'no window for that machine');
+  assert.equal(await raiseVsCodeWindow({ spawnFn, platform: 'darwin' }), null);
+});
+
+test('the VS Code helper runs, and finds no window for a machine nobody has open', { skip: process.platform !== 'win32' && 'Windows only' }, async () => {
+  const code = await new Promise((resolve) => {
+    const c = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(VSCODE_HELPER, 'utf16le').toString('base64')], {
+      windowsHide: true,
+      stdio: 'ignore',
+      env: { ...process.env, PET_RAISE_MARKS: Buffer.from('[SSH: no-such-host.invalid]', 'utf8').toString('base64') },
+    });
+    c.on('exit', resolve);
+  });
+  assert.equal(code, 2);
+});
+
+test("a session's machine gives the VS Code window to look for, and the folder to open there without one", () => {
+  const sshHosts = [{ alias: 'lab', hostName: '192.0.2.10', user: null, port: null }];
+  assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: 'wsl:Ubuntu', cwd: '/home/me/my proj' }), {
+    marks: ['[WSL: Ubuntu]'], folder: 'vscode://vscode-remote/wsl+Ubuntu/home/me/my%20proj',
+  });
+  assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: 'ssh:me@192.0.2.10:22', machine: '192.0.2.10', cwd: '/data/proj' }, { sshHosts }), {
+    marks: ['[SSH: lab]', '[SSH: me@192.0.2.10]', '[SSH: 192.0.2.10]'], folder: 'vscode://vscode-remote/ssh-remote+lab/data/proj',
+  });
+  const connections = [{ hostId: 'remote-ssh-discovered:lab', name: 'lab', target: 'lab', port: null }];
+  assert.deepEqual(vsCodePlace({ kind: 'codex', client: 'vscode', hostId: 'remote-ssh-discovered:lab', cwd: '/data/proj' }, { connections, sshHosts }).marks, ['[SSH: lab]']);
+  assert.deepEqual(vsCodePlace({ kind: 'codex', client: 'vscode', hostId: 'local', machineKey: 'wsl:Ubuntu', cwd: '/home/me' }).marks, ['[WSL: Ubuntu]']);
+  assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: null, cwd: 'C:\\Users\\me\\proj' }), { marks: [], folder: 'vscode://file/C:/Users/me/proj' });
+  assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: null, cwd: null }), { marks: [], folder: '' });
 });

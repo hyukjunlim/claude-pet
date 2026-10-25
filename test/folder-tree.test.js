@@ -72,6 +72,19 @@ test('WSL is one host whether the path came as a distro, a share, Codex\'s local
   assert.deepEqual(home.children.map((c) => [c.label, titles(c).sort()]), [['tok', ['loop', 'share', 'tok']], ['chem', ['chem']]]);
 });
 
+test("Codex's chats in VS Code or a terminal say so, and one in WSL sits under WSL", () => {
+  const hosts = build([], [
+    codex('ext', '/home/me/urban-map', 'local', { client: 'vscode', machineKey: 'wsl:Ubuntu', machine: 'Ubuntu' }),
+    codex('tui', '/data/me/projects', 'remote-ssh-discovered:lab', { client: 'terminal' }),
+    codex('app', '/data/me/projects', 'remote-ssh-discovered:lab'),
+  ]);
+  const rows = (n) => [...n.sessions, ...n.children.flatMap(rows)];
+  assert.deepEqual(hosts.map((h) => [h.label, h.folders.flatMap(rows).map((s) => [s.title, s.app]).sort()]), [
+    ['WSL', [['ext', 'codex-vscode']]],
+    ['lab', [['app', 'codex'], ['tui', 'codex-terminal']]],
+  ]);
+});
+
 test('Windows paths match without case, /mnt/c is this PC, and an inner folder is shown below its parent', () => {
   const [pc] = build(
     [claude('home', 'C:\\Users\\Me'), claude('pet', 'c:\\users\\me\\ttokttok-pet', { lastActivityAt: ago(0.5) })],

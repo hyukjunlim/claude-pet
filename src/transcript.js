@@ -54,7 +54,9 @@ function createTurnState() {
     questionThisTurn: false,     // the running (or last) turn showed a next-step box
     backgroundTasks: new Map(),  // task id -> { detail, at }: sent to the background, no ending notice yet
     title: null,
+    aiTitle: null,               // the title Claude Code gave the session itself (ai-title)
     cwd: null,
+    entrypoint: null,            // what started it: claude-desktop, claude-vscode, cli, sdk-…
     // Used to tell whether an SSH session's copied transcript has caught up with the desktop index.
     lastStampAt: 0,              // newest timestamp in the file, on the clock of the machine that wrote it
     lastUserAt: 0,               // newest user entry (a prompt, a tool result or a meta message)
@@ -217,10 +219,14 @@ function applyEntry(state, entry) {
   if (at > state.lastStampAt) state.lastStampAt = at;
   if (entry.isSidechain) return;
   if (entry.cwd && typeof entry.cwd === 'string') state.cwd = entry.cwd;
+  if (entry.entrypoint && typeof entry.entrypoint === 'string') state.entrypoint = entry.entrypoint;
 
   switch (entry.type) {
     case 'custom-title':
       if (typeof entry.customTitle === 'string') state.title = entry.customTitle;
+      return;
+    case 'ai-title':
+      if (typeof entry.aiTitle === 'string') state.aiTitle = entry.aiTitle;
       return;
     case 'summary':
       if (typeof entry.summary === 'string' && !state.title) state.title = entry.summary;
