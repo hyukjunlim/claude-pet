@@ -27,7 +27,7 @@ const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
 const { FolderWindow } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
-const { settleFlags } = require('./flags');
+const { settleMarks } = require('./marks');
 const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
@@ -489,7 +489,7 @@ function mergeSessions() {
 
 // Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
 function sendTree() {
-  const flags = currentFlags();
+  const marked = currentMarks();
   const hidden = currentHidden();
   if (!folder?.open) return;
   const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id));
@@ -500,7 +500,7 @@ function sendTree() {
     sshHosts: sshConfigHosts(),
     codexConnections: codex?.connections ?? [],
     defaultWsl: wslDistros()[0] ?? null,
-    flags,
+    marked,
   });
   const key = JSON.stringify(hosts);
   if (key === treeKey) return;
@@ -508,20 +508,37 @@ function sendTree() {
   folder.send('folder:tree', hosts);
 }
 
-// Folder mode's follow-up flags (flags.js), less the ones whose session you've since sent a
-// message.
-function currentFlags() {
-  const saved = settings.get('flags') || {};
-  const left = settleFlags(saved, [...claudeAll, ...codexAll, ...webAll]);
-  if (left !== saved) settings.set({ flags: left });
+// The sessions you marked as Ready (marks.js), less the ones you've since sent a message. Marks
+// were follow-up flags before; those carry over.
+function currentMarks() {
+  const flags = settings.get('flags');
+  if (flags) settings.set({ marked: { ...flags, ...settings.get('marked') }, flags: undefined });
+  const saved = settings.get('marked') || {};
+  const left = settleMarks(saved, [...claudeAll, ...codexAll, ...webAll]);
+  if (left !== saved) settings.set({ marked: left });
   return left;
 }
 
-function setFlag(id, on) {
-  const flags = { ...currentFlags() };
-  if (on) flags[id] = Date.now();
-  else delete flags[id];
-  settings.set({ flags });
+// Mark as Ready: a session you'd marked done gets back what it had (a question still in the
+// next-step box is Needs you again); a quiet one shows as Ready until you mark it done or message it.
+function markReady(id) {
+  trackerFor(id)?.undismiss?.(id);   // the lists update right away
+  persistDismissed();
+  const s = [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((x) => x.id === id), null);
+  if (!s || s.status === 'idle') settings.set({ marked: { ...currentMarks(), [id]: Date.now() } });
+  sendTree();
+}
+
+// Mark as done: a session's Ready, Error or Needs you is settled, as its bubble's × settles it,
+// and your mark on it goes.
+function markDone(ids) {
+  const marked = { ...currentMarks() };
+  for (const id of ids) {
+    trackerFor(id)?.dismiss(id);
+    delete marked[id];
+  }
+  settings.set({ marked });
+  persistDismissed();
   sendTree();
 }
 
@@ -545,22 +562,16 @@ function setHidden(ids, on) {
   sendTree();
 }
 
-// A sidebar row's own menu: a session's (open it, flag it, hide it), or a machine's or a folder's
-// (fold it, hide what's in it). Null for anywhere else, which gets the tray menu.
+// A sidebar row's own menu: a session's (mark it done or Ready, hide it), or a machine's or a
+// folder's (fold it, hide what's in it). Null for anywhere else, which gets the tray menu.
 function rowMenu(target) {
   const known = (id) => typeof id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === id));
   if (target?.kind === 'session' && known(target.id)) {
     const { id } = target;
-    const flagged = Object.hasOwn(currentFlags(), id);
+    const status = [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null)?.status;
+    const pending = Object.hasOwn(currentMarks(), id) || status === 'review' || status === 'failed' || status === 'waiting';
     return Menu.buildFromTemplate([
-      {
-        label: 'Open',
-        click: () => {
-          if (openSession(id, { handoff: false, fill: true })) folder?.send('folder:select', id);
-        },
-      },
-      { type: 'separator' },
-      { label: flagged ? 'Clear flag' : 'Flag for follow-up', click: () => setFlag(id, !flagged) },
+      pending ? { label: 'Mark as done', click: () => markDone([id]) } : { label: 'Mark as Ready', click: () => markReady(id) },
       { label: 'Hide from the sidebar', click: () => setHidden([id], true) },
     ]);
   }
@@ -600,6 +611,7 @@ function startCodex() {
     ...codexPaths(),
     watchHosts: settings.get('codexOverSsh'),
     dismissed: settings.get('dismissed') || {},
+    readyFrom: readyFrom(),
   });
   codex.on('change', (list) => {
     codexSessions = list;
@@ -1060,7 +1072,6 @@ function openWebChat(s, { handoff = true } = {}) {
     if (!url) return false;
     openApp(url, { handoff });
   }
-  if (s.status !== 'running') webchats.dismiss(s.id);
   return true;
 }
 
@@ -1075,16 +1086,22 @@ function openSession(id, { handoff = true, fill = false } = {}) {
   if (!url) return false;
   open(url);
   if (fill && (s.kind === 'desktop' || s.kind === 'codex')) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
-  // A finished session or a one-off notice is done with once opened; a class bubble
-  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked, and a
-  // session that needs you until you answer it (or click its ×). A quiet session (folder mode
-  // lists those too) has nothing to be done with.
-  const asks = s.status === 'waiting' && s.kind !== 'etl';
-  if (s.status !== 'running' && s.status !== 'background' && s.status !== 'idle' && !asks && !s.keepOnOpen) {
+  // Opening a session doesn't settle it: Ready, Error and Needs you stay until you mark it done
+  // (its ×, or the sidebar's Mark as done) or send it a message. A one-off eTL notice is done with
+  // once opened; a class bubble (`keepOnOpen`, etl/timetable.js) stays until the class ends or its
+  // × is clicked.
+  if (s.kind === 'etl' && s.status !== 'running' && s.status !== 'background' && s.status !== 'idle' && !s.keepOnOpen) {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }
   return true;
+}
+
+// From when on a look at a session no longer counts as done with it: set the first time this
+// version runs, so what was settled before stays settled.
+function readyFrom() {
+  if (!settings.get('readyFrom')) settings.set({ readyFrom: Date.now() });
+  return settings.get('readyFrom');
 }
 
 function persistDismissed() {
@@ -1230,11 +1247,6 @@ function registerIpc() {
     if (!fromFolder(e) || typeof id !== 'string') return;
     if (!openSession(id, { handoff: via === 'key', fill: true })) log('folder: nothing to open for', id);
   });
-  // A row's flag: it stays until you send that session your next message.
-  ipcMain.on('folder:flag', (e, id, on) => {
-    if (!fromFolder(e) || typeof id !== 'string') return;
-    setFlag(id, on === true);
-  });
   ipcMain.on('folder:pet-click', (e) => {
     if (!fromFolder(e)) return;
     const url = mainAppLink();
@@ -1321,6 +1333,12 @@ function buildMenu() {
     });
   }
   for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
+  // Ready lasts until it's marked done: every finished one at once (questions wait for answers).
+  const done = new Set([
+    ...sessions.filter((s) => s.kind !== 'etl' && (s.status === 'review' || s.status === 'failed')).map((s) => s.id),
+    ...Object.keys(currentMarks()),
+  ]);
+  if (done.size) items.push({ label: `Mark all Ready as done (${done.size})`, click: () => markDone([...done]) });
   items.push({ type: 'separator' });
   const folderMode = settings.get('mode') === 'folder';
   items.push({
@@ -1697,7 +1715,8 @@ if (!app.requestSingleInstanceLock()) {
     tracker = DEMO
       ? new DemoTracker()
       : new SessionTracker({
-        ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {}, seen: settings.get('seen') || {},
+        ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {},
+        readyFrom: readyFrom(),
       });
     tracker.on('change', (list) => {
       claudeSessions = list;
@@ -1707,7 +1726,6 @@ if (!app.requestSingleInstanceLock()) {
       claudeAll = list;
       sendTree();
     });
-    tracker.on('seen', () => settings.set({ seen: tracker.seenSnapshot() }));
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
     if (DEMO) {
       tracker.on('usage', ({ claude, codex }) => setUsage({ claude: claude ? [claude] : [], codex }));

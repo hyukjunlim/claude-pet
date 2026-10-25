@@ -356,7 +356,8 @@ function applySystem(state, entry, at) {
   }
 }
 
-// meta: { lastFocusedAt, dismissedAt, summary: postTurnSummary from the desktop session file }
+// meta: { lastFocusedAt, dismissedAt, summary: postTurnSummary from the desktop session file,
+// readyFrom: turns that end from then on are Ready until dismissed, looked at or not }
 function deriveStatus(state, meta = {}, now = Date.now()) {
   const derived = turnStatus(state, meta, now);
   // Between the turn that starts a background task and the one its notice starts, Claude isn't
@@ -392,7 +393,10 @@ function turnStatus(state, meta, now) {
   }
 
   const ended = state.turnEndedAt;
-  if (!ended || state.interrupted || now - ended > UNREAD_WINDOW_MS) return { status: 'idle', detail: '', since: ended };
+  // A turn that ended before `readyFrom` went quiet once you had looked at it, or after 12 hours.
+  // One since stays until you mark it done (dismissedAt) or start another turn.
+  const old = !(meta.readyFrom <= ended);
+  if (!ended || state.interrupted || (old && now - ended > UNREAD_WINDOW_MS)) return { status: 'idle', detail: '', since: ended };
 
   const summary = meta.summary;
   const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;
@@ -403,8 +407,8 @@ function turnStatus(state, meta, now) {
     return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
   }
 
-  // How else the turn ended matters only until you've seen it.
-  const seenAt = Math.max(meta.lastFocusedAt || 0, meta.dismissedAt || 0);
+  // How else the turn ended matters until you mark it done (or, before `readyFrom`, look at it).
+  const seenAt = Math.max(old ? meta.lastFocusedAt || 0 : 0, meta.dismissedAt || 0);
   if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
 
   if (state.error) return { status: 'failed', detail: state.error.message, since: ended };

@@ -210,10 +210,11 @@ function pendingQuestion(state) {
   return newest;
 }
 
-// Threads from the desktop app are "Ready" while the app lists them as unread. CLI threads,
-// which it doesn't track, are "Ready" for a few minutes after they finish. `skew` is how far
-// the clock of the machine that wrote the rollout is ahead of ours.
-function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 0, skew = 0 } = {}) {
+// Threads from the desktop app are "Ready" until you dismiss them; turns that ended before
+// `readyFrom`, only while the app listed them as unread. CLI threads, which it doesn't track, are
+// "Ready" for a few minutes after they finish. `skew` is how far the clock of the machine that
+// wrote the rollout is ahead of ours.
+function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 0, skew = 0, readyFrom = null } = {}) {
   const clock = now + skew;
   const seen = dismissedAt ? dismissedAt + skew : 0;
   const local = (d) => (d.since ? { ...d, since: d.since - skew } : d);
@@ -227,8 +228,9 @@ function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 
   }
   const ended = state.turnEndedAt;
   const idle = local({ status: 'idle', detail: '', since: ended });
-  if (!ended || state.aborted || ended <= seen || clock - ended > UNREAD_WINDOW_MS) return idle;
-  if (state.fromDesktop ? !unread : clock - ended > CLI_REVIEW_MS) return idle;
+  const old = readyFrom == null || ended - skew < readyFrom;
+  if (!ended || state.aborted || ended <= seen || (old && clock - ended > UNREAD_WINDOW_MS)) return idle;
+  if (state.fromDesktop ? old && !unread : clock - ended > CLI_REVIEW_MS) return idle;
   if (state.error) return local({ status: 'failed', detail: state.error.message, since: ended });
   return local({ status: 'review', detail: oneLine(state.lastMessage, 120) || 'Finished', since: ended });
 }

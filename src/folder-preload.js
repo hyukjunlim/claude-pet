@@ -22,12 +22,10 @@ contextBridge.exposeInMainWorld('folder', {
   onWake: listen('folder:wake'),
   onStep: listen('folder:step'),     // Ctrl+Tab (+1) or Ctrl+Shift+Tab (-1)
   onFold: listen('folder:fold'),     // a row menu's Collapse or Expand: { key, open }
-  onSelect: listen('folder:select'), // a session opened from its row's menu
   ready: () => ipcRenderer.send('folder:ready'),
   prefs: () => ipcRenderer.sendSync('folder:prefs'),   // { fold, order, zoom } from settings.json
   savePrefs: (p) => ipcRenderer.send('folder:save-prefs', p),
   open: (id, via) => ipcRenderer.send('folder:open', String(id), via === 'key' ? 'key' : 'click'),
-  flag: (id, on) => ipcRenderer.send('folder:flag', String(id), on === true),
   activatePet: () => ipcRenderer.send('folder:pet-click'),
   resize: (phase) => ipcRenderer.send('folder:resize', String(phase)),   // 'move', 'end' or 'reset'
   // `target`: the row clicked, if any: { kind: 'session', id } or { kind: 'folder', key, open, ids }.

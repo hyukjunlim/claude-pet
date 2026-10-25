@@ -66,10 +66,6 @@
   api.onFold(({ key, open } = {}) => {
     if (typeof key === 'string') setOpen(key, open === true);
   });
-  api.onSelect((id) => {
-    current = id;
-    render();
-  });
 
   // ---------------------------------------------------------- folding
 
@@ -277,15 +273,15 @@
   }
 
   function sessionEl(s, depth) {
-    const row = el('button', `row session status-${s.status}${s.flagged ? ' flagged' : ''}${s.id === current ? ' current' : ''}`);
+    const row = el('button', `row session status-${s.status}${s.id === current ? ' current' : ''}`);
     row.type = 'button';
     row.dataset.id = s.id;
     row.style.setProperty('--depth', String(depth));
     row.setAttribute('role', 'treeitem');
     const state = LABELS[s.status];
     const app = s.siteName || APP_NAME[s.app];
-    row.setAttribute('aria-label', [s.title, app, state, s.flagged && 'Flagged', `Click to open in ${app}`].filter(Boolean).join(', '));
-    row.append(flagEl(s), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
+    row.setAttribute('aria-label', [s.title, app, state, `Click to open in ${app}`].filter(Boolean).join(', '));
+    row.append(el('span', 'chevron'), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
     if (state) row.append(el('span', 'state', state));
     else {
       const ago = el('span', 'ago', formatAgo(s.lastActivityAt));
@@ -298,36 +294,6 @@
       render();
     });
     return row;
-  }
-
-  // The follow-up flag, where a folder's row has its arrow: faint while you point at the row,
-  // filled in once set. Opening the session leaves it; your next message to it takes it off
-  // (main.js, flags.js).
-  function flagEl(s) {
-    const flag = el('span', 'flag');
-    flag.title = s.flagged ? 'Clear flag' : 'Flag for follow-up';
-    flag.append(flagIcon());
-    flag.addEventListener('click', (e) => {
-      e.stopPropagation();   // not an open
-      s.flagged = !s.flagged;
-      api.flag(s.id, s.flagged);
-      render();
-    });
-    return flag;
-  }
-
-  // A flag on its pole; CSS fills the cloth in.
-  function flagIcon() {
-    const ns = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('aria-hidden', 'true');
-    for (const d of ['M4 14.5V2.5', 'M4 2.75h8.25L10.25 6l2 3.25H4z']) {
-      const path = document.createElementNS(ns, 'path');
-      path.setAttribute('d', d);
-      svg.append(path);
-    }
-    return svg;
   }
 
   // A folded folder's news: something needs you, or is working.

@@ -56,22 +56,23 @@ test('a reply being written is Running, and Ready once it ends while you look el
   assert.equal(item.url, `https://claude.ai/chat/${CONV}`);
 });
 
-test('a reply that ends while you look at its tab leaves no bubble', () => {
+test('a reply that ends while you look at its tab is Ready all the same', () => {
   const { c, advance, tab } = chats();
   c.report('h1', tab({ generating: true, looking: true }));
   c.report('h1', tab({ generating: false, looking: true }));
   advance(END_GRACE_MS);
-  assert.deepEqual(bubbles(c), []);
+  assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);
 });
 
-test('Ready goes away once you look at the chat', () => {
+test('looking at the chat leaves it Ready; your next message starts a new reply', () => {
   const { c, advance, tab } = chats();
   c.report('h1', tab({ generating: true }));
   c.report('h1', tab({ generating: false }));
   advance(END_GRACE_MS);
-  assert.equal(c.items().length, 1);
   c.report('h1', tab({ looking: true }));
-  assert.deepEqual(bubbles(c), []);
+  assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);
+  c.report('h1', tab({ looking: true, generating: true }));
+  assert.deepEqual(bubbles(c), [['running', 'Refactor plan']]);
 });
 
 test('a stop control that drops out for a moment is still the same reply', () => {
@@ -97,7 +98,7 @@ test('a new chat carries on as its conversation once the site gives it an addres
   assert.deepEqual(c.items().map((it) => [it.id, it.title, it.since]), [[`web:claude:${CONV}`, 'Trip ideas', since]]);
 });
 
-test('two tabs of one conversation make one bubble, and looking at either counts', () => {
+test('two tabs of one conversation make one bubble, which a look at either leaves Ready', () => {
   const { c, advance, tab } = chats();
   c.report('h1', tab({ tabId: 1, generating: true }));
   c.report('h1', tab({ tabId: 2 }));
@@ -106,10 +107,11 @@ test('two tabs of one conversation make one bubble, and looking at either counts
   advance(END_GRACE_MS);
   assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);
   c.report('h1', tab({ tabId: 2, looking: true }));
-  assert.deepEqual(bubbles(c), []);
+  assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);
+  assert.equal(c.items().length, 1);
 });
 
-test('its × marks a Ready chat as seen; a reply still being written has none', () => {
+test('its × marks a Ready chat as done; a reply still being written has none', () => {
   const { c, advance, tab } = chats();
   c.report('h1', tab({ generating: true }));
   c.dismiss(`web:claude:${CONV}`);

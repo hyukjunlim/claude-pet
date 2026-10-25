@@ -49,6 +49,16 @@ test('a Codex turn in progress is running, with the command it runs', () => {
   assert.deepEqual(rolloutStatus(s, { now: T0 + 5000 }), { status: 'running', detail: 'npm test', since: T0 + 1000 });
 });
 
+test('from readyFrom on, a desktop thread is Ready until dismissed, read in the app or not', () => {
+  const s = rollout([meta(), started(1), complete(9)]);
+  const readyFrom = T0;
+  assert.equal(rolloutStatus(s, { now: T0 + 20_000, unread: false, readyFrom }).status, 'review');
+  assert.equal(rolloutStatus(s, { now: T0 + 13 * 3600_000, unread: false, readyFrom }).status, 'review');
+  assert.equal(rolloutStatus(s, { now: T0 + 20_000, unread: false, readyFrom, dismissedAt: T0 + 15_000 }).status, 'idle');
+  // Before readyFrom, reading it in the app settled it.
+  assert.equal(rolloutStatus(s, { now: T0 + 20_000, unread: false, readyFrom: T0 + 10_000 }).status, 'idle');
+});
+
 test("a desktop thread is ready while Codex lists it as unread, and quiet once you've read it", () => {
   const s = rollout([meta(), started(1), complete(9)]);
   assert.deepEqual(rolloutStatus(s, { now: T0 + 20_000, unread: true }), { status: 'review', detail: 'Added the parser.', since: T0 + 9000 });
@@ -252,6 +262,15 @@ test('the full list has the threads the app lists, quiet ones included, but not 
     assert.equal(remote.remote, 'lab');
     assert.equal(remote.url, 'codex://threads/th-remote?hostId=remote-ssh-discovered%3Alab-server');
     assert.equal(remote.lastActivityAt, Math.round((t + 10) * 1000));
+
+    // From readyFrom on, a thread past its rollout's hour stays Ready until you mark it done.
+    const readyFrom = Math.round((t + 5) * 1000);
+    const later = new CodexTracker({ ...pathsIn(home), watchHosts: false, readyFrom });
+    await later.tick();
+    assert.deepEqual(later.sessions.map((s) => [s.id, s.status]), [['codex:th-remote', 'review']]);
+    const done = new CodexTracker({ ...pathsIn(home), watchHosts: false, readyFrom, dismissed: { 'codex:th-remote': Date.now() } });
+    await done.tick();
+    assert.deepEqual(done.sessions, []);
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }

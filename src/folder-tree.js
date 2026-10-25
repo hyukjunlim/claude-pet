@@ -124,13 +124,17 @@ function newNode(key, label, pathText) {
 // `claude`, `codex`: the trackers' full lists. `chats`: the web chats' (WebChats.all), which go
 // first, right under "Chat" (as its `loose`). `sshHosts`: from ~/.ssh/config (sshConfigHosts).
 // `codexConnections`: CodexTracker.connections. `defaultWsl`: the distro Codex's local threads
-// and loopback SSH hosts run in. `flags`: the sessions you flagged to come back to (flags.js).
+// and loopback SSH hosts run in. `marked`: the sessions you marked as Ready, and when (marks.js).
 // `now`: for which folders start out open.
 function buildTree({
-  claude = [], codex = [], chats = [], sshHosts = [], codexConnections = [], defaultWsl = null, flags = {}, now = Date.now(),
+  claude = [], codex = [], chats = [], sshHosts = [], codexConnections = [], defaultWsl = null, marked = {}, now = Date.now(),
 } = {}) {
   const ctx = { sshHosts, codexConnections, defaultWsl };
-  const item = (s, app) => ({ ...itemOf(s, app), flagged: Object.hasOwn(flags, s.id) });
+  // A quiet session you marked shows as Ready; one with news of its own shows that.
+  const item = (s, app) => {
+    const it = itemOf(s, app);
+    return Object.hasOwn(marked, s.id) && it.status === 'idle' ? { ...it, status: 'review', detail: 'Marked as Ready', since: marked[s.id] } : it;
+  };
   const hosts = new Map();   // key -> { host, root, loose }
   const add = (s, app, { host, where }) => {
     let h = hosts.get(host.key);

@@ -57,6 +57,17 @@ test('a finished turn is review until the session is focused', () => {
   assert.equal(deriveStatus(s, { dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
 });
 
+test('from readyFrom on, a finished turn stays Ready until dismissed, looked at or not, however old', () => {
+  const s = run([prompt(0), reply(5, 'a-last'), stopSummary(6)]);
+  const readyFrom = T0 - 1000;
+  assert.equal(deriveStatus(s, { readyFrom, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'review');   // looked at
+  assert.equal(deriveStatus(s, { readyFrom }, T0 + 13 * 60 * 60 * 1000).status, 'review');               // 13 hours on
+  assert.equal(deriveStatus(s, { readyFrom, dismissedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');      // marked done
+  assert.equal(deriveStatus(run([prompt(0), reply(5, 'a-last'), stopSummary(6), prompt(20)]), { readyFrom }, T0 + 21_000).status, 'running');
+  // A turn that ended before readyFrom keeps the old rules: looking at it settled it.
+  assert.equal(deriveStatus(s, { readyFrom: T0 + 7000, lastFocusedAt: T0 + 9000 }, T0 + 10_000).status, 'idle');
+});
+
 test('the desktop summary for this turn can mark it as blocked on the user', () => {
   const s = run([prompt(0), reply(5, 'a-last'), stopSummary(6)]);
   const summary = { status_category: 'blocked', needs_action: 'Pick one of the 4 options', summarizes_uuid: 'a-last' };

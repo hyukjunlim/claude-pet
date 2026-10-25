@@ -30,14 +30,15 @@ const build = (claudeList, codexList) => buildTree({
 });
 const titles = (n) => n.sessions.map((s) => s.title);
 
-test('a flagged session says so', () => {
+test('a quiet session you marked shows as Ready; one with news of its own shows that', () => {
   const [lab] = buildTree({
-    claude: [claude('paper figures', '/data/me/projects/BirdCount', onLab), claude('stride', '/data/me/projects/RiverSurvey', onLab)],
-    sshHosts: SSH_HOSTS, codexConnections: CONNECTIONS, flags: { 'paper figures': NOW - 1000 }, now: NOW,
+    claude: [claude('paper figures', '/data/me/projects/BirdCount', onLab), claude('stride', '/data/me/projects/RiverSurvey', { ...onLab, status: 'running', since: NOW - 500 })],
+    sshHosts: SSH_HOSTS, codexConnections: CONNECTIONS, marked: { 'paper figures': NOW - 1000, stride: NOW - 1000 }, now: NOW,
   });
   const [projects] = lab.folders;
   const [bb, retro] = [...projects.children].sort((a, b) => a.label.localeCompare(b.label));
-  assert.deepEqual([bb.sessions[0].flagged, retro.sessions[0].flagged], [true, false]);
+  assert.deepEqual([bb.sessions[0].status, bb.sessions[0].since, retro.sessions[0].status], ['review', NOW - 1000, 'running']);
+  assert.equal(lab.attention, 1);   // a folded machine says so
 });
 
 test('the two apps\' names for one server meet, and a parent folder\'s session stays at the parent', () => {

@@ -245,7 +245,7 @@ function readCatalog(file) {
 class CodexTracker extends EventEmitter {
   constructor({
     home, appState, catalog, sessionsRoot, sessionIndex,
-    watchHosts = true, remoteFactory = (o) => new CodexRemote(o), pollMs = 1000, now = Date.now, dismissed = {},
+    watchHosts = true, remoteFactory = (o) => new CodexRemote(o), pollMs = 1000, now = Date.now, dismissed = {}, readyFrom = null,
   } = {}) {
     super();
     this.home = home;
@@ -258,6 +258,7 @@ class CodexTracker extends EventEmitter {
     this.pollMs = pollMs;
     this.now = now;
     this.dismissed = new Map(Object.entries(dismissed).filter(([id]) => id.startsWith('codex:')));
+    this.readyFrom = readyFrom;       // turns ending from then on are Ready until dismissed (rollout.js)
     this.unread = new Map();          // threadId -> hostId, from the app's unread list
     this.unreadSince = new Map();     // threadId -> when it became unread while we watched
     this.aeons = new Map();           // dot threadId -> { name, activity, working, since, activeAt }
@@ -325,8 +326,14 @@ class CodexTracker extends EventEmitter {
     this.recompute(true);
   }
 
+  // Undoes dismiss: the thread's own Ready, Error or Needs you comes back.
+  undismiss(id) {
+    if (this.dismissed.delete(id)) this.recompute(true);
+  }
+
+  // Kept as long as a thread's last turn could still show as Ready, which only its dismissal ends.
   dismissedSnapshot() {
-    const cutoff = this.now() - 24 * 60 * 60 * 1000;
+    const cutoff = this.now() - 30 * 24 * 60 * 60 * 1000;
     return Object.fromEntries([...this.dismissed].filter(([, t]) => t > cutoff));
   }
 
@@ -616,7 +623,7 @@ class CodexTracker extends EventEmitter {
       followed.add(s.threadId);
       if (s.lastPromptAt) prompted.set(s.threadId, s.lastPromptAt - skew);
       const derived = rolloutStatus(s, {
-        now, skew, unread: this.unread.has(s.threadId), dismissedAt: this.dismissed.get(`codex:${s.threadId}`),
+        now, skew, unread: this.unread.has(s.threadId), dismissedAt: this.dismissed.get(`codex:${s.threadId}`), readyFrom: this.readyFrom,
       });
       if (derived.status !== 'idle') byThread.set(s.threadId, session(s.threadId, hostId, s.cwd, derived));
     };
@@ -638,6 +645,16 @@ class CodexTracker extends EventEmitter {
       if ((dismissedAt && dismissedAt >= since) || (since && now - since > UNREAD_WINDOW_MS)) continue;
       byThread.set(threadId, session(threadId, host, null, { status: 'review', detail: '', since }));
     }
+    // Threads past the hour their rollout is followed for: one whose last turn ended after
+    // `readyFrom` stays Ready until you mark it done (the app's catalog says when it last changed).
+    if (this.readyFrom != null) {
+      for (const [threadId, c] of this.catalog) {
+        if (byThread.has(threadId) || followed.has(threadId) || c.missing || (c.threadSource != null && c.threadSource !== USER_THREAD)) continue;
+        if (this.aeons.has(threadId) || this.subtasks.has(threadId) || this.dreams.has(threadId)) continue;
+        if (!(c.updatedAt >= this.readyFrom) || this.dismissed.get(`codex:${threadId}`) >= c.updatedAt) continue;
+        byThread.set(threadId, session(threadId, c.hostId, c.cwd, { status: 'review', detail: '', since: c.updatedAt }));
+      }
+    }
     // A dot with a turn under way is working, even if an earlier reply is still unread.
     for (const [threadId, dot] of this.aeons) {
       if (!dot.working || now - dot.activeAt >= DOT_WORKING_MS) continue;
@@ -658,7 +675,7 @@ class CodexTracker extends EventEmitter {
   // Folder mode lists the threads the app's sidebar does: the ones you started, on this PC and
   // on SSH hosts. A dot lives in the cloud with no folder, and helper threads (the auto-reviewer,
   // a thread's subagents) aren't yours, so neither is listed.
-  // `prompted`: when you last sent each followed thread a message (folder mode's flags go by it).
+  // `prompted`: when you last sent each followed thread a message (folder mode's marks go by it).
   recomputeAll(byThread, prompted = new Map(), force = false) {
     const all = [];
     for (const [threadId, c] of this.catalog) {

@@ -34,9 +34,9 @@ const DEFAULTS = {
   webChats: false,         // claude.ai and ChatGPT chats, from the browser extension
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
-  flags: {},               // folder mode's follow-up flags: session id -> when you flagged it (flags.js)
+  readyFrom: null,         // when opening a session stopped counting as done with it (main.js)
+  marked: {},              // sessions marked as Ready in the sidebar: session id -> when (marks.js)
   hidden: {},              // sessions hidden from the sidebar: session id -> when (hidden.js)
-  seen: {},                // sessions you saw in the app with its window in front, and when
 };
 
 class Settings {

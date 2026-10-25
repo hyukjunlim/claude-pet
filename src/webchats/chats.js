@@ -2,9 +2,9 @@
 
 // What the pet makes of the browser extension's reports: a bubble for each claude.ai or ChatGPT
 // conversation, the way it shows a Claude session. It's Running while a reply is being written in
-// any of the conversation's tabs, and Ready once the reply is done, unless you were looking at one
-// of those tabs when it finished. Ready stays until you look at the conversation, click its bubble
-// or close it with its ×; it outlives its tab, and then a click opens the conversation's address.
+// any of the conversation's tabs, and Ready once the reply is done. Ready stays until you close it
+// with its × (or the sidebar's Mark as done) or send another message, looked at or not; it outlives
+// its tab, and then a click opens the conversation's address.
 //
 // Each report is one tab's state, sent whenever it changes (content.js, through host.js):
 // { tabId, windowId, site, url, title, generating, looking }. "Looking" means the tab is the one
@@ -143,7 +143,8 @@ class WebChats extends EventEmitter {
     this.#emit();
   }
 
-  // Its × (or a click on it): a Ready bubble counts as seen. A reply still being written has no ×.
+  // Its × (or the sidebar's Mark as done): the Ready bubble is done with. A reply still being
+  // written has no ×.
   dismiss(id) {
     const chat = this.chats.get(String(id).replace(/^web:/, ''));
     if (!chat || chat.status !== 'review') return;
@@ -262,13 +263,12 @@ class WebChats extends EventEmitter {
     } else if (chat.status === 'running' && !chat.endTimer) {
       chat.endTimer = this.setTimer(() => this.#ended(chat), END_GRACE_MS);
     }
-    if (chat.status === 'review' && chat.looking) chat.status = null;   // you've seen it
   }
 
   #ended(chat) {
     chat.endTimer = null;
     if (this.chats.get(chat.key) !== chat || chat.status !== 'running') return;
-    chat.status = chat.looking ? null : 'review';
+    chat.status = 'review';
     chat.since = this.now();
     chat.activeAt = chat.since;
     this.#emit();
