@@ -323,14 +323,8 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 Chats on claude.ai, chatgpt.com and gemini.google.com can get bubbles too, from a small browser
 extension in [browser-extension/](browser-extension/) for Chrome, Edge and other Chromium browsers.
 It's **off** until you turn it on: tray menu → *Web chats* → *Show claude.ai, ChatGPT and Gemini
-chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini" (e.g. "ChatGPT · 2m").
+chats*. Their bubbles are marked "claude.ai", "ChatGPT" or "Gemini" (e.g. "ChatGPT · 2m").
 
-- **Running** while a reply is being written, **Ready** once it's done, unless you were looking at
-  the chat's tab (the one shown in a browser window that has the focus) when it finished. Ready goes
-  away when you look at the chat, click its bubble or close it with ×. A conversation open in
-  several tabs gets one bubble.
-- **Clicking** brings the chat's tab and its browser window to the front. If the tab is gone, the
-  chat's address opens in your default browser.
 - **Setting up:** turning it on writes a native messaging host (a manifest and a small launcher) to
   `%APPDATA%\claude-pet\webchats` and registers it for Chrome and Edge under
   `HKCU\Software\…\NativeMessagingHosts\com.hyukjunlim.claude_pet`, which needs no admin rights;
@@ -345,6 +339,12 @@ chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini" (e.g. "Cha
   host as it starts. The extension's folder is `browser-extension` in the source folder, or
   `resources\app\browser-extension` next to `Claude Pet.exe` in a downloaded copy. Loading it
   (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
+- **Running** while a reply is being written, **Ready** once it's done, unless you were looking at
+  the chat's tab (the one shown in a browser window that has the focus) when it finished. Ready goes
+  away when you look at the chat, click its bubble or close it with ×. A conversation open in
+  several tabs gets one bubble.
+- **Clicking** brings the chat's tab and its browser window to the front. If the tab is gone, the
+  chat's address opens in your default browser.
 - **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
   reply is being written and whether you're looking at it. Never the messages. The extension only
   reads the page and makes no requests of its own; the host hands the tabs' reports to the pet over
