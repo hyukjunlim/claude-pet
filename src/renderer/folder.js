@@ -33,7 +33,10 @@
   let query = '';
   let current = null;                          // the session you opened last
   // Your folding, folder order and text size, kept in settings.json (main.js).
-  const prefs = takePrefs(api.prefs());
+  const saved = api.prefs();
+  const prefs = takePrefs(saved);
+  // Docked on a monitor's right edge, the drag edge and the border go on the left (folder.css).
+  document.body.classList.toggle('dock-right', saved?.edge === 'right');
   let fold = prefs.fold;                       // folder key -> open, where you changed it
   let order = prefs.order;                     // parent key -> its folders' keys, in your order
   let press = null;                            // a folder row held down, maybe being dragged

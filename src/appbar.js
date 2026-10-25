@@ -1,6 +1,6 @@
 'use strict';
 
-// Docks folder mode's window to the left edge of its monitor as a Windows "app bar", the way the
+// Docks folder mode's window to the left or right edge of its monitor as a Windows "app bar", the way the
 // taskbar is docked: Windows takes that strip out of the monitor's work area, so maximized
 // windows (Claude's, Codex's) fill the rest instead of going under the sidebar. Registering is
 // one call to the shell for the window's handle, which a small PowerShell helper makes (the pet
@@ -37,18 +37,19 @@ public static class PetAppBar {
   }
   // Physical pixels, like the shell's own: this process would otherwise get scaled coordinates.
   static void Aware() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { } }
-  public static string Dock(IntPtr h, uint cb, int width) {
+  // edge: 0 left (ABE_LEFT), 2 right (ABE_RIGHT).
+  public static string Dock(IntPtr h, uint cb, int width, uint edge) {
     Aware();
     APPBARDATA d = Data(h, cb);
     SHAppBarMessage(0, ref d);                       // ABM_NEW (already registered: no harm)
     MONITORINFO mi = new MONITORINFO();
     mi.cbSize = Marshal.SizeOf(mi);
     GetMonitorInfo(MonitorFromWindow(h, 2), ref mi); // MONITOR_DEFAULTTONEAREST
-    d.uEdge = 0;                                     // ABE_LEFT
+    d.uEdge = edge;
     d.rc = mi.rcMonitor;
-    d.rc.right = d.rc.left + width;
+    if (edge == 2) d.rc.left = d.rc.right - width; else d.rc.right = d.rc.left + width;
     SHAppBarMessage(2, ref d);                       // ABM_QUERYPOS: the shell moves it past other bars
-    d.rc.right = d.rc.left + width;
+    if (edge == 2) d.rc.left = d.rc.right - width; else d.rc.right = d.rc.left + width;
     SHAppBarMessage(3, ref d);                       // ABM_SETPOS
     return d.rc.left + "," + d.rc.top + "," + d.rc.right + "," + d.rc.bottom;
   }
@@ -59,7 +60,7 @@ public static class PetAppBar {
 }
 '@
 $h = [IntPtr]::new([long]'HWND')
-if ('ACTION' -eq 'dock') { [Console]::Out.WriteLine([PetAppBar]::Dock($h, CALLBACK, WIDTH)) }
+if ('ACTION' -eq 'dock') { [Console]::Out.WriteLine([PetAppBar]::Dock($h, CALLBACK, WIDTH, EDGE)) }
 else { [PetAppBar]::Undock($h) }
 `;
 
@@ -75,9 +76,12 @@ function hwndOf(win) {
   return buf.length >= 8 ? buf.readBigUInt64LE(0) : BigInt(buf.readUInt32LE(0));
 }
 
-function script(action, hwnd, width = 0) {
+const EDGES = { left: 0, right: 2 };   // ABE_LEFT, ABE_RIGHT
+
+function script(action, hwnd, width = 0, edge = 'left') {
   return HELPER.replace("'HWND'", `'${hwnd}'`).replace("'ACTION'", `'${action}'`)
-    .replace('CALLBACK', String(CALLBACK_MESSAGE)).replace('WIDTH', String(Math.max(1, Math.round(width))));
+    .replace('CALLBACK', String(CALLBACK_MESSAGE)).replace('WIDTH', String(Math.max(1, Math.round(width))))
+    .replace('EDGE', String(EDGES[edge] ?? EDGES.left));
 }
 
 function runHelper(text, spawnFn) {
@@ -130,13 +134,13 @@ class AppBar {
     }
   }
 
-  // Reserves a strip `width` DIPs wide (times the monitor's `scaleFactor`) on the left of the
-  // window's monitor. Resolves to the strip in DIPs, for the window to take, or null if Windows
-  // wouldn't have it (then the window just sits there, over whatever is maximized).
-  dock(width, scaleFactor = 1) {
+  // Reserves a strip `width` DIPs wide (times the monitor's `scaleFactor`) on the `edge` ('left'
+  // or 'right') of the window's monitor. Resolves to the strip in DIPs, for the window to take, or
+  // null if Windows wouldn't have it (then the window just sits there, over whatever is maximized).
+  dock(width, scaleFactor = 1, edge = 'left') {
     return this.enqueue(async () => {
       if (this.platform !== 'win32' || this.win.isDestroyed()) return null;
-      const r = await runHelper(script('dock', this.hwnd, width * scaleFactor), this.spawnFn);
+      const r = await runHelper(script('dock', this.hwnd, width * scaleFactor, edge), this.spawnFn);
       const rect = r.ok ? parseRect(r.out) : null;
       if (!rect) {
         this.log('app bar: could not dock', r.error || r.out.trim());

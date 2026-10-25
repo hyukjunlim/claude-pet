@@ -17,7 +17,9 @@ test('the helper script gets the window, the action, the message and the width',
   const s = script('dock', 123456789n, 450.4);
   assert.match(s, /\[long\]'123456789'/);
   assert.match(s, /if \('dock' -eq 'dock'\)/);
-  assert.match(s, new RegExp(`Dock\\(\\$h, ${CALLBACK_MESSAGE}, 450\\)`));
+  assert.match(s, new RegExp(`Dock\\(\\$h, ${CALLBACK_MESSAGE}, 450, 0\\)`), 'the left edge (ABE_LEFT) unless told otherwise');
+  assert.match(script('dock', 1n, 450, 'right'), new RegExp(`Dock\\(\\$h, ${CALLBACK_MESSAGE}, 450, 2\\)`), 'ABE_RIGHT');
+  assert.match(script('dock', 1n, 450, 'top'), /, 450, 0\)/, 'anything else is the left edge');
   assert.match(script('undock', 1n), /if \('undock' -eq 'dock'\)/);
 });
 
@@ -51,7 +53,10 @@ test('docking turns the strip into DIPs; undocking gives it back once; Windows\'
   hooks.get(CALLBACK_MESSAGE)(1);
   assert.equal(moved, 0);                                  // not docked yet
   assert.deepEqual(await bar.dock(300, 1.5), { x: 0, y: 0, width: 300, height: 1440 });
-  assert.match(runs[0], /Dock\(\$h, \d+, 450\)/);          // 300 DIPs at 150%
+  assert.match(runs[0], /Dock\(\$h, \d+, 450, 0\)/);       // 300 DIPs at 150%, on the left
+  await bar.dock(300, 1.5, 'right');
+  assert.match(runs[1], /Dock\(\$h, \d+, 450, 2\)/);       // ... and on the right
+  runs.splice(1);
   assert.match(runs[0], /\[long\]'42'/);
   hooks.get(CALLBACK_MESSAGE)(1);                          // ABN_POSCHANGED
   hooks.get(CALLBACK_MESSAGE)(3);                          // another notice

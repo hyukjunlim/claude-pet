@@ -187,11 +187,11 @@ Other things it does:
 ## Folder mode
 
 Tray menu → *Mode* → *Folder sidebar* (or `--mode=folder` on the command line) turns the pet into
-a sidebar. It docks to the left edge of the monitor as a Windows app bar, so other windows make
-room for it, and lists every Claude Code session and Codex thread, quiet ones too, by machine and
-folder. The pet and the weekly limits sit at its foot, with eTL's notices just above them when
-eTL is on. Each time it docks, the Claude and Codex windows are maximized beside it, so the
-conversation you open fills the rest of the screen.
+a sidebar. It docks to an edge of a monitor as a Windows app bar (the left one, unless you pick
+another), so other windows make room for it, and lists every Claude Code session and Codex
+thread, quiet ones too, by machine and folder. The pet and the weekly limits sit at its foot, with
+eTL's notices just above them when eTL is on. Each time it docks, the Claude and Codex windows are
+maximized beside it, so the conversation you open fills the rest of the screen.
 
 - **Machines and folders:** *Local*, *WSL* and each SSH host, each with its folders. The two apps'
   names for one server meet under one heading, and a session started in a parent folder stays at
@@ -223,8 +223,11 @@ conversation you open fills the rest of the screen.
   on an SSH host (one SSH command removes them). A Codex chat is archived by Codex itself (its
   app-server's `thread/archive`), so you can bring it back from Codex's archived chats. Not while
   the chat is working, or in the two minutes after it was last written, when it may still be open.
-- **Width and text size:** drag the sidebar's right edge; double-click it for the default width.
-  **Ctrl+=** and **Ctrl+-** size the text, **Ctrl+0** resets it.
+- **Where:** tray menu → *Appearance* → *Sidebar position* picks the monitor (named by where it
+  sits, with its size, the main one marked) and its left or right edge. The sidebar stays there; if
+  that monitor is unplugged, it goes to the one the floating pet was on.
+- **Width and text size:** drag the sidebar's inner edge (the one facing the screen); double-click
+  it for the default width. **Ctrl+=** and **Ctrl+-** size the text, **Ctrl+0** resets it.
 - **Look:** Inter where it's installed, otherwise Segoe UI. The page, the text and the selected row
   take the colors of the Claude app's sidebar. Tray menu → *Appearance* → *Theme* picks light, dark
   or the Windows app mode for all of the pet's windows.
@@ -662,7 +665,7 @@ src/renderer/       Pet page (sprite engine, activity bubbles), the sidebar's pa
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
 src/foreground.js   Which app's window is in front, for Ctrl+Tab (a small PowerShell helper, Windows)
 src/raise.js        Brings Codex's window, or a web chat's browser window, to the front (Windows)
-src/folder-mode.js  Folder mode's sidebar: its window, docked at the screen's left edge
+src/folder-mode.js  Folder mode's sidebar: its window, docked at a monitor's left or right edge
 src/folder-tree.js  Sessions and threads → machine › folder tree, for the sidebar
 src/folder-preload.js What the sidebar's page may ask of the main process
 src/appbar.js       Docks a window as a Windows app bar (a small PowerShell helper)

@@ -1,9 +1,10 @@
 'use strict';
 
-// Folder mode's window: a sidebar docked to the left edge of a monitor (see appbar.js), showing
-// folder-tree.js's tree, with the pet and the weekly limits at the bottom. Unlike the pet's
-// window it takes focus: you search in it, and a click in it lets Windows hand the front to the
-// app that opens the session. You set its width by dragging its right edge.
+// Folder mode's window: a sidebar docked to the left or right edge of a monitor (see appbar.js),
+// showing folder-tree.js's tree, with the pet and the weekly limits at the bottom. Unlike the
+// pet's window it takes focus: you search in it, and a click in it lets Windows hand the front to
+// the app that opens the session. You set its width by dragging its inner edge (the one facing
+// the screen).
 
 const path = require('node:path');
 const { BrowserWindow, nativeTheme, screen } = require('electron');
@@ -20,6 +21,34 @@ function clampWidth(width) {
   return Number.isFinite(w) ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w)) : WIDTH;
 }
 
+function edgeOf(edge) {
+  return edge === 'right' ? 'right' : 'left';
+}
+
+// The sidebar `width` wide against `edge` of `area` (a work area, or the strip it had): the
+// right edge keeps its right side where it is.
+function placeOn(area, width, edge) {
+  const x = edgeOf(edge) === 'right' ? area.x + area.width - width : area.x;
+  return { x, y: area.y, width, height: area.height };
+}
+
+// The width that puts the sidebar's inner edge at `cursorX`, the sidebar being `bounds`.
+function widthTo(bounds, cursorX, edge) {
+  return clampWidth(edgeOf(edge) === 'right' ? bounds.x + bounds.width - cursorX : cursorX - bounds.x);
+}
+
+// The monitors, named for the menu: by where they sit (left to right), with their size in pixels
+// and which is the main one. [{ id, label }], in that order.
+function displayChoices(displays, primaryId) {
+  const sorted = [...displays].sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y);
+  const names = sorted.length === 2 ? ['Left', 'Right'] : sorted.length === 3 ? ['Left', 'Middle', 'Right'] : null;
+  return sorted.map((d, i) => {
+    const px = `${Math.round(d.bounds.width * d.scaleFactor)}×${Math.round(d.bounds.height * d.scaleFactor)}`;
+    const name = sorted.length === 1 ? 'This monitor' : names ? `${names[i]} monitor` : `Monitor ${i + 1}`;
+    return { id: d.id, label: `${name} · ${px}${d.id === primaryId ? ' (main)' : ''}` };
+  });
+}
+
 // The page's background (folder.css --page), light or dark.
 function pageColor() {
   return nativeTheme.shouldUseDarkColors ? '#1f1f1f' : '#fafafa';
@@ -27,9 +56,11 @@ function pageColor() {
 
 class FolderWindow {
   // `onDocked()`: the strip was taken (again), so windows maximized next to it have moved.
-  constructor({ log = () => {}, width = WIDTH, onDocked = () => {} } = {}) {
+  // `edge`: 'left' or 'right' (it takes effect the next time the sidebar opens).
+  constructor({ log = () => {}, width = WIDTH, edge = 'left', onDocked = () => {} } = {}) {
     this.log = log;
     this.width = clampWidth(width);
+    this.edge = edgeOf(edge);
     this.onDocked = onDocked;
     this.win = null;
     this.bar = null;
@@ -46,18 +77,16 @@ class FolderWindow {
     return this.open && webContents === this.win.webContents;
   }
 
-  // Opens the sidebar on `display` (the pet's monitor), or shows it again.
-  show(display) {
+  // Opens the sidebar on `display`, against `edge` ('left' or 'right'), or shows it again.
+  show(display, edge = this.edge) {
     if (this.open) {
       this.win.show();
       return;
     }
-    const wa = display.workArea;
+    this.edge = edgeOf(edge);
+    const at = placeOn(display.workArea, this.width, this.edge);
     const win = new BrowserWindow({
-      x: wa.x,
-      y: wa.y,
-      width: this.width,
-      height: wa.height,
+      ...at,
       title: 'Ttokttok Pet',
       frame: false,
       resizable: false,
@@ -129,11 +158,11 @@ class FolderWindow {
     const win = this.win;
     const display = screen.getDisplayMatching(win.getBounds());
     const wa = display.workArea;
-    const rect = await this.bar.dock(this.width, display.scaleFactor);
+    const rect = await this.bar.dock(this.width, display.scaleFactor, this.edge);
     this.lastDock = Date.now();
     if (this.win !== win || win.isDestroyed()) return;
     this.strip = rect ? { x: rect.x, y: wa.y, width: rect.width, height: wa.height } : null;
-    win.setBounds(this.strip ?? { x: wa.x, y: wa.y, width: this.width, height: wa.height });
+    win.setBounds(this.strip ?? placeOn(wa, this.width, this.edge));
     const b = win.getBounds();
     if (this.strip && Math.abs(b.x - this.strip.x) > 2) {
       this.log('folder: docked at', JSON.stringify(rect), 'but placed at', JSON.stringify(b), '- placing again');
@@ -142,23 +171,23 @@ class FolderWindow {
     if (rect) this.onDocked();
   }
 
-  // The width that puts the sidebar's right edge under the cursor.
+  // The width that puts the sidebar's inner edge under the cursor.
   widthAtCursor() {
-    const left = this.strip?.x ?? (this.open ? this.win.getBounds().x : 0);
-    return clampWidth(screen.getCursorScreenPoint().x - left);
+    const bounds = this.strip ?? (this.open ? this.win.getBounds() : { x: 0, width: this.width });
+    return widthTo(bounds, screen.getCursorScreenPoint().x, this.edge);
   }
 
-  // While you drag the edge: the window follows; the strip waits for the drop (setWidth).
+  // While you drag the edge: the window follows (its outer side stays put); the strip waits for
+  // the drop (setWidth).
   preview(width) {
     if (!this.open) return;
-    const b = this.strip ?? this.win.getBounds();
-    this.win.setBounds({ ...b, width: clampWidth(width) });
+    this.win.setBounds(placeOn(this.strip ?? this.win.getBounds(), clampWidth(width), this.edge));
   }
 
   // The width you dropped the edge at. Docking again moves the windows maximized next to it.
   setWidth(width) {
     this.width = clampWidth(width);
-    if (this.strip) this.strip = { ...this.strip, width: this.width };
+    if (this.strip) this.strip = placeOn(this.strip, this.width, this.edge);
     this.dock();
     return this.width;
   }
@@ -195,4 +224,4 @@ class FolderWindow {
   }
 }
 
-module.exports = { FolderWindow, WIDTH, clampWidth };
+module.exports = { FolderWindow, WIDTH, clampWidth, displayChoices, placeOn, widthTo };

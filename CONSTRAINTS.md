@@ -33,8 +33,9 @@ Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
 
 ## Folder mode
 - A second mode, chosen in the tray menu (or with `--mode=folder`): a sidebar docked to the
-  left edge of the monitor as a Windows app bar, listing every Claude session and Codex thread
-  as a host › folder tree. A session opened from a parent folder stays at that parent folder.
+  left or right edge of a monitor, both chosen in the tray menu, as a Windows app bar, listing
+  every Claude session and Codex thread as a host › folder tree. A session opened from a
+  parent folder stays at that parent folder.
   The pet and the weekly limits sit at its bottom.
 - Clicking a session opens it in the official app, which fills the rest of the screen:
   one conversation at a time.

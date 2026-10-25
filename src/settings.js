@@ -8,7 +8,9 @@ const DEFAULTS = {
   scale: 0.75,
   theme: 'system',         // the pet's look: 'system' (Windows' app mode), 'light' or 'dark'
   mode: 'pet',             // 'pet': the floating pet; 'folder': a sidebar of every session, by machine and folder
-  folderWidth: 400,        // the sidebar's width in DIPs (drag its right edge; double-click it for this)
+  folderWidth: 400,        // the sidebar's width in DIPs (drag its inner edge; double-click it for this)
+  folderDisplay: null,     // ... the monitor it docks on (an Electron display id); null: the pet's
+  folderEdge: 'left',      // ... and that monitor's edge: 'left' or 'right'
   folderFold: {},          // folder mode: folder key -> open, where you changed it
   folderOrder: {},         // ... parent key -> its machines' or folders' keys, in the order you dragged them
   folderZoom: null,        // ... the text size (Ctrl +, Ctrl -), 1 being 100%; null: not set yet

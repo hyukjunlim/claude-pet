@@ -27,7 +27,7 @@ const { archiveCodexChat, canDelete, deleteClaudeSession, isChat } = require('./
 const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
-const { FolderWindow } = require('./folder-mode');
+const { FolderWindow, displayChoices } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
 const { settleMarks } = require('./marks');
 const { settleHidden } = require('./hidden');
@@ -373,13 +373,29 @@ function setVisible(visible) {
   gettingStarted?.visibilityChanged(visible);
 }
 
+// The monitor the sidebar docks on: the one picked in the tray menu while it's connected, else
+// the floating pet's.
+function folderDisplay() {
+  const id = settings.get('folderDisplay');
+  return screen.getAllDisplays().find((d) => d.id === id) ?? displayForPet();
+}
+
+// The tray menu's Sidebar position: the sidebar opens again on `display` (an id), against `edge`.
+async function placeSidebar({ display = settings.get('folderDisplay'), edge = settings.get('folderEdge') }) {
+  settings.set({ folderDisplay: display, folderEdge: edge === 'right' ? 'right' : 'left' });
+  log(`sidebar: ${settings.get('folderEdge')} edge of display ${display ?? '(the pet’s)'}`);
+  if (settings.get('mode') !== 'folder' || !settings.get('visible')) return;
+  await folder.close();
+  applyMode();
+}
+
 // Shows the floating pet or the folder sidebar, whichever the mode is, if the pet is to be seen.
 function applyMode() {
   const visible = settings.get('visible');
   if (settings.get('mode') === 'folder') {
     if (win && !win.isDestroyed()) win.hide();
     if (visible) {
-      folder.show(displayForPet());
+      folder.show(folderDisplay(), settings.get('folderEdge'));
       treeKey = '';
       stepKeys.start();
     } else {
@@ -1520,7 +1536,10 @@ function registerIpc() {
   // starts, before it draws the tree.
   ipcMain.on('folder:prefs', (e) => {
     e.returnValue = fromFolder(e)
-      ? { fold: settings.get('folderFold') || {}, order: settings.get('folderOrder') || {}, zoom: settings.get('folderZoom') ?? null }
+      ? {
+        fold: settings.get('folderFold') || {}, order: settings.get('folderOrder') || {}, zoom: settings.get('folderZoom') ?? null,
+        edge: folder.edge,   // the page puts its drag edge and border on the inner side
+      }
       : null;
   });
   ipcMain.on('folder:save-prefs', (e, p) => {
@@ -1741,6 +1760,22 @@ function appearanceMenu(folderMode) {
       },
     })),
   });
+  // Which monitor the sidebar docks on, and which of its edges.
+  if (folderMode) {
+    const on = folderDisplay().id;
+    const edge = settings.get('folderEdge');
+    items.push({
+      label: 'Sidebar position',
+      submenu: [
+        ...displayChoices(screen.getAllDisplays(), screen.getPrimaryDisplay().id).map((d) => ({
+          label: d.label, type: 'radio', checked: d.id === on, click: () => placeSidebar({ display: d.id }),
+        })),
+        { type: 'separator' },
+        { label: 'Left edge', type: 'radio', checked: edge !== 'right', click: () => placeSidebar({ edge: 'left' }) },
+        { label: 'Right edge', type: 'radio', checked: edge === 'right', click: () => placeSidebar({ edge: 'right' }) },
+      ],
+    });
+  }
   items.push({ type: 'separator' });
   if (!folderMode) {
     items.push({
@@ -2097,7 +2132,9 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createTray();
     // Each time the sidebar docks, the Claude and Codex windows are maximized beside it.
-    folder = new FolderWindow({ log, width: settings.get('folderWidth'), onDocked: () => maximizeApps('all') });
+    folder = new FolderWindow({
+      log, width: settings.get('folderWidth'), edge: settings.get('folderEdge'), onDocked: () => maximizeApps('all'),
+    });
     // Taken while Claude, Codex (ChatGPT.exe) or the sidebar (this app) is in front.
     stepKeys = new StepKeys({
       apps: ['claude', 'chatgpt', path.parse(process.execPath).name],

@@ -67,6 +67,12 @@ body {
   box-sizing: border-box;
 }
 
+/* Docked on the right edge: the line runs down the left side, where the screen is. */
+body.dock-right {
+  border-right: 0;
+  border-left: var(--line) solid var(--side-line);
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -405,7 +411,8 @@ mark {
 
 /* ------------------------------------------------------------------ width and text size */
 
-/* The right edge: drag it to make the sidebar wider or narrower. */
+/* The inner edge (the right one, or the left one when docked on the right): drag it to make
+   the sidebar wider or narrower. */
 #edge {
   position: fixed;
   top: 0;
@@ -414,6 +421,11 @@ mark {
   width: 6px;
   cursor: ew-resize;
   touch-action: none;
+}
+
+.dock-right #edge {
+  right: auto;
+  left: 0;
 }
 
 #edge:hover,
