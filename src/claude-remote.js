@@ -24,8 +24,7 @@ threading.Thread(target=exit_with_the_pet, daemon=True).start()
 
 HOME = os.path.expanduser('~')
 USAGE = os.path.join(HOME, '.ttokttok-pet', 'usage.json')
-# the mod, and Claude Pet's copy from before the rename, which the pet's next 'update' moves over
-MANIFESTS = [os.path.join(HOME, d, 'mod', 'pet-usage', '.claude-plugin', 'plugin.json') for d in ('.ttokttok-pet', '.claude-pet')]
+MANIFEST = os.path.join(HOME, '.ttokttok-pet', 'mod', 'pet-usage', '.claude-plugin', 'plugin.json')
 SETTINGS = os.path.join(os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude'), 'settings.json')
 
 def send(obj):
@@ -49,9 +48,9 @@ def read_json(path):
 def mod_state():
     env = (read_json(SETTINGS) or {}).get('env') or {}
     dirs = [d.replace(chr(92), '/').rstrip('/') for d in str(env.get('CLAUDE_CODE_PLUGIN_DIRS') or '').split(os.pathsep) if d]
-    ours = any(d.endswith('/.ttokttok-pet/mod/pet-usage') or d.endswith('/.claude-pet/mod/pet-usage') for d in dirs)
-    version = next((v for v in ((read_json(m) or {}).get('version') for m in MANIFESTS) if v), None)
-    return {'version': version, 'enabled': ours and env.get('CLAUDE_CODE_ENABLE_FUNCTION_HOOKS') == '1'}
+    ours = any(d.endswith('/.ttokttok-pet/mod/pet-usage') for d in dirs)
+    return {'version': (read_json(MANIFEST) or {}).get('version'),
+            'enabled': ours and env.get('CLAUDE_CODE_ENABLE_FUNCTION_HOOKS') == '1'}
 
 seen = {}
 last_beat = 0
@@ -66,7 +65,7 @@ while True:
         if s is None or usage is not None:   # else half written: read it again next round
             seen['usage'] = s
             send({'usage': usage})
-    s = [stamp(m) for m in MANIFESTS] + [stamp(SETTINGS)]
+    s = [stamp(MANIFEST), stamp(SETTINGS)]
     if s != seen.get('mod', 0):
         seen['mod'] = s
         send({'mod': mod_state()})

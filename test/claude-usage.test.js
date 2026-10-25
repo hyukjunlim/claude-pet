@@ -182,43 +182,32 @@ test('hosts picked from ~/.ssh/config are read next to the desktop app\'s', asyn
 // The watcher is plain Python 3; run it here against a fake home if Python is installed.
 const python = ['python3', 'python'].find((cmd) => spawnSync(cmd, ['-c', 'import sys; sys.exit(sys.version_info[0] != 3)']).status === 0);
 
-// A home folder for the watcher, with the mod's folder `dir` (under it) in Claude Code's settings.
-function watcherHome(dir, env = {}) {
+test('the watcher script sends the usage file and the mod state, and again when they change', { skip: !python && 'Python 3 is not installed' }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
-  const modDir = path.join(home, ...dir.split('/'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CLAUDE_CONFIG_DIR;
+  const petDir = path.join(home, '.ttokttok-pet');
+  const modDir = path.join(petDir, 'mod', 'pet-usage');
   fs.mkdirSync(path.join(modDir, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(path.join(modDir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'pet-usage', version: '1.0.0' }));
   fs.mkdirSync(path.join(home, '.claude'));
-  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: modDir, ...env } }));
-  return { home, modDir };
-}
-
-// Runs WATCHER with `home` as the home folder; last(key) is the latest message with that key.
-function watch(home) {
-  const env = { ...process.env, HOME: home, USERPROFILE: home };
-  delete env.CLAUDE_CONFIG_DIR;
+  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: modDir } }));
+  fs.writeFileSync(path.join(petDir, 'usage.json'), JSON.stringify(saved(T0, 40)));
   const child = spawn(python, ['-u', '-c', LOADER], { env, windowsHide: true });
   const exited = new Promise((resolve) => child.on('exit', resolve));
-  const messages = [];
-  let buffer = '';
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => {
-    buffer += chunk;
-    for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
-      messages.push(JSON.parse(buffer.slice(0, nl)));
-      buffer = buffer.slice(nl + 1);
-    }
-  });
-  child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
-  return { child, exited, messages, last: (key) => messages.filter((m) => key in m).at(-1)?.[key] };
-}
-
-test('the watcher script sends the usage file and the mod state, and again when they change', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const { home, modDir } = watcherHome('.ttokttok-pet/mod/pet-usage');
-  const petDir = path.join(home, '.ttokttok-pet');
-  fs.writeFileSync(path.join(petDir, 'usage.json'), JSON.stringify(saved(T0, 40)));
-  const { child, exited, messages, last } = watch(home);
   try {
+    const messages = [];
+    let buffer = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+        messages.push(JSON.parse(buffer.slice(0, nl)));
+        buffer = buffer.slice(nl + 1);
+      }
+    });
+    child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
+    const last = (key) => messages.filter((m) => key in m).at(-1)?.[key];
     assert.ok(await waitFor(() => messages.some((m) => typeof m.now === 'number')), 'sends the host clock');
     assert.ok(await waitFor(() => last('usage') && last('mod')));
     assert.deepEqual(last('usage'), saved(T0, 40));
@@ -233,18 +222,6 @@ test('the watcher script sends the usage file and the mod state, and again when 
     child.stdin.end();
     const late = new Promise((resolve) => setTimeout(() => resolve('still running'), 4000));
     assert.notEqual(await Promise.race([exited, late]), 'still running');
-  } finally {
-    child.kill();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
-  }
-});
-
-test("the watcher counts Claude Pet's copy of the mod as the mod, so the pet moves it over", { skip: !python && 'Python 3 is not installed' }, async () => {
-  const { home } = watcherHome('.claude-pet/mod/pet-usage', { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1' });
-  const { child, last } = watch(home);
-  try {
-    assert.ok(await waitFor(() => last('mod')));
-    assert.deepEqual(last('mod'), { version: '1.0.0', enabled: true });
   } finally {
     child.kill();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });

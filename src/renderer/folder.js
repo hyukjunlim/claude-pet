@@ -69,29 +69,9 @@
 
   // ---------------------------------------------------------- folding
 
-  // Before settings.json kept them, this page did, in its own storage. Those come over the first
-  // time (where settings.json has nothing yet), and the page's copies go.
+  // The folding, order and text size settings.json keeps for the sidebar.
   function takePrefs(saved) {
-    const p = { fold: { ...saved?.fold }, order: { ...saved?.order }, zoom: Number(saved?.zoom) || 1 };
-    const moved = {};
-    try {
-      const take = (key) => {
-        const value = localStorage.getItem(key);
-        localStorage.removeItem(key);
-        return value;
-      };
-      const fold = JSON.parse(take('claude-pet:folder-fold') || 'null');
-      const order = JSON.parse(take('claude-pet:folder-order') || 'null');
-      const zoom = Number(take('claude-pet:sidebar-zoom-2'));
-      for (const key of ['claude-pet:folder-zoom', 'claude-pet:sidebar-zoom']) localStorage.removeItem(key);   // from an older 100%
-      if (fold && typeof fold === 'object' && !Object.keys(p.fold).length) moved.fold = p.fold = fold;
-      if (order && typeof order === 'object' && !Object.keys(p.order).length) moved.order = p.order = order;
-      if (zoom && saved?.zoom == null) moved.zoom = p.zoom = zoom;
-    } catch {
-      // nothing to bring over
-    }
-    if (Object.keys(moved).length) api.savePrefs(moved);
-    return p;
+    return { fold: { ...saved?.fold }, order: { ...saved?.order }, zoom: Number(saved?.zoom) || 1 };
   }
 
   function setOpen(key, open) {

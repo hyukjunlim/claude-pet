@@ -7,7 +7,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
-const { LEGACY_REGISTRY, REGISTRY, WebChatsFeature, batchPath, extensionId, launcher } = require('../src/webchats/feature');
+const { REGISTRY, WebChatsFeature, batchPath, extensionId, launcher } = require('../src/webchats/feature');
 const { createHost, frame, frameReader } = require('../src/webchats/host');
 const { END_GRACE_MS } = require('../src/webchats/chats');
 
@@ -55,7 +55,7 @@ test('a batch file names folders under the user profile through %VARIABLES%, so 
   assert.equal(text, '@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"D:\\pet\\pet.exe" "D:\\pet\\host.js" %*\r\n');
 });
 
-test("turning web chats on registers one host with Chrome and Edge for this extension only, in place of Claude Pet's; off removes it", async (t) => {
+test('turning web chats on registers one host with Chrome and Edge for this extension only; off removes it', async (t) => {
   const { f, data, reg, dir } = feature(t);
   await f.register();
   const manifestPath = path.join(dir, 'webchats', 'host.json');
@@ -69,19 +69,13 @@ test("turning web chats on registers one host with Chrome and Edge for this exte
   assert.deepEqual(reg, [
     ['reg.exe', 'add', REGISTRY.chrome, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f'],
     ['reg.exe', 'add', REGISTRY.edge, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f'],
-    ['reg.exe', 'delete', LEGACY_REGISTRY.chrome, '/f'],
-    ['reg.exe', 'delete', LEGACY_REGISTRY.edge, '/f'],
   ]);
-  assert.match(REGISTRY.chrome, /^HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com\.hyukjunlim\.ttokttok_pet$/);
-  assert.match(REGISTRY.edge, /^HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com\.hyukjunlim\.ttokttok_pet$/);
-  assert.match(LEGACY_REGISTRY.chrome, /\\com\.hyukjunlim\.claude_pet$/);
+  assert.match(REGISTRY.chrome, /^HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\/);
+  assert.match(REGISTRY.edge, /^HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\/);
   reg.length = 0;
   await f.setEnabled(false);
   assert.equal(data.webChats, false);
-  assert.deepEqual(reg, [
-    ['reg.exe', 'delete', REGISTRY.chrome, '/f'], ['reg.exe', 'delete', REGISTRY.edge, '/f'],
-    ['reg.exe', 'delete', LEGACY_REGISTRY.chrome, '/f'], ['reg.exe', 'delete', LEGACY_REGISTRY.edge, '/f'],
-  ]);
+  assert.deepEqual(reg, [['reg.exe', 'delete', REGISTRY.chrome, '/f'], ['reg.exe', 'delete', REGISTRY.edge, '/f']]);
 });
 
 test('off by default: nothing is registered and nothing listens', async (t) => {

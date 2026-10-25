@@ -3,7 +3,6 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
@@ -32,7 +31,6 @@ const { settleMarks } = require('./marks');
 const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
-const { moveFolder } = require('./move-folder');
 
 const DEMO = process.argv.includes('--demo');
 // Debug aid: TTOKTTOK_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
@@ -110,7 +108,6 @@ const usage = { claude: [], codex: null };   // Claude's readings from each plac
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
 let modBusy = null;             // what the Live Claude usage menu is doing, while it does it
-let userDataNote = null;        // what became of Claude Pet's %APPDATA% folder, for the log (userDataDir)
 const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 const wslAsked = new Set();     // the WSL distros checkWsl has asked this run
 let wslTimer = null;
@@ -981,7 +978,6 @@ async function checkWsl() {
     wslAsked.add(distro);
     const r = await wslInstaller(distro, { action: 'status', windowsDir: localMod.dir });
     if (!r.ok) continue;
-    await moveWsl(distro, r.legacy === true);
     rememberWsl(distro, r.enabled);
     const had = settings.get('claudeCodeWsl')?.[distro] === true;
     if (r.claude === had) continue;
@@ -1672,86 +1668,13 @@ async function showUpdateResult() {
   }
 }
 
-// ---------------------------------------------------------------- coming from Claude Pet
-
-// Until 0.5 the pet was Claude Pet, in %APPDATA%\claude-pet. The folder comes along whole (the
-// eTL token's key is in its Local State), copied if a browser's web chats host holds it. If even
-// that fails, this run stays there and the next one tries again.
-function userDataDir() {
-  const dir = path.join(app.getPath('appData'), 'ttokttok-pet');
-  const legacy = path.join(app.getPath('appData'), 'claude-pet');
-  try {
-    userDataNote = moveFolder(legacy, dir);
-    return dir;
-  } catch (err) {
-    userDataNote = `couldn't move ${legacy} (${err.code || err.message})`;
-    return fs.existsSync(dir) ? dir : legacy;
-  }
-}
-
-// The rest of Claude Pet's, once: Start at login under its name, and ~/.claude-pet
-// (LocalMod.adoptLegacy). Its copy of the mod stays until the WSL distros set up with it have
-// moved over too (moveWsl).
-function adoptClaudePet() {
-  if (userDataNote) log(userDataNote);
-  moveLoginItem();
-  try {
-    const moved = localMod.adoptLegacy();
-    if (!moved.length) return;
-    log(`moved from ~/.claude-pet to ~/.ttokttok-pet: ${moved.join(', ')}`);
-    if (moved.includes('mod') && settings.get('claudeModWslToMove') == null) {
-      const wsl = settings.get('claudeModWsl');
-      settings.set({ claudeModWslToMove: Object.keys(wsl).filter((d) => wsl[d]) });
-    }
-    if (!settings.get('claudeModWslToMove')?.length) localMod.dropLegacy();
-  } catch (err) {
-    log("couldn't move ~/.claude-pet:", err.message);
-  }
-}
-
-// Claude Pet started at login under its own name; if it did, this pet does in its place.
-function moveLoginItem() {
-  if (process.platform !== 'win32') return;
-  const run = ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'ClaudePet'];
-  try {
-    execFileSync('reg.exe', ['query', ...run], { stdio: 'ignore', windowsHide: true });
-  } catch {
-    return;   // not there
-  }
-  try {
-    execFileSync('reg.exe', ['delete', ...run, '/f'], { stdio: 'ignore', windowsHide: true });
-    app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: true });
-    log("Start at login: Claude Pet's entry replaced");
-  } catch (err) {
-    log("couldn't replace Claude Pet's Start at login:", err.message);
-  }
-}
-
-// A distro still loading Claude Pet's copy of the mod loads the new one from now on. Once none
-// is left to move, Claude Pet's copy goes.
-async function moveWsl(distro, legacy) {
-  const left = settings.get('claudeModWslToMove');
-  if (!legacy && !left?.includes(distro)) return;
-  if (legacy) {
-    const r = await wslInstaller(distro, { action: 'update', windowsDir: localMod.dir });
-    if (!r.ok) {
-      log(`mod move in WSL ${distro} failed: ${r.error}`);
-      return;
-    }
-    log(`mod moved to ~/.ttokttok-pet in WSL ${distro}`);
-  }
-  const rest = (left ?? []).filter((d) => d !== distro);
-  settings.set({ claudeModWslToMove: rest });
-  if (!rest.length) localMod.dropLegacy();
-}
-
 // ---------------------------------------------------------------- lifecycle
 
 // A downloaded copy is named "Ttokttok Pet", which would give it its own %APPDATA%\Ttokttok Pet.
 // Settings, pets and the log stay where a clone keeps them (%APPDATA%\ttokttok-pet, and
 // ~/Library/Logs/ttokttok-pet on macOS), so going from one kind of install to the other loses
 // nothing. Set before the single-instance lock, which lives in that folder too.
-app.setPath('userData', DEBUG_USER_DATA || userDataDir());
+app.setPath('userData', DEBUG_USER_DATA || path.join(app.getPath('appData'), 'ttokttok-pet'));
 app.setAppLogsPath(process.platform === 'darwin'
   ? path.join(app.getPath('home'), 'Library', 'Logs', 'ttokttok-pet')
   : path.join(app.getPath('userData'), 'logs'));
@@ -1774,10 +1697,6 @@ if (!app.requestSingleInstanceLock()) {
     }
     applyLoginFlag(process.argv);
     protocol.handle('pet', handleProtocol);
-    if (!DEMO) {
-      localMod = new LocalMod();
-      adoptClaudePet();   // before loadPets: your own pets may still be in ~/.claude-pet
-    }
     loadPets();
     const saved = settings.get('position');
     petPos = clampPet(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : defaultPosition());
@@ -1820,6 +1739,7 @@ if (!app.requestSingleInstanceLock()) {
     if (DEMO) {
       tracker.on('usage', ({ claude, codex }) => setUsage({ claude: claude ? [claude] : [], codex }));
     } else {
+      localMod = new LocalMod();
       updateLocalMod();
       claudeUsage = new ClaudeUsage({
         usageFile: localMod.usageFile,

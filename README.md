@@ -105,28 +105,6 @@ checks when you ask.
 - **Installed before this existed?** That version has no such menu item. Update it by hand once,
   as described under [Install](#install).
 
-### Coming from Claude Pet
-
-Ttokttok Pet was called Claude Pet until 0.5. The first time 0.5 starts, it moves what Claude Pet
-kept, so nothing is lost:
-
-- `%APPDATA%\claude-pet` (settings, the eTL token, marks, the log) becomes `%APPDATA%\ttokttok-pet`.
-- `~/.claude-pet` (your pets and the [live usage](#live-claude-usage) mod) becomes
-  `~/.ttokttok-pet`: on this PC right away, in WSL and on SSH hosts as the pet next reaches them.
-  Claude Code sessions that were already running keep saving usage to the old place until you
-  restart them, so the meter may show older figures until then.
-- Start at login and the web chats host take the new name.
-
-Two things are yours to do:
-
-- **The browser extension:** reload it on the extensions page, or restart the browser. If you
-  moved the pet's folder, load it again from there.
-- **A downloaded copy:** the installer puts Ttokttok Pet beside Claude Pet, not over it. Uninstall
-  Claude Pet in Windows Settings → Apps.
-
-A copy from the source keeps updating where it is (GitHub sends the old address on), and its
-folder can keep the name `claude-pet`.
-
 ## Building the installer
 
 `npm run dist` builds `Ttokttok-Pet-Setup-<version>.exe` (a per-user installer) and
