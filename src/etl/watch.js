@@ -84,7 +84,7 @@ function tokenItem(now) {
     badge: '토큰 만료',
     title: 'eTL 토큰이 만료되었습니다',
     project: '새 토큰을 등록해 주세요',
-    detail: 'eTL 설정에서 새 토큰을 만들고, 트레이 메뉴의 eTL에서 등록해 주세요.',
+    detail: 'eTL 설정에서 새 토큰을 만들고, 트레이 메뉴의 Sources → eTL에서 등록해 주세요.',
     url: TOKEN_SETTINGS_URL,
     now,
   });

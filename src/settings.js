@@ -12,7 +12,7 @@ const DEFAULTS = {
   folderFold: {},          // folder mode: folder key -> open, where you changed it
   folderOrder: {},         // ... parent key -> its machines' or folders' keys, in the order you dragged them
   folderZoom: null,        // ... the text size (Ctrl +, Ctrl -), 1 being 100%; null: not set yet
-  folderPetScale: 0.5,     // the size of the pet at the sidebar's foot (Small; tray menu → Size in folder mode)
+  folderPetScale: 0.5,     // the size of the pet at the sidebar's foot (Small; tray menu → Appearance → Size in folder mode)
   visible: true,
   position: null,          // top-left of the pet sprite, in screen DIPs
   showActivity: true,

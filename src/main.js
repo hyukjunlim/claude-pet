@@ -145,7 +145,7 @@ function log(...args) {
 
 // ---------------------------------------------------------------- geometry
 
-// The floating pet's scale (tray menu → Size), or `s`: folder mode's pet has a size of its own.
+// The floating pet's scale (tray menu → Appearance → Size), or `s`: folder mode's pet has a size of its own.
 function petScale(s = settings.get('scale')) {
   if (currentPet?.pixelArt) {
     // Snap so every art pixel (4 atlas px) covers a whole number of device pixels.
@@ -897,7 +897,7 @@ async function offerLiveUsage() {
       'It puts the mod in ~/.claude-pet and adds two entries to the "env" of ~/.claude/settings.json',
       `${here ? '' : `in ${elsewhere.join(', ')} `}(a backup is kept). Sessions you start from now on use it.`,
       '',
-      'Tray menu → Live Claude usage changes this later.',
+      'Tray menu → Sources → Live Claude usage changes this later.',
     ].join('\n'),
     buttons: ['Set it up', 'Not now'],
     defaultId: 0,
@@ -934,7 +934,7 @@ async function offerEtlConnection() {
       '서울대 eTL을 쓰는 경우 과제 마감과 공지를 펫 알림으로 받을 수 있습니다.',
       '연결을 누르면 토큰 입력 창이 열립니다. eTL의 계정 → 설정 → 새 액세스 토큰에서 발급해 붙여 넣으면 됩니다.',
       '토큰은 이 컴퓨터에 암호화해 저장됩니다.',
-      '지금 건너뛰어도 트레이 메뉴의 eTL에서 언제든 연결할 수 있습니다.',
+      '지금 건너뛰어도 트레이 메뉴의 Sources → eTL에서 언제든 연결할 수 있습니다.',
     ].join('\n'),
     buttons: ['eTL 연결', '나중에'],
     defaultId: 1,
@@ -1322,25 +1322,11 @@ function applyModeFlag(argv) {
 
 function buildMenu() {
   const items = [];
-  items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
-  const tags = { cli: ' (terminal)', codex: ' (Codex)', etl: ' (eTL)' };
-  const tagOf = (s) => (s.kind === 'web' ? ` (${s.siteName || s.site})` : tags[s.kind] || '');
-  for (const s of sessions.slice(0, 8)) {
-    items.push({
-      label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tagOf(s)}`,
-      enabled: Boolean(sessionUrl(s)),
-      click: () => openSession(s.id),
-    });
-  }
-  for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
-  // Ready lasts until it's marked done: every finished one at once (questions wait for answers).
-  const done = new Set([
-    ...sessions.filter((s) => s.kind !== 'etl' && (s.status === 'review' || s.status === 'failed')).map((s) => s.id),
-    ...Object.keys(currentMarks()),
-  ]);
-  if (done.size) items.push({ label: `Mark all Ready as done (${done.size})`, click: () => markDone([...done]) });
-  items.push({ type: 'separator' });
   const folderMode = settings.get('mode') === 'folder';
+  // The sessions themselves are in the bubbles and the sidebar. The weekly limits in words are
+  // in the sidebar meter's hover text; the floating pet's meter has none, so they're here.
+  if (!folderMode) for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
+  if (items.length) items.push({ type: 'separator' });
   items.push({
     label: folderMode ? 'Show sidebar' : 'Show pet',
     type: 'checkbox',
@@ -1371,49 +1357,35 @@ function buildMenu() {
       });
     }
   }
+  items.push({ type: 'separator' }, appearanceMenu(folderMode));
+  const sources = sourcesMenu();
+  if (sources) items.push(sources);
+  items.push({ type: 'separator' });
   items.push({
-    label: 'Show activity bubbles',
+    label: 'Start at login',
     type: 'checkbox',
-    checked: settings.get('showActivity'),
-    click: (mi) => {
-      settings.set({ showActivity: mi.checked });
-      sendSessions();
-    },
+    checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
+    click: (mi) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: mi.checked }),
   });
-  items.push({
-    label: 'Show weekly limits',
-    type: 'checkbox',
-    checked: settings.get('showUsage'),
-    click: (mi) => {
-      settings.set({ showUsage: mi.checked });
-      sendUsage();
-    },
-  });
-  if (localMod && liveUsageWanted()) items.push(liveUsageMenu());
-  if (codexInstalled() && !DEMO) {
+  if (!DEMO) {
     items.push({
-      label: 'Show Codex threads',
-      type: 'checkbox',
-      checked: settings.get('showCodex'),
-      click: (mi) => {
-        settings.set({ showCodex: mi.checked });
-        if (mi.checked) startCodex();
-        else stopCodex();
-      },
-    });
-    items.push({
-      label: 'Follow Codex on SSH hosts',
-      type: 'checkbox',
-      checked: settings.get('codexOverSsh'),
-      enabled: settings.get('showCodex'),
-      click: (mi) => {
-        settings.set({ codexOverSsh: mi.checked });
-        codex?.setWatchHosts(mi.checked);
-      },
+      label: updateLabel(),
+      enabled: !updateBusy,
+      click: () => (update ? offerUpdate() : checkUpdates()),
     });
   }
-  if (etl) items.push(etl.menu());
-  if (webchats) items.push(webchats.menu());
+  items.push({ type: 'separator' });
+  if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
+  if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
+  items.push({ label: 'Restart Claude Pet', click: restart });
+  items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
+  return Menu.buildFromTemplate(items);
+}
+
+// How the pet looks. The bubbles and the position are the floating pet's, so folder mode leaves
+// them out; there, Size is the pet's at the foot of the sidebar.
+function appearanceMenu(folderMode) {
+  const items = [];
   items.push({
     label: 'Pet',
     submenu: [
@@ -1428,16 +1400,6 @@ function buildMenu() {
       { label: 'Reload pets', click: () => { loadPets(); selectPet(currentPet?.key); } },
     ],
   });
-  items.push({
-    label: 'Animate even with Windows animation effects off',
-    type: 'checkbox',
-    checked: settings.get('alwaysAnimate') === true,
-    click: (mi) => {
-      settings.set({ alwaysAnimate: mi.checked });
-      sendMotion();
-    },
-  });
-  // In folder mode, the size of the pet at the foot of the sidebar; otherwise the floating pet's.
   const sizeKey = folderMode ? 'folderPetScale' : 'scale';
   items.push({
     label: 'Size',
@@ -1467,34 +1429,81 @@ function buildMenu() {
       },
     })),
   });
+  items.push({ type: 'separator' });
+  if (!folderMode) {
+    items.push({
+      label: 'Show activity bubbles',
+      type: 'checkbox',
+      checked: settings.get('showActivity'),
+      click: (mi) => {
+        settings.set({ showActivity: mi.checked });
+        sendSessions();
+      },
+    });
+  }
   items.push({
-    label: 'Reset position',
-    click: () => {
-      layout = 'above';
-      petPos = clampPet(defaultPosition());
-      finishMove();
-      wake();
+    label: 'Show weekly limits',
+    type: 'checkbox',
+    checked: settings.get('showUsage'),
+    click: (mi) => {
+      settings.set({ showUsage: mi.checked });
+      sendUsage();
     },
   });
   items.push({
-    label: 'Start at login',
+    label: 'Animate even with Windows animation effects off',
     type: 'checkbox',
-    checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
-    click: (mi) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: mi.checked }),
+    checked: settings.get('alwaysAnimate') === true,
+    click: (mi) => {
+      settings.set({ alwaysAnimate: mi.checked });
+      sendMotion();
+    },
   });
-  if (!DEMO) {
+  if (!folderMode) {
+    items.push({ type: 'separator' });
     items.push({
-      label: updateLabel(),
-      enabled: !updateBusy,
-      click: () => (update ? offerUpdate() : checkUpdates()),
+      label: 'Reset position',
+      click: () => {
+        layout = 'above';
+        petPos = clampPet(defaultPosition());
+        finishMove();
+        wake();
+      },
     });
   }
-  items.push({ type: 'separator' });
-  if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
-  if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
-  items.push({ label: 'Restart Claude Pet', click: restart });
-  items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
-  return Menu.buildFromTemplate(items);
+  return { label: 'Appearance', submenu: items };
+}
+
+// What the pet watches besides Claude: Codex, live usage, web chats and eTL. Null when none of
+// them is around.
+function sourcesMenu() {
+  const items = [];
+  if (codexInstalled() && !DEMO) {
+    items.push({
+      label: 'Show Codex threads',
+      type: 'checkbox',
+      checked: settings.get('showCodex'),
+      click: (mi) => {
+        settings.set({ showCodex: mi.checked });
+        if (mi.checked) startCodex();
+        else stopCodex();
+      },
+    });
+    items.push({
+      label: 'Follow Codex on SSH hosts',
+      type: 'checkbox',
+      checked: settings.get('codexOverSsh'),
+      enabled: settings.get('showCodex'),
+      click: (mi) => {
+        settings.set({ codexOverSsh: mi.checked });
+        codex?.setWatchHosts(mi.checked);
+      },
+    });
+  }
+  if (localMod && liveUsageWanted()) items.push(liveUsageMenu());
+  if (webchats) items.push(webchats.menu());
+  if (etl) items.push(etl.menu());
+  return items.length ? { label: 'Sources', submenu: items } : null;
 }
 
 // Starts a fresh pet as this one exits. The single-instance lock is let go first, so the new

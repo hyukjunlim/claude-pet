@@ -179,7 +179,7 @@ class WebChatsFeature extends EventEmitter {
     return true;
   }
 
-  // The tray menu's "Web chats" submenu.
+  // The tray menu's Sources → "Web chats" submenu.
   menu() {
     const on = this.enabled;
     const items = [

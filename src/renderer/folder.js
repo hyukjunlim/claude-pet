@@ -52,7 +52,7 @@
     sizePet();
   });
 
-  // The atlas cell, 192 x 208, at the pet's scale (tray menu → Size), on screen: the page's
+  // The atlas cell, 192 x 208, at the pet's scale (tray menu → Appearance → Size), on screen: the page's
   // zoom is undone for it, so Ctrl + and Ctrl - size the text and leave the pet as it is.
   let petScale = 0.5;
   function sizePet() {

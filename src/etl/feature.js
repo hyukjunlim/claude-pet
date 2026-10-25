@@ -31,7 +31,7 @@ const { ASSISTANT_ID, assistantItem, assistantLinks } = require('./assistant');
 const { TimetableNotifier, createTimetable, kstParts } = require('./timetable');
 const { formatKst } = require('./model');
 
-const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 eTL에서 토큰을 등록해 주세요.';
+const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 Sources → eTL에서 토큰을 등록해 주세요.';
 const CODEX_PROMPT = '오늘 브리핑해 줘';
 const FILE_COMMANDS = new Set(['files', 'download']);   // answered by files.js, timetable by
                                                         // timetable.js, the rest by queries.js
@@ -220,7 +220,7 @@ class EtlFeature extends EventEmitter {
     }
   }
 
-  // The tray menu's "eTL" submenu.
+  // The tray menu's Sources → "eTL" submenu.
   menu() {
     const on = this.enabled;
     const items = [
@@ -305,7 +305,7 @@ class EtlFeature extends EventEmitter {
       type: 'question',
       title: 'Claude Pet',
       message: 'eTL 비서 말풍선을 켤까요?',
-      detail: `펫 위에 "eTL 비서" 말풍선을 늘 띄워 두고, 누르면 ${where}로 바로 갑니다. 나중에 트레이 메뉴의 eTL에서 바꿀 수 있습니다.`,
+      detail: `펫 위에 "eTL 비서" 말풍선을 늘 띄워 두고, 누르면 ${where}로 바로 갑니다. 나중에 트레이 메뉴의 Sources → eTL에서 바꿀 수 있습니다.`,
       buttons: ['켜기', '나중에'],
       defaultId: 0,
       cancelId: 1,

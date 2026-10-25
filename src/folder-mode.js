@@ -82,7 +82,7 @@ class FolderWindow {
       },
     });
     this.win = win;
-    // Behind the page while it resizes; the tray menu's Theme can change it.
+    // Behind the page while it resizes; the tray menu's Appearance → Theme can change it.
     const shade = () => win.setBackgroundColor(pageColor());
     nativeTheme.on('updated', shade);
     win.on('closed', () => nativeTheme.off('updated', shade));
