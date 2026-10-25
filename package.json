@@ -1,6 +1,6 @@
 {
   "name": "ttokttok-pet",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A floating desktop pet that shows what your Claude desktop Code sessions and Codex threads are doing.",
   "author": "hyukjunlim",
   "repository": "github:hyukjunlim/ttokttok-pet",
