@@ -1312,8 +1312,7 @@ function buildMenu() {
   const items = [];
   items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
   const tags = { cli: ' (terminal)', codex: ' (Codex)', etl: ' (eTL)' };
-  const sites = { chatgpt: 'ChatGPT', gemini: 'Gemini' };
-  const tagOf = (s) => (s.kind === 'web' ? ` (${sites[s.site] || 'Claude Chat'})` : tags[s.kind] || '');
+  const tagOf = (s) => (s.kind === 'web' ? ` (${s.siteName || s.site})` : tags[s.kind] || '');
   for (const s of sessions.slice(0, 8)) {
     items.push({
       label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tagOf(s)}`,

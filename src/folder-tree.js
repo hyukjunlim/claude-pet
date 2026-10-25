@@ -111,6 +111,7 @@ function itemOf(s, app) {
     detail: s.detail || '',
     since: s.since || 0,
     lastActivityAt: s.lastActivityAt || 0,
+    ...(s.siteName && { siteName: s.siteName }),   // a web chat's site
   };
 }
 

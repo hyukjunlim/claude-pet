@@ -180,6 +180,7 @@ class WebChats extends EventEmitter {
         id: `web:${chat.key}`,
         kind: 'web',
         site: chat.site,
+        siteName: SITES[chat.site]?.name ?? chat.site,   // what the pet calls it everywhere
         status: chat.status,
         title: chat.title,
         detail: chat.status === 'running' ? 'Writing a reply' : 'Reply ready',
@@ -197,6 +198,7 @@ class WebChats extends EventEmitter {
       id: `web:${chat.key}`,
       kind: 'web',
       site: chat.site,
+      siteName: SITES[chat.site]?.name ?? chat.site,
       status: chat.status || 'idle',
       title: chat.title,
       detail: chat.status === 'running' ? 'Writing a reply' : chat.status === 'review' ? 'Reply ready' : '',

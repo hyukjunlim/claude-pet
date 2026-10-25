@@ -205,6 +205,8 @@ test('the full list has every conversation a tab shows, quiet ones too, newest f
   assert.deepEqual(all.map((it) => [it.site, it.title, it.status]), [['chatgpt', 'Busy one', 'running'], ['claude', 'Quiet one', 'idle']]);
   assert.equal(all[1].id, `web:claude:${CONV}`);
   assert.deepEqual(all.map((it) => it.lastPromptAt), [all[0].since, 0]);   // a reply starts when you send a message
+  assert.deepEqual(all.map((it) => it.siteName), ['ChatGPT', 'claude.ai']);   // each site's name, from SITES
+  assert.deepEqual(c.items().map((it) => it.siteName), ['ChatGPT']);
   assert.deepEqual(lists.at(-1), all);
   c.closed('h1', 7);                                                          // its tab closed: a quiet one goes
   assert.deepEqual(c.all().map((it) => it.title), ['Busy one']);

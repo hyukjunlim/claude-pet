@@ -144,8 +144,7 @@
     const codex = s.kind === 'codex';
     const etl = s.kind === 'etl';
     const web = s.kind === 'web';        // a claude.ai, ChatGPT or Gemini chat in the browser
-    const WEB_SOURCE = { chatgpt: 'ChatGPT', gemini: 'Gemini' };
-    const source = web ? (WEB_SOURCE[s.site] || 'Claude Chat') : etl ? 'eTL' : codex ? 'Codex' : 'Claude';
+    const source = web ? s.siteName || s.site : etl ? 'eTL' : codex ? 'Codex' : 'Claude';
     // No hover tooltip (it pops up over the other bubbles); screen readers still get the details.
     const where = s.remote ? (codex ? `on ${s.remote}` : `SSH · ${s.remote}`) : '';
     // The main process opens an eTL link only on eTL's own site (see sessionUrl there).

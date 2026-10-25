@@ -16,7 +16,7 @@
   const player = new window.SpritePlayer(spriteEl);
 
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
-  const APP_NAME = { claude: 'Claude', codex: 'Codex', 'claude-web': 'claude.ai', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+  const APP_NAME = { claude: 'Claude', codex: 'Codex' };   // a web chat names its site itself
   const MACHINES = '*';                        // ... where the parent is the list of machines
   const BASE_ZOOM = 1.296;                     // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
@@ -283,7 +283,8 @@
     row.style.setProperty('--depth', String(depth));
     row.setAttribute('role', 'treeitem');
     const state = LABELS[s.status];
-    row.setAttribute('aria-label', [s.title, APP_NAME[s.app], state, s.flagged && 'Flagged', `Click to open in ${APP_NAME[s.app]}`].filter(Boolean).join(', '));
+    const app = s.siteName || APP_NAME[s.app];
+    row.setAttribute('aria-label', [s.title, app, state, s.flagged && 'Flagged', `Click to open in ${app}`].filter(Boolean).join(', '));
     row.append(flagEl(s), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
     if (state) row.append(el('span', 'state', state));
     else {
