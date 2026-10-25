@@ -185,15 +185,17 @@ header {
 
 .row:hover { background: var(--hover); }
 
-/* Dragging a folder among its siblings: it fades, and a line shows where it would land. */
-.folder { position: relative; }
-.folder.dragging { opacity: 0.45; }
+/* Dragging a machine or a folder among its siblings: it fades, and a line shows where it would
+   land. */
+.movable { position: relative; }
+.movable.dragging { opacity: 0.45; }
 .reordering,
 .reordering .row,
+.reordering .host-head,
 .reordering .flag { cursor: grabbing; }
 
-.folder.drop-before::before,
-.folder.drop-after::after {
+.movable.drop-before::before,
+.movable.drop-after::after {
   content: "";
   position: absolute;
   left: calc(6px + var(--depth, 0) * var(--indent));
@@ -204,8 +206,8 @@ header {
   pointer-events: none;
 }
 
-.folder.drop-before::before { top: -1px; }
-.folder.drop-after::after { bottom: -1px; }
+.movable.drop-before::before { top: -1px; }
+.movable.drop-after::after { bottom: -1px; }
 .row:focus-visible { outline: 2px solid color-mix(in srgb, var(--claude) 60%, transparent); outline-offset: -2px; }
 .row.current { background: var(--selected); }
 

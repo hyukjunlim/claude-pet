@@ -2,8 +2,8 @@
 
 // Folder mode's page: every Claude session and Codex thread under its machine and folder (the
 // tree comes ready-made from src/folder-tree.js), eTL's notices under it, and the weekly limits
-// and the pet docked at the bottom. A click on a session opens it in its app; a folder folds,
-// and dragging it moves it among its siblings.
+// and the pet docked at the bottom. A click on a session opens it in its app; a machine or a
+// folder folds, and dragging it moves it among its siblings.
 
 (() => {
   const api = window.folder;
@@ -19,6 +19,7 @@
   const APP_NAME = { claude: 'Claude', codex: 'Codex', 'claude-web': 'claude.ai', chatgpt: 'ChatGPT', gemini: 'Gemini' };
   const FOLD_KEY = 'claude-pet:folder-fold';   // folder key -> open, where you changed it
   const ORDER_KEY = 'claude-pet:folder-order'; // parent key -> its folders' keys, in your order
+  const MACHINES = '*';                        // ... where the parent is the list of machines
   const BASE_ZOOM = 1.2;                       // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
 
@@ -165,7 +166,7 @@
       out.push(...n.sessions);
       arranged(n.key, n.children).forEach(walk);
     };
-    for (const h of shown) {
+    for (const h of arranged(MACHINES, shown)) {
       arranged(h.key, h.folders).forEach(walk);
       out.push(...h.loose);
     }
@@ -190,7 +191,7 @@
   function render() {
     const shown = query ? hosts.map(filterHost).filter(Boolean) : hosts;
     const scroll = treeEl.scrollTop;
-    treeEl.replaceChildren(...shown.map(hostEl));
+    treeEl.replaceChildren(...arranged(MACHINES, shown).map(hostEl));
     if (!shown.length) treeEl.append(el('div', 'empty', query ? 'No sessions match.' : 'No Claude sessions or Codex threads yet.'));
     treeEl.scrollTop = scroll;
     updateFoldAll();
@@ -198,7 +199,9 @@
 
   function hostEl(h) {
     const open = isOpen(h.key, true);
-    const wrap = el('div', `host${open ? ' open' : ''}`);
+    const wrap = el('div', `host movable${open ? ' open' : ''}`);
+    wrap.dataset.key = h.key;
+    wrap.dataset.parent = MACHINES;
     wrap.setAttribute('role', 'group');
     const head = el('button', 'host-head');
     head.type = 'button';
@@ -207,7 +210,10 @@
     // folds it when clicked. The arrows on the left are the folders'.
     head.append(el('span', 'host-name', h.label));
     if (!open) head.append(...pips(h));
-    head.addEventListener('click', () => setOpen(h.key, !open));
+    head.addEventListener('click', () => {
+      if (!dragged) setOpen(h.key, !open);
+    });
+    head.addEventListener('pointerdown', (e) => pressRow(e, wrap));
     wrap.append(head);
     if (open) {
       const kids = el('div', 'children');
@@ -228,7 +234,10 @@
     const open = isOpen(n.key, n.open);
     const wrap = el('div', `folder${open ? ' open' : ''}`);
     wrap.dataset.key = n.key;
-    if (parentKey) wrap.dataset.parent = parentKey;
+    if (parentKey) {
+      wrap.classList.add('movable');
+      wrap.dataset.parent = parentKey;
+    }
     wrap.style.setProperty('--depth', String(depth));
     const row = el('button', 'row');
     row.type = 'button';
@@ -241,7 +250,7 @@
     row.addEventListener('click', () => {
       if (!dragged) setOpen(n.key, !open);
     });
-    if (parentKey) row.addEventListener('pointerdown', (e) => pressFolder(e, wrap));
+    if (parentKey) row.addEventListener('pointerdown', (e) => pressRow(e, wrap));
     wrap.append(row);
     if (open) {
       const kids = el('div', 'children');
@@ -412,12 +421,12 @@
     return g;
   }
 
-  // ---------------------------------------------------------- folder order: drag a folder
+  // ---------------------------------------------------------- order: drag a machine or a folder
 
-  // A parent's folders (a machine's, or a folder's) in the order you dragged them to; the
-  // sessions in a folder stay newest first. The first time a parent shows, its order then (newest
-  // first) is kept, so a folder doesn't move when a session in it gets busy; one that turns up
-  // later goes on top. A folder that's gone keeps its place, for when it's back.
+  // The machines, or a parent's folders (a machine's, or a folder's), in the order you dragged
+  // them to; the sessions in a folder stay newest first. The first time a parent shows, its order
+  // then is kept, so a folder doesn't move when a session in it gets busy; one that turns up later
+  // goes on top. One that's gone keeps its place, for when it's back.
   function arranged(parentKey, folders) {
     if (!folders.length) return folders;
     const saved = order[parentKey];
@@ -437,11 +446,12 @@
     save(ORDER_KEY, order);
   }
 
-  // Held down, a folder's row starts a drag once the pointer has moved a little; until then it's
-  // a click, which folds it. Not while searching, when the list shows only part of each parent.
+  // Held down, a machine's heading or a folder's row starts a drag once the pointer has moved a
+  // little; until then it's a click, which folds it. Not while searching, when the list shows
+  // only part of each parent.
   const DRAG_PX = 5;
 
-  function pressFolder(e, wrap) {
+  function pressRow(e, wrap) {
     if (e.button !== 0 || query) return;
     press = { id: e.pointerId, row: e.currentTarget, wrap, y: e.clientY, dragging: false, cancelled: false, target: null, after: false };
   }
@@ -466,11 +476,11 @@
   });
 
   // The sibling under the pointer (or the sibling whose folders it's in), and whether the dragged
-  // folder goes after it: below its middle.
+  // one goes after it: below its middle.
   function dropTarget(x, y) {
     const parent = press.wrap.dataset.parent;
-    let f = document.elementFromPoint(x, y)?.closest('.folder');
-    while (f && f.dataset.parent !== parent) f = f.parentElement?.closest('.folder');
+    let f = document.elementFromPoint(x, y)?.closest('.movable');
+    while (f && f.dataset.parent !== parent) f = f.parentElement?.closest('.movable');
     if (!f || f === press.wrap) return null;
     const r = f.getBoundingClientRect();
     return { wrap: f, after: y > r.top + r.height / 2 };
@@ -491,7 +501,7 @@
     else if (y > r.bottom - 24) treeEl.scrollTop += 12;
   }
 
-  // Escape: the folder stays where it was. The drag still ends when the button comes up.
+  // Escape: it stays where it was. The drag still ends when the button comes up.
   function cancelDrag() {
     mark(null);
     press.cancelled = true;
