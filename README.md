@@ -178,8 +178,9 @@ Other things it does:
 Tray menu → *Mode* → *Folder sidebar* (or `--mode=folder` on the command line) turns the pet into
 a sidebar. It docks to the left edge of the monitor as a Windows app bar, so other windows make
 room for it, and lists every Claude Code session and Codex thread, quiet ones too, by machine and
-folder. The pet and the weekly limits sit at its foot. Each time it docks, the Claude and Codex
-windows are maximized beside it, so the conversation you open fills the rest of the screen.
+folder. The pet and the weekly limits sit at its foot, with eTL's notices just above them when
+eTL is on. Each time it docks, the Claude and Codex windows are maximized beside it, so the
+conversation you open fills the rest of the screen.
 
 - **Machines and folders:** *Local*, *WSL* and each SSH host, each with its folders. The two apps'
   names for one server meet under one heading, and a session started in a parent folder stays at
