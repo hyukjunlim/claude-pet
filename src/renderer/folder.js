@@ -17,8 +17,6 @@
 
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
   const APP_NAME = { claude: 'Claude', codex: 'Codex', 'claude-web': 'claude.ai', chatgpt: 'ChatGPT', gemini: 'Gemini' };
-  const FOLD_KEY = 'claude-pet:folder-fold';   // folder key -> open, where you changed it
-  const ORDER_KEY = 'claude-pet:folder-order'; // parent key -> its folders' keys, in your order
   const MACHINES = '*';                        // ... where the parent is the list of machines
   const BASE_ZOOM = 1.296;                     // the text size at 100% (Ctrl 0), over folder.css's px
   let zoom = 1;                                // Ctrl + and Ctrl - from there, 80% to 200%
@@ -27,8 +25,10 @@
   let notices = [];
   let query = '';
   let current = null;                          // the session you opened last
-  let fold = load(FOLD_KEY);
-  let order = load(ORDER_KEY);
+  // Your folding, folder order and text size, kept in settings.json (main.js).
+  const prefs = takePrefs(api.prefs());
+  let fold = prefs.fold;                       // folder key -> open, where you changed it
+  let order = prefs.order;                     // parent key -> its folders' keys, in your order
   let press = null;                            // a folder row held down, maybe being dragged
   let dragged = false;                         // the click a drag ends with isn't one
   let treePending = false;                     // a tree that came during a drag
@@ -73,21 +73,29 @@
 
   // ---------------------------------------------------------- folding
 
-  function load(key) {
+  // Before settings.json kept them, this page did, in its own storage. Those come over the first
+  // time (where settings.json has nothing yet), and the page's copies go.
+  function takePrefs(saved) {
+    const p = { fold: { ...saved?.fold }, order: { ...saved?.order }, zoom: Number(saved?.zoom) || 1 };
+    const moved = {};
     try {
-      const saved = JSON.parse(localStorage.getItem(key) || '{}');
-      return saved && typeof saved === 'object' ? saved : {};
+      const take = (key) => {
+        const value = localStorage.getItem(key);
+        localStorage.removeItem(key);
+        return value;
+      };
+      const fold = JSON.parse(take('claude-pet:folder-fold') || 'null');
+      const order = JSON.parse(take('claude-pet:folder-order') || 'null');
+      const zoom = Number(take('claude-pet:sidebar-zoom-2'));
+      for (const key of ['claude-pet:folder-zoom', 'claude-pet:sidebar-zoom']) localStorage.removeItem(key);   // from an older 100%
+      if (fold && typeof fold === 'object' && !Object.keys(p.fold).length) moved.fold = p.fold = fold;
+      if (order && typeof order === 'object' && !Object.keys(p.order).length) moved.order = p.order = order;
+      if (zoom && saved?.zoom == null) moved.zoom = p.zoom = zoom;
     } catch {
-      return {};
+      // nothing to bring over
     }
-  }
-
-  function save(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // kept for this run only
-    }
+    if (Object.keys(moved).length) api.savePrefs(moved);
+    return p;
   }
 
   function setOpen(key, open) {
@@ -96,7 +104,7 @@
     render();
   }
 
-  const saveFold = () => save(FOLD_KEY, fold);
+  const saveFold = () => api.savePrefs({ fold });
 
   // While searching, everything that matches is shown open.
   const isOpen = (key, byDefault) => (query ? true : fold[key] ?? byDefault);
@@ -450,7 +458,7 @@
 
   function remember(parentKey, keys) {
     order[parentKey] = keys;
-    save(ORDER_KEY, order);
+    api.savePrefs({ order });
   }
 
   // Held down, a machine's heading or a folder's row starts a drag once the pointer has moved a
@@ -618,7 +626,6 @@
 
   // ---------------------------------------------------------- text size: Ctrl +, Ctrl -, Ctrl 0
 
-  const ZOOM_KEY = 'claude-pet:sidebar-zoom-2'; // new with each 100%: the last one's 90% is this 100%
   const ZOOMS = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
   const zoomLevelEl = document.getElementById('zoom-level');
   let zoomTimer = null;
@@ -628,12 +635,8 @@
     // The whole sidebar, as a browser's zoom does, from a 100% that is 1.296 times the CSS's sizes.
     document.documentElement.style.zoom = String(BASE_ZOOM * zoom);
     sizePet();
-    try {
-      localStorage.setItem(ZOOM_KEY, String(zoom));
-    } catch {
-      // kept for this run only
-    }
-    if (!show) return;
+    if (!show) return;   // the size it starts at
+    api.savePrefs({ zoom });
     zoomLevelEl.textContent = `${Math.round(zoom * 100)}%`;
     zoomLevelEl.hidden = false;
     clearTimeout(zoomTimer);
@@ -665,12 +668,7 @@
     zoomBy(e.deltaY < 0 ? 1 : -1);
   }, { passive: false });
 
-  try {
-    for (const old of ['claude-pet:folder-zoom', 'claude-pet:sidebar-zoom']) localStorage.removeItem(old);   // sizes from an older 100%
-    setZoom(localStorage.getItem(ZOOM_KEY) || 1, false);
-  } catch {
-    setZoom(1, false);
-  }
+  setZoom(prefs.zoom, false);
 
   // ---------------------------------------------------------- helpers
 

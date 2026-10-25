@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('folder', {
   onFold: listen('folder:fold'),     // a row menu's Collapse or Expand: { key, open }
   onSelect: listen('folder:select'), // a session opened from its row's menu
   ready: () => ipcRenderer.send('folder:ready'),
+  prefs: () => ipcRenderer.sendSync('folder:prefs'),   // { fold, order, zoom } from settings.json
+  savePrefs: (p) => ipcRenderer.send('folder:save-prefs', p),
   open: (id, via) => ipcRenderer.send('folder:open', String(id), via === 'key' ? 'key' : 'click'),
   flag: (id, on) => ipcRenderer.send('folder:flag', String(id), on === true),
   activatePet: () => ipcRenderer.send('folder:pet-click'),

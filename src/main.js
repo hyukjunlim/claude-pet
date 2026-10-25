@@ -1200,6 +1200,21 @@ function registerIpc() {
 
   // Folder mode's sidebar.
   const fromFolder = (event) => Boolean(folder?.owns(event.sender));
+  // The sidebar's folding, folder order and text size, kept in settings.json. The page asks as it
+  // starts, before it draws the tree.
+  ipcMain.on('folder:prefs', (e) => {
+    e.returnValue = fromFolder(e)
+      ? { fold: settings.get('folderFold') || {}, order: settings.get('folderOrder') || {}, zoom: settings.get('folderZoom') ?? null }
+      : null;
+  });
+  ipcMain.on('folder:save-prefs', (e, p) => {
+    if (!fromFolder(e) || !p || typeof p !== 'object') return;
+    const patch = {};
+    if (isMapOf(p.fold, (v) => typeof v === 'boolean')) patch.folderFold = p.fold;
+    if (isMapOf(p.order, (v) => Array.isArray(v) && v.every((k) => typeof k === 'string'))) patch.folderOrder = p.order;
+    if (Number.isFinite(p.zoom) && p.zoom >= 0.5 && p.zoom <= 3) patch.folderZoom = p.zoom;
+    if (Object.keys(patch).length) settings.set(patch);
+  });
   ipcMain.on('folder:ready', (e) => {
     if (!fromFolder(e)) return;
     treeKey = '';
@@ -1257,6 +1272,11 @@ function themeOf() {
 
 function applyTheme() {
   nativeTheme.themeSource = themeOf();
+}
+
+// A plain object whose values all pass `ok`.
+function isMapOf(value, ok) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(ok);
 }
 
 function isPoint(p) {
