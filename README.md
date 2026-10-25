@@ -47,8 +47,8 @@ all.
 It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* to open the token
 form, or *나중에* to skip it; you can connect later from the tray menu's *eTL* item.
 
-Chats on claude.ai and chatgpt.com can get bubbles too, through an optional browser extension:
-see [Web chats](#web-chats-claudeai-chatgpt-gemini).
+Chats on claude.ai, chatgpt.com and gemini.google.com can get bubbles too, through an optional
+browser extension: see [Web chats](#web-chats-claudeai-chatgpt-gemini).
 
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
@@ -183,7 +183,8 @@ windows are maximized beside it, so the conversation you open fills the rest of 
 
 - **Machines and folders:** *Local*, *WSL* and each SSH host, each with its folders. The two apps'
   names for one server meet under one heading, and a session started in a parent folder stays at
-  the parent. Web chats, when they're on, come first, under *Chat*, with a dot in each site's color.
+  the parent. Web chats come first, under *Chat*, with a dot in each site's color, once you've
+  turned them on and loaded the browser extension ([Web chats](#web-chats-claudeai-chatgpt-gemini)).
 - **Order:** the sessions in a folder are newest first. Machines and folders keep the order they
   first showed in, so a folder doesn't jump when a session in it gets busy. Drag a machine's
   heading or a folder's row to move it among its neighbors (Escape cancels); a folder that turns
