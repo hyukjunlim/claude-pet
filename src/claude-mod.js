@@ -153,23 +153,46 @@ class LocalMod {
     return this.status();
   }
 
-  // Claude Pet's ~/.claude-pet, once: your pets, the usage file and the install state move here,
-  // and this PC's settings load the mod from here. Its copy of the mod stays for WSL distros still
-  // set up with it (dropLegacy takes it away). Whether there was such a folder.
+  // Claude Pet's ~/.claude-pet: your pets, the install state and the usage file move here, and
+  // this PC's settings load the mod from here. Its copy of the mod stays for WSL distros still set
+  // up with it (dropLegacy takes it away). Sessions started before the move save their usage
+  // there until they're restarted, so a newer file there is taken each time. What it moved.
   adoptLegacy() {
-    if (!fs.existsSync(this.legacyDir)) return false;
+    if (!fs.existsSync(this.legacyDir)) return [];
+    const moved = [];
     fs.mkdirSync(this.petDir, { recursive: true });
-    for (const name of ['pets', 'install.json', 'usage.json']) {
+    for (const name of ['pets', 'install.json']) {
       const from = path.join(this.legacyDir, name);
       const to = path.join(this.petDir, name);
-      if (fs.existsSync(from) && !fs.existsSync(to)) fs.renameSync(from, to);
+      if (fs.existsSync(from) && !fs.existsSync(to)) {
+        fs.renameSync(from, to);
+        moved.push(name);
+      }
     }
-    if (fs.existsSync(path.join(this.legacyDir, 'mod'))) this.copyFiles();
+    const usage = path.join(this.legacyDir, 'usage.json');
+    if (fs.existsSync(usage)) {
+      if (!fs.existsSync(this.usageFile) || fs.statSync(usage).mtimeMs > fs.statSync(this.usageFile).mtimeMs) {
+        fs.renameSync(usage, this.usageFile);
+        moved.push('usage.json');
+      } else {
+        fs.rmSync(usage);
+      }
+    }
+    if (fs.existsSync(path.join(this.legacyDir, 'mod')) && !fs.existsSync(this.dir)) {
+      this.copyFiles();
+      moved.push('mod');
+    }
     const settings = this.readSettings();
     if (pluginDirs(settings.env, this.delimiter).some((d) => LEGACY_RE.test(d))) {
       this.writeSettings(withModMoved(settings, this.dir, this.delimiter));
+      moved.push('settings');
     }
-    return true;
+    try {
+      fs.rmdirSync(this.legacyDir);
+    } catch {
+      // the mod's still there, or something else is
+    }
+    return moved;
   }
 
   // Claude Pet's copy of the mod, and its folder once nothing else is left in it.

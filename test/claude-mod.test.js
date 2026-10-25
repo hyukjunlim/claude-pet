@@ -153,7 +153,7 @@ test("Claude Pet's folder on this PC moves over once, its copy of the mod last",
     const { legacy, legacyMod, settingsFile } = claudePetHome(home, ';');
     const mod = new LocalMod({ home, claudeDir: path.join(home, '.claude'), delimiter: ';' });
     assert.equal(mod.status().installed, false, "the new folder isn't set up yet");
-    assert.equal(mod.adoptLegacy(), true);
+    assert.deepEqual(mod.adoptLegacy(), ['pets', 'install.json', 'usage.json', 'mod', 'settings']);
     assert.equal(fs.existsSync(path.join(mod.petDir, 'pets', 'mine', 'pet.json')), true, 'your pets come along');
     assert.equal(fs.readFileSync(mod.usageFile, 'utf8'), '{"version":1}');
     assert.deepEqual(readJson(mod.stateFile), { functionHooksAdded: true });
@@ -162,12 +162,27 @@ test("Claude Pet's folder on this PC moves over once, its copy of the mod last",
       CLAUDE_CODE_PLUGIN_DIRS: [path.join(home, 'mine'), mod.dir].join(';'), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
     });
     assert.equal(fs.existsSync(legacyMod), true, 'kept for WSL distros still loading it');
-    assert.equal(mod.adoptLegacy(), true, 'again while it stays: nothing changes');
+    assert.deepEqual(mod.adoptLegacy(), [], 'again while it stays: nothing changes');
     assert.deepEqual(mod.status(), { installed: true, version: bundledVersion() });
 
     mod.dropLegacy();
     assert.equal(fs.existsSync(legacy), false);
-    assert.equal(mod.adoptLegacy(), false);
+    assert.deepEqual(mod.adoptLegacy(), []);
+
+    // a session started before the move saves its usage in the old place: newer figures count
+    const old = path.join(legacy, 'usage.json');
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(old, '{"version":2}');
+    fs.utimesSync(old, new Date(), new Date(Date.now() + 60_000));
+    assert.deepEqual(mod.adoptLegacy(), ['usage.json']);
+    assert.equal(fs.readFileSync(mod.usageFile, 'utf8'), '{"version":2}');
+    assert.equal(fs.existsSync(legacy), false);
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(old, '{"version":0}');
+    fs.utimesSync(old, new Date(0), new Date(0));
+    assert.deepEqual(mod.adoptLegacy(), [], 'older figures just go');
+    assert.equal(fs.readFileSync(mod.usageFile, 'utf8'), '{"version":2}');
+    assert.equal(fs.existsSync(legacy), false);
 
     mod.uninstall();
     assert.deepEqual(readJson(settingsFile).env, { CLAUDE_CODE_PLUGIN_DIRS: path.join(home, 'mine') }, 'hooks go: Claude Pet turned them on');

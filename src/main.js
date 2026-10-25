@@ -1696,13 +1696,14 @@ function adoptClaudePet() {
   if (userDataNote) log(userDataNote);
   moveLoginItem();
   try {
-    if (!localMod.adoptLegacy()) return;
-    log('moved ~/.claude-pet to ~/.ttokttok-pet');
-    if (settings.get('claudeModWslToMove') == null) {
+    const moved = localMod.adoptLegacy();
+    if (!moved.length) return;
+    log(`moved from ~/.claude-pet to ~/.ttokttok-pet: ${moved.join(', ')}`);
+    if (moved.includes('mod') && settings.get('claudeModWslToMove') == null) {
       const wsl = settings.get('claudeModWsl');
       settings.set({ claudeModWslToMove: Object.keys(wsl).filter((d) => wsl[d]) });
     }
-    if (!settings.get('claudeModWslToMove').length) localMod.dropLegacy();
+    if (!settings.get('claudeModWslToMove')?.length) localMod.dropLegacy();
   } catch (err) {
     log("couldn't move ~/.claude-pet:", err.message);
   }
