@@ -32,6 +32,7 @@ const DEFAULTS = {
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
   flags: {},               // folder mode's follow-up flags: session id -> when you flagged it (flags.js)
+  hidden: {},              // sessions hidden from the sidebar: session id -> when (hidden.js)
   seen: {},                // sessions you saw in the app with its window in front, and when
 };
 

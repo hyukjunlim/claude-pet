@@ -28,6 +28,7 @@ const { WebChatsFeature } = require('./webchats/feature');
 const { FolderWindow } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
 const { settleFlags } = require('./flags');
+const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
 
@@ -489,11 +490,13 @@ function mergeSessions() {
 // Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
 function sendTree() {
   const flags = currentFlags();
+  const hidden = currentHidden();
   if (!folder?.open) return;
+  const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id));
   const hosts = buildTree({
-    claude: claudeAll,
-    codex: codexAll,
-    chats: webAll,
+    claude: shown(claudeAll),
+    codex: shown(codexAll),
+    chats: shown(webAll),
     sshHosts: sshConfigHosts(),
     codexConnections: codex?.connections ?? [],
     defaultWsl: wslDistros()[0] ?? null,
@@ -519,6 +522,23 @@ function setFlag(id, on) {
   if (on) flags[id] = Date.now();
   else delete flags[id];
   settings.set({ flags });
+  sendTree();
+}
+
+// The sessions you hid from the sidebar (hidden.js), less the ones with something new in them.
+function currentHidden() {
+  const saved = settings.get('hidden') || {};
+  const left = settleHidden(saved, [...claudeAll, ...codexAll, ...webAll]);
+  if (left !== saved) settings.set({ hidden: left });
+  return left;
+}
+
+// `id` null: every hidden session shows again.
+function setHidden(id, on) {
+  const hidden = id == null ? {} : { ...currentHidden() };
+  if (id != null && on) hidden[id] = Date.now();
+  else if (id != null) delete hidden[id];
+  settings.set({ hidden });
   sendTree();
 }
 
@@ -1184,11 +1204,12 @@ function registerIpc() {
     if (!fromFolder(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
     const menu = buildMenu();
-    // On a session's row, its flag comes first.
+    // On a session's row, its flag and hiding it come first.
     const id = typeof p?.id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === p.id)) ? p.id : null;
     if (id) {
       const flagged = Object.hasOwn(currentFlags(), id);
       menu.insert(0, new MenuItem({ type: 'separator' }));
+      menu.insert(0, new MenuItem({ label: 'Hide from the sidebar', click: () => setHidden(id, true) }));
       menu.insert(0, new MenuItem({ label: flagged ? 'Clear flag' : 'Flag for follow-up', click: () => setFlag(id, !flagged) }));
     }
     tray?.popUpContextMenu(menu, position);
@@ -1245,7 +1266,8 @@ function buildMenu() {
   const items = [];
   items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
   const tags = { cli: ' (terminal)', codex: ' (Codex)', etl: ' (eTL)' };
-  const tagOf = (s) => (s.kind === 'web' ? ` (${s.site === 'chatgpt' ? 'ChatGPT' : 'Claude Chat'})` : tags[s.kind] || '');
+  const sites = { chatgpt: 'ChatGPT', gemini: 'Gemini' };
+  const tagOf = (s) => (s.kind === 'web' ? ` (${sites[s.site] || 'Claude Chat'})` : tags[s.kind] || '');
   for (const s of sessions.slice(0, 8)) {
     items.push({
       label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tagOf(s)}`,
@@ -1270,6 +1292,22 @@ function buildMenu() {
       { label: 'Folder sidebar (every session, by machine and folder)', type: 'radio', checked: folderMode, click: () => setMode('folder') },
     ],
   });
+  // The sessions you hid from the sidebar, to bring back (one whose session is gone isn't listed).
+  if (folderMode) {
+    const hidden = Object.keys(currentHidden())
+      .map((id) => [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null))
+      .filter(Boolean);
+    if (hidden.length) {
+      items.push({
+        label: `Hidden from the sidebar (${hidden.length})`,
+        submenu: [
+          ...hidden.map((s) => ({ label: truncate(s.title, 42), click: () => setHidden(s.id, false) })),
+          { type: 'separator' },
+          { label: 'Show them all', click: () => setHidden(null) },
+        ],
+      });
+    }
+  }
   items.push({
     label: 'Show activity bubbles',
     type: 'checkbox',
