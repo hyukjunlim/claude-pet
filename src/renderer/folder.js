@@ -635,6 +635,7 @@
   }, { passive: false });
 
   try {
+    for (const old of ['claude-pet:folder-zoom', 'claude-pet:sidebar-zoom']) localStorage.removeItem(old);   // sizes from an older 100%
     setZoom(localStorage.getItem(ZOOM_KEY) || 1, false);
   } catch {
     setZoom(1, false);

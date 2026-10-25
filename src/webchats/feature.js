@@ -184,7 +184,7 @@ class WebChatsFeature extends EventEmitter {
     const on = this.enabled;
     const items = [
       {
-        label: 'Show claude.ai and ChatGPT chats',
+        label: 'Show claude.ai, ChatGPT and Gemini chats',
         type: 'checkbox',
         checked: on,
         click: (mi) => this.setEnabled(mi.checked).catch((err) => this.log('web chats:', err.message)),
