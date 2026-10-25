@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, MenuItem, Tray, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage,
+  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage,
   screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
@@ -533,13 +533,48 @@ function currentHidden() {
   return left;
 }
 
-// `id` null: every hidden session shows again.
-function setHidden(id, on) {
-  const hidden = id == null ? {} : { ...currentHidden() };
-  if (id != null && on) hidden[id] = Date.now();
-  else if (id != null) delete hidden[id];
+// `ids` null: every hidden session shows again.
+function setHidden(ids, on) {
+  const hidden = ids == null ? {} : { ...currentHidden() };
+  const now = Date.now();
+  for (const id of ids ?? []) {
+    if (on) hidden[id] = now;
+    else delete hidden[id];
+  }
   settings.set({ hidden });
   sendTree();
+}
+
+// A sidebar row's own menu: a session's (open it, flag it, hide it), or a machine's or a folder's
+// (fold it, hide what's in it). Null for anywhere else, which gets the tray menu.
+function rowMenu(target) {
+  const known = (id) => typeof id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === id));
+  if (target?.kind === 'session' && known(target.id)) {
+    const { id } = target;
+    const flagged = Object.hasOwn(currentFlags(), id);
+    return Menu.buildFromTemplate([
+      {
+        label: 'Open',
+        click: () => {
+          if (openSession(id, { handoff: false, fill: true })) folder?.send('folder:select', id);
+        },
+      },
+      { type: 'separator' },
+      { label: flagged ? 'Clear flag' : 'Flag for follow-up', click: () => setFlag(id, !flagged) },
+      { label: 'Hide from the sidebar', click: () => setHidden([id], true) },
+    ]);
+  }
+  if (target?.kind === 'folder' && typeof target.key === 'string' && Array.isArray(target.ids)) {
+    const { key } = target;
+    const open = target.open === true;
+    const ids = target.ids.filter(known);
+    return Menu.buildFromTemplate([
+      { label: open ? 'Collapse' : 'Expand', click: () => folder?.send('folder:fold', { key, open: !open }) },
+      { type: 'separator' },
+      { label: 'Hide from the sidebar', enabled: ids.length > 0, click: () => setHidden(ids, true) },
+    ]);
+  }
+  return null;
 }
 
 function codexInstalled() {
@@ -1203,16 +1238,7 @@ function registerIpc() {
   ipcMain.on('folder:context-menu', (e, p) => {
     if (!fromFolder(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
-    const menu = buildMenu();
-    // On a session's row, its flag and hiding it come first.
-    const id = typeof p?.id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === p.id)) ? p.id : null;
-    if (id) {
-      const flagged = Object.hasOwn(currentFlags(), id);
-      menu.insert(0, new MenuItem({ type: 'separator' }));
-      menu.insert(0, new MenuItem({ label: 'Hide from the sidebar', click: () => setHidden(id, true) }));
-      menu.insert(0, new MenuItem({ label: flagged ? 'Clear flag' : 'Flag for follow-up', click: () => setFlag(id, !flagged) }));
-    }
-    tray?.popUpContextMenu(menu, position);
+    tray?.popUpContextMenu(rowMenu(p?.target) ?? buildMenu(), position);
   });
 }
 
@@ -1301,7 +1327,7 @@ function buildMenu() {
       items.push({
         label: `Hidden from the sidebar (${hidden.length})`,
         submenu: [
-          ...hidden.map((s) => ({ label: truncate(s.title, 42), click: () => setHidden(s.id, false) })),
+          ...hidden.map((s) => ({ label: truncate(s.title, 42), click: () => setHidden([s.id], false) })),
           { type: 'separator' },
           { label: 'Show them all', click: () => setHidden(null) },
         ],

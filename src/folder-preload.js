@@ -21,11 +21,13 @@ contextBridge.exposeInMainWorld('folder', {
   onStatus: listen('folder:status'),
   onWake: listen('folder:wake'),
   onStep: listen('folder:step'),     // Ctrl+Tab (+1) or Ctrl+Shift+Tab (-1)
+  onFold: listen('folder:fold'),     // a row menu's Collapse or Expand: { key, open }
+  onSelect: listen('folder:select'), // a session opened from its row's menu
   ready: () => ipcRenderer.send('folder:ready'),
   open: (id, via) => ipcRenderer.send('folder:open', String(id), via === 'key' ? 'key' : 'click'),
   flag: (id, on) => ipcRenderer.send('folder:flag', String(id), on === true),
   activatePet: () => ipcRenderer.send('folder:pet-click'),
   resize: (phase) => ipcRenderer.send('folder:resize', String(phase)),   // 'move', 'end' or 'reset'
-  // `id`: the session whose row was clicked, if any.
-  contextMenu: (screenX, screenY, id) => ipcRenderer.send('folder:context-menu', { screenX, screenY, id: typeof id === 'string' ? id : null }),
+  // `target`: the row clicked, if any: { kind: 'session', id } or { kind: 'folder', key, open, ids }.
+  contextMenu: (screenX, screenY, target) => ipcRenderer.send('folder:context-menu', { screenX, screenY, target: target ?? null }),
 });

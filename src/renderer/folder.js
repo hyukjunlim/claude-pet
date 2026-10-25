@@ -63,6 +63,13 @@
   api.onMotion(({ alwaysAnimate }) => player.setAlwaysAnimate(alwaysAnimate));
   api.onStatus((status) => player.setBase(status || 'idle'));
   api.onWake(() => player.playOnce('waving', 3));
+  api.onFold(({ key, open } = {}) => {
+    if (typeof key === 'string') setOpen(key, open === true);
+  });
+  api.onSelect((id) => {
+    current = id;
+    render();
+  });
 
   // ---------------------------------------------------------- folding
 
@@ -544,11 +551,35 @@
     if (!player.transient) player.playOnce('jumping');
   });
 
+  // A session's row, a folder's row or a machine's heading has a menu of its own (main.js); the
+  // rest of the page has the tray menu.
   document.addEventListener('contextmenu', (e) => {
     if (e.target === searchEl) return;   // the field's own menu (cut, copy, paste)
     e.preventDefault();
-    api.contextMenu(e.screenX, e.screenY, e.target.closest?.('.session')?.dataset.id);
+    api.contextMenu(e.screenX, e.screenY, menuTarget(e.target));
   });
+
+  function menuTarget(node) {
+    const session = node.closest?.('.session');
+    if (session?.dataset.id) return { kind: 'session', id: session.dataset.id };   // not eTL's notices
+    const head = node.closest?.('.folder > .row, .host-head');
+    const n = head && nodeFor(head.parentElement.dataset.key);
+    if (!n) return null;
+    return { kind: 'folder', key: n.key, open: head.parentElement.classList.contains('open'), ids: n.sessions.map((s) => s.id) };
+  }
+
+  // The machine or folder with key `key` ("No folder" too), with every session in it.
+  function nodeFor(key) {
+    const all = (n) => [...n.sessions, ...n.children.flatMap(all)];
+    const find = (n) => (n.key === key ? n : n.children.reduce((found, c) => found ?? find(c), null));
+    for (const h of hosts) {
+      if (h.key === key) return { key, sessions: [...h.folders.flatMap(all), ...h.loose] };
+      if (key === `${h.key}|loose`) return { key, sessions: h.loose };
+      const n = h.folders.reduce((found, f) => found ?? find(f), null);
+      if (n) return { key, sessions: all(n) };
+    }
+    return null;
+  }
 
   // ---------------------------------------------------------- width: drag the right edge
 
