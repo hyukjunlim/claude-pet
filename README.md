@@ -501,9 +501,11 @@ the token with eTL before saving it. *토큰 등록/변경…* replaces it.
 and on *지금 확인*. The first check only notes what's there and says how many assignments are due.
 After that, a bubble appears for:
 
-- **마감 임박:** 24 hours, 3 hours and 1 hour before an assignment you haven't submitted is due
-  (online submissions only). It shows the time left, kept current, and stays until the deadline
-  or until you submit.
+- **마감 임박:** from 24 hours before an assignment is due until the due time, one bubble per
+  assignment, made from the last check's list, so a check that fails doesn't lose it. It shows the
+  time left, kept current: **마감 임박** in yellow while it isn't handed in (red in its last 3
+  hours), **제출함** in green once it is, **오프라인** in gray for work handed in on paper. Its ×
+  hides it for an hour.
 - **마감 변경**, **새 과제**, **성적** (a new or changed grade) and **새 공지** (announcements of the
   last 14 days; one that mentions a makeup or cancelled class says **보강 공지** or **휴강 공지**).
 - **Today's classes:** from 6:00, one bubble per class (start time, course, room and how soon it
@@ -512,9 +514,9 @@ After that, a bubble appears for:
   the day ends; tray menu → *Sources* → *eTL* → *오늘 수업 알림* turns them off.
 - **토큰 만료:** once, when eTL stops accepting the token.
 
-Clicking a bubble opens that eTL page in your browser; × dismisses it for good. Other bubbles go
-away after 3 days, and at most 30 are kept. Changes made while the pet wasn't running show up at
-the next check.
+Clicking a bubble opens that eTL page in your browser; × dismisses the others for good. Other
+bubbles go away after 3 days, and at most 30 are kept. Changes made while the pet wasn't running
+show up at the next check.
 
 **Chat folder.** Turning eTL on also creates a chat folder, `Documents\etl-assistant` by default
 (*채팅 폴더 위치 변경…* moves it; your `todos.md` and `timetable.md` are copied and the old folder is left

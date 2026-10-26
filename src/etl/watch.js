@@ -16,7 +16,8 @@
 //   {
 //     version: 1,
 //     initialized: bool,                           // a check has set the baseline
-//     assignments: { '<cid>:<aid>': { name, course, due: ms | null, score: number | null, reminded: ['24h', '3h'] } },
+//     assignments: { '<cid>:<aid>': { name, course, due: ms | null, score: number | null, submitted: bool,
+//                                     online: bool, url: string | null } },
 //     announcementsSeen: ['<id>', ...],            // oldest first, at most MAX_SEEN_ANNOUNCEMENTS
 //     tokenExpiredNotified: bool,                  // the 401 bubble was shown; cleared by resetTokenExpired
 //   }
@@ -26,10 +27,11 @@ const { formatKst, htmlToText, isGraded, isOnline, isPublished, isSubmitted, rem
 const STATE_VERSION = 1;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-const REMINDERS = [{ hours: 1, tag: '1h' }, { hours: 3, tag: '3h' }, { hours: 24, tag: '24h' }];   // shortest first
+const DEADLINE_WINDOW_MS = DAY_MS;            // a deadline's bubble shows this long before it
+const URGENT_MS = 3 * HOUR_MS;                 // ... and turns red this close to it, if not handed in
 const ANNOUNCE_WINDOW_MS = 14 * DAY_MS;
 const MAX_SEEN_ANNOUNCEMENTS = 1000;
-const NOTICE_TTL_MS = 3 * DAY_MS;              // how long a bubble stays, unless it's a reminder
+const NOTICE_TTL_MS = 3 * DAY_MS;              // how long a bubble stays
 const TITLE_LIMIT = 200;
 const DETAIL_LIMIT = 300;
 const PROJECT_LIMIT = 80;
@@ -40,7 +42,7 @@ const ID_RE = /^\d+$/;
 
 // Which bubbles go first when there are too many (lower first): PLAN 5.3's order, with the
 // expired token up front and the one-off "connected" bubble last.
-const PRIORITY = { token: 0, remind24h: 1, remind3h: 1, remind1h: 1, due: 2, new: 3, grade: 4, ann: 5, connected: 6 };
+const PRIORITY = { token: 0, deadline: 1, due: 2, new: 3, grade: 4, ann: 5, connected: 6 };
 
 function priorityOf(item) {
   const kind = String(item?.id || '').split(':')[1];
@@ -105,15 +107,37 @@ function announcementBadge(n) {
 
 const scoreText = (n) => (typeof n === 'number' ? String(Math.round(n * 100) / 100) : String(n));
 
-// The reminder stage due now, if it hasn't been sent: the shortest stage the time left fits in.
-// Sending it also counts every longer stage as sent, so a deadline first seen 2 hours out gets
-// the 3-hour reminder only, and once.
-function reminderDue(dueMs, reminded, now) {
-  const left = dueMs - now;
-  const stage = REMINDERS.find((r) => left <= r.hours * HOUR_MS);
-  if (!stage || reminded.includes(stage.tag)) return null;
-  const sent = REMINDERS.filter((r) => r.hours >= stage.hours).map((r) => r.tag);
-  return { stage, reminded: [...new Set([...reminded, ...sent])].sort() };
+// A bubble for each assignment due in the next 24 hours, from what the last check saw, so a check
+// that failed doesn't lose one: whether it's handed in or not, until the due time. Yellow while it
+// isn't, red in its last 3 hours; green once it is; gray for work handed in on paper (eTL doesn't
+// know). `hidden`: id -> until when a closed one stays out of sight (EtlTracker).
+function deadlineItems(assignments, now, hidden = {}) {
+  const out = [];
+  for (const [key, rec] of Object.entries(assignments || {})) {
+    const due = rec?.due;
+    if (!Number.isFinite(due) || due <= now || due - now > DEADLINE_WINDOW_MS) continue;
+    const id = `etl:deadline:${key}`;
+    if (hidden[id] > now) continue;
+    const offline = rec.online === false;
+    const submitted = rec.submitted === true;
+    // A short label, so the assignment's name still fits beside it; the rest goes on the line below.
+    const [status, badge, timePrefix] = offline ? ['background', '오프라인', '마감 ']
+      : submitted ? ['review', '제출함', '마감 ']
+        : [due - now <= URGENT_MS ? 'failed' : 'waiting', '마감 임박', '미제출 · '];
+    out.push({
+      ...item({
+        id, status, badge, title: rec.name, url: rec.url, now: due - DEADLINE_WINDOW_MS,
+        project: `${timePrefix}${remaining(due, now)} · ${rec.course}`,
+        detail: `${rec.course} · 마감 ${formatKst(due)}`,
+        expiresAt: due,
+      }),
+      // `course`, `dueAt` and `timePrefix` let the tracker keep the time left in `project` current.
+      course: rec.course,
+      dueAt: due,
+      timePrefix,
+    });
+  }
+  return out;
 }
 
 function diff(prevState, snapshot, now) {
@@ -121,21 +145,20 @@ function diff(prevState, snapshot, now) {
 
   if (snapshot?.unauthorized) {
     // Said once; the rest of what we know stays as it was.
-    if (prev.tokenExpiredNotified) return { state: prev, alerts: [], resolved: [] };
-    return { state: { ...prev, tokenExpiredNotified: true }, alerts: [tokenItem(now)], resolved: [] };
+    if (prev.tokenExpiredNotified) return { state: prev, alerts: [] };
+    return { state: { ...prev, tokenExpiredNotified: true }, alerts: [tokenItem(now)] };
   }
 
   const results = Array.isArray(snapshot?.results) ? snapshot.results : [];
   const errors = Array.isArray(snapshot?.errors) ? snapshot.errors : [];
   const announcements = Array.isArray(snapshot?.announcements) ? snapshot.announcements : null;
   // Nothing came back at all: keep the last state rather than baseline on an empty one.
-  if (!results.length && errors.length && !announcements) return { state: null, alerts: [], resolved: [] };
+  if (!results.length && errors.length && !announcements) return { state: null, alerts: [] };
 
   const firstRun = !prev.initialized;
   const oldRecords = prev.assignments && typeof prev.assignments === 'object' ? prev.assignments : {};
   const records = {};
   const alerts = [];
-  const resolved = [];
   const pending = [];        // first run: what's due and not yet handed in
   const courseNames = new Map();
 
@@ -152,14 +175,8 @@ function diff(prevState, snapshot, now) {
       const due = toMs(a.due_at);
       const submitted = isSubmitted(a);
       const score = isGraded(a) ? a.submission.score : null;
-      const rec = {
-        name: a.name || '(제목 없음)',
-        course: courseName,
-        due,
-        score,
-        reminded: Array.isArray(old?.reminded) ? [...old.reminded] : [],
-      };
       const url = assignmentUrl(a, cid, aid);
+      const rec = { name: a.name || '(제목 없음)', course: courseName, due, score, submitted, online: isOnline(a), url };
       const dueText = due != null ? `마감 ${formatKst(due)} (${remaining(due, now)})` : '마감일 없음';
 
       if (!old) {
@@ -179,8 +196,6 @@ function diff(prevState, snapshot, now) {
             project: `${courseName} · ${change}`,
             detail: `${courseName} · ${change}`,
           }));
-          // Pushed back, or given a due time it didn't have: remind again for the new one.
-          if (due != null && (oldDue == null || due > oldDue)) rec.reminded = [];
         }
         if (score != null && old.score !== score) {
           const points = typeof a.points_possible === 'number' ? ` / ${scoreText(a.points_possible)}` : '';
@@ -193,26 +208,9 @@ function diff(prevState, snapshot, now) {
         }
       }
 
-      if (submitted) resolved.push(key);
-      // Reminders: online, not handed in, and still before the due time.
-      if (due != null && !submitted && isOnline(a) && due > now) {
-        if (firstRun) pending.push({ rec, due });
-        const r = reminderDue(due, rec.reminded, now);
-        if (r) {
-          rec.reminded = r.reminded;
-          // `course` and `dueAt` let the tracker keep the time left in `project` current.
-          alerts.push({
-            ...item({
-              id: `etl:remind${r.stage.tag}:${key}`, status: 'waiting', badge: '마감 임박', title: rec.name, url, now,
-              project: `${remaining(due, now)} · ${courseName}`,
-              detail: `${courseName} · ${dueText}`,
-              expiresAt: due,
-            }),
-            course: courseName,
-            dueAt: due,
-          });
-        }
-      }
+      // The first check's summary: online work not handed in yet, before its due time. (The
+      // deadline bubbles themselves come from the records, see deadlineItems.)
+      if (firstRun && due != null && !submitted && isOnline(a) && due > now) pending.push({ rec, due });
       records[key] = rec;
     }
   }
@@ -270,7 +268,6 @@ function diff(prevState, snapshot, now) {
       tokenExpiredNotified: false,
     },
     alerts,
-    resolved,
   };
 }
 
@@ -279,6 +276,7 @@ module.exports = {
   MAX_SEEN_ANNOUNCEMENTS,
   NOTICE_TTL_MS,
   TOKEN_SETTINGS_URL,
+  deadlineItems,
   diff,
   priorityOf,
   resetTokenExpired,

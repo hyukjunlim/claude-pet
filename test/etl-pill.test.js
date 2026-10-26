@@ -89,7 +89,7 @@ function find(el, className) {
 }
 
 const NOTICE = {
-  id: 'etl:remind3h:100001:200001',
+  id: 'etl:deadline:100001:200001',
   kind: 'etl',
   status: 'waiting',
   badge: '마감 임박',
