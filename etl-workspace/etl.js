@@ -42,6 +42,12 @@ const HELP = `SNU eTL 조회 CLI (읽기 전용, Claude Pet을 통해 조회)
                                           (--course ID --id ID 형식도 가능)
   timetable [--date YYYY-MM-DD] [--week]  그날(기본 오늘) 수업, 보강·휴강 반영
                                           --week: 과목별 주간 시간표도 함께
+  boards --course ID                      과목 게시판 목록 (글 수, 안 읽은 글 수)
+  posts --course ID --board ID [--page N] [--keyword 검색어]
+                                          게시판 글 목록 (한 페이지 20개, 제목 검색)
+  post --course ID --board ID --id ID     게시글 본문, 첨부파일 목록, 댓글
+  download <과목ID> <파일ID> --board ID --post ID
+                                          게시글 첨부파일 하나를 강의자료/<과목명>/에 받기
   api "<경로>" [--all]                     eTL(Canvas) API를 GET으로 그대로 조회
                                           경로는 /api/v1/로 시작, 따옴표로 감싸기
                                           --all: 목록의 다음 페이지까지 모두
@@ -93,7 +99,7 @@ function parseArgs(argv) {
       else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) value = argv[++i];
       else return { error: `--${key} 옵션에 값이 필요합니다.`, ascii };
       if (!key) return { error: `알 수 없는 옵션입니다: ${a}`, ascii };
-      args[key] = toValue(value);
+      args[key] = key === 'keyword' ? value : toValue(value);   // a search word stays text
       continue;
     }
     positional.push(a);

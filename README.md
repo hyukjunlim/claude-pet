@@ -403,6 +403,18 @@ the calendar, the inbox and the rest. The `etl-api` skill lists the paths to try
 and calendar-feed addresses are masked in the answer, paths about access tokens are refused, and
 opening a conversation doesn't mark it read.
 
+**Course boards.** A course's 게시판 tab isn't Canvas but LearningX's board, whose API takes
+LearningX's own short-lived token rather than the Canvas one. The pet gets one the way the browser
+does: it asks Canvas for a one-time launch link to the board tool and submits the LTI form that
+link returns, the only POST the pet ever sends. The LearningX token stays in the pet's memory until
+shortly before it expires, and neither it nor the launch link reaches the chat. `etl.js boards`,
+`posts` and `post` list a course's boards, a page of posts (with a title search), and one post with
+its comments and attachments. Reading a post doesn't count as a view. Attachments are Canvas files
+in a folder Canvas marks hidden, so `etl.js download <course> <file> --board <board> --post <post>`
+takes one only after LearningX confirms it is attached to that post; it is then saved like any
+other course material. A plain `download` of a hidden file looks through the course's board posts
+for it the same way before giving up.
+
 **Timetable.** eTL has no class times, but each syllabus links to the course in SNU's public course
 catalog (`sugang.snu.ac.kr`), which has them. The pet looks each of this term's courses up there
 (no login, and the eTL token is never sent there), keeps the weekly timetable for a day, and adds

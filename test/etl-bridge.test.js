@@ -103,7 +103,29 @@ test('the default channel is a per-user named pipe on Windows and a socket under
 
 test('the whitelist holds exactly the read-only commands from the plan', () => {
   assert.deepEqual(Object.keys(COMMANDS).sort(),
-    ['announcements', 'api', 'assignment', 'assignments', 'briefing', 'check', 'courses', 'download', 'files', 'grades', 'timetable']);
+    ['announcements', 'api', 'assignment', 'assignments', 'boards', 'briefing', 'check', 'courses', 'download', 'files',
+      'grades', 'post', 'posts', 'timetable']);
+});
+
+test('the board commands take course, board and post ids, a page and a title search word', () => {
+  assert.deepEqual(validateRequest({ cmd: 'boards', args: { course: 7 } }), { cmd: 'boards', args: { course: 7 } });
+  assert.deepEqual(validateRequest({ cmd: 'posts', args: { course: 7, board: 3 } }),
+    { cmd: 'posts', args: { course: 7, board: 3, page: 1 } });
+  assert.deepEqual(validateRequest({ cmd: 'posts', args: { course: 7, board: 3, page: 2, keyword: '중간고사' } }).args,
+    { course: 7, board: 3, page: 2, keyword: '중간고사' });
+  assert.deepEqual(validateRequest({ cmd: 'post', args: { course: 7, board: 3, id: 9 } }).args, { course: 7, board: 3, id: 9 });
+  assert.throws(() => validateRequest({ cmd: 'boards', args: {} }), /course 인자가 필요/);
+  assert.throws(() => validateRequest({ cmd: 'posts', args: { course: 7 } }), /board 인자가 필요/);
+  assert.throws(() => validateRequest({ cmd: 'post', args: { course: 7, board: 3 } }), /id 인자가 필요/);
+  for (const keyword of ['', '   ', 'a'.repeat(101), 'x\ny', 5]) {
+    assert.throws(() => validateRequest({ cmd: 'posts', args: { course: 7, board: 3, keyword } }), /keyword/, JSON.stringify(keyword));
+  }
+  assert.deepEqual(validateRequest({ cmd: 'download', args: { course: 7, id: 5, board: 3, post: 9 } }).args,
+    { course: 7, id: 5, board: 3, post: 9 });
+  assert.throws(() => validateRequest({ cmd: 'download', args: { course: 7, id: 5, post: 'x' } }), /post/);
+  for (const page of [0, 1001, 1.5, '2']) {
+    assert.throws(() => validateRequest({ cmd: 'posts', args: { course: 7, board: 3, page } }), /page/, String(page));
+  }
 });
 
 test('api takes any /api/v1/ path with a query, and nothing that could leave the API', () => {
@@ -382,6 +404,27 @@ test('the CLI turns flags into a request and prints the answer, Korean intact', 
       ['assignment', { course: 3, id: 4 }],
       ['announcements', { days: 3, course: 5 }],
       ['grades', {}],
+    ]);
+  });
+});
+
+test('the CLI sends board lookups, keeping a numeric search word as text', async () => {
+  const record = (cmd) => async (args) => { calls.push({ cmd, args }); return {}; };
+  const calls = [];
+  const { handlers } = fakeHandlers({
+    boards: record('boards'), posts: record('posts'), post: record('post'), download: record('download'),
+  });
+  await withBridge({ handlers }, async (bridge) => {
+    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    assert.equal((await runCli(['boards', '--course', '7'], env)).code, 0);
+    assert.equal((await runCli(['posts', '--course', '7', '--board', '3', '--page', '2', '--keyword', '2026'], env)).code, 0);
+    assert.equal((await runCli(['post', '--course', '7', '--board', '3', '--id', '9'], env)).code, 0);
+    assert.equal((await runCli(['download', '7', '5', '--board', '3', '--post', '9'], env)).code, 0);
+    assert.deepEqual(calls.map((c) => [c.cmd, c.args]), [
+      ['boards', { course: 7 }],
+      ['posts', { course: 7, board: 3, page: 2, keyword: '2026' }],
+      ['post', { course: 7, board: 3, id: 9 }],
+      ['download', { board: 3, post: 9, course: 7, id: 5 }],
     ]);
   });
 });

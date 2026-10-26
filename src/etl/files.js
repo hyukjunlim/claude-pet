@@ -9,7 +9,8 @@
 //   download({ course, id })  saves one file to <chat folder>/강의자료/<course>/<name> and
 //                             returns its path. A file saved earlier that eTL hasn't changed since
 //                             (same updated_at and size) and that is still on disk is returned
-//                             as is, without fetching it again.
+//                             as is, without fetching it again. A 게시판 post's attachment comes
+//                             here too, through feature.js once board.js has confirmed it.
 //
 // Nothing here runs on its own: the tracker never calls it, and turning eTL on downloads nothing.
 //
@@ -77,12 +78,13 @@ async function soft(promise) {
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const contentType = (f) => f?.['content-type'] ?? f?.content_type ?? null;
 
-function skipReason(f) {
+// `hiddenOk`: a board attachment, which LearningX keeps in a folder Canvas marks hidden.
+function skipReason(f, { hiddenOk = false } = {}) {
   const type = String(contentType(f) || '').toLowerCase();
   if (type.startsWith('video/') || f?.mime_class === 'video') return SKIP.video;
   if (num(f?.size) != null && f.size > MAX_BYTES) return SKIP.large;
   if (f?.locked_for_user) return SKIP.locked;
-  if (f?.hidden_for_user) return SKIP.hidden;
+  if (f?.hidden_for_user && !hiddenOk) return SKIP.hidden;
   return null;
 }
 
@@ -538,7 +540,11 @@ function createFiles({
     throw new Error('같은 이름의 파일이 너무 많아 저장하지 못했습니다.');
   }
 
-  async function download({ course, id } = {}) {
+  // `attachedTo` ({ title, url } of a board post, from board.js's attachment()) is set by the pet
+  // only after LearningX confirmed the file is attached to that post; the bridge can't pass it.
+  // Without it, a file that is hidden and nothing else is looked for on the course's boards with
+  // `findAttachment` (board.js's findAttachment(), or nothing).
+  async function download({ course, id } = {}, { attachedTo: given = null, findAttachment = null } = {}) {
     if (!validId(id)) throw new TypeError('파일 ID는 1 이상의 정수여야 합니다.');
     const c = await courseFor(course);
     const cid = Number(c.id);
@@ -547,7 +553,17 @@ function createFiles({
     if (!found) {
       throw new Error(`${c.name}에서 파일 ID ${fid}를 찾을 수 없거나 받을 권한이 없습니다. files 명령으로 파일 ID를 확인해 주세요.`);
     }
-    const { meta, link } = found;
+    const { meta } = found;
+    let attachedTo = given;
+    if (!attachedTo && findAttachment && skipReason(meta) === SKIP.hidden) {
+      try {
+        attachedTo = await findAttachment();
+      } catch (err) {
+        if (isAuth(err)) throw err;
+        attachedTo = null;                   // the boards couldn't be read: still just hidden
+      }
+    }
+    const link = attachedTo?.url || found.link;
     const name = meta.display_name || meta.filename || `파일 ${fid}`;
     const base = {
       course: c.name,
@@ -559,8 +575,9 @@ function createFiles({
       updated_at: formatKst(meta.updated_at),
     };
     if (found.assignment) base.assignment = found.assignment;
+    if (attachedTo) base.post = attachedTo.title;
 
-    const skip = skipReason(meta) || (meta.url ? null : SKIP.noUrl);
+    const skip = skipReason(meta, { hiddenOk: Boolean(attachedTo) }) || (meta.url ? null : SKIP.noUrl);
     if (skip) return { ...base, downloaded: false, skip, url: link };
 
     const saved = savedCopy(readRecords(recordsFile)[String(fid)], meta);

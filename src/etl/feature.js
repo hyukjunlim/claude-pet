@@ -16,6 +16,7 @@
 //
 // The token lives only in userData, encrypted with safeStorage (token.js).
 
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
@@ -26,6 +27,7 @@ const { EtlTracker } = require('./tracker');
 const { createBridge, createFileBridge, COMMANDS } = require('./bridge');
 const { createQueries } = require('./queries');
 const { createFiles } = require('./files');
+const { createBoard, createBoardSession } = require('./board');
 const { defaultWorkspaceDir, ensureWorkspace, moveWorkspace, isInside } = require('./workspace');
 const { ASSISTANT_ID, assistantItem, assistantLinks } = require('./assistant');
 const { TimetableNotifier, createTimetable, kstParts } = require('./timetable');
@@ -33,8 +35,10 @@ const { formatKst } = require('./model');
 
 const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 eTL에서 토큰을 등록해 주세요.';
 const CODEX_PROMPT = '오늘 브리핑해 줘';
-const FILE_COMMANDS = new Set(['files', 'download']);   // answered by files.js, timetable by
-                                                        // timetable.js, the rest by queries.js
+// Bridge commands by who answers them: files.js, board.js, timetable.js (timetable) and
+// queries.js (the rest).
+const FILE_COMMANDS = new Set(['files', 'download']);
+const BOARD_COMMANDS = new Set(['boards', 'posts', 'post']);
 const ASSISTANT_LINK_GAP_MS = 1200;   // between the eTL 비서 bubble's links (see openAssistant)
 
 class EtlFeature extends EventEmitter {
@@ -62,6 +66,7 @@ class EtlFeature extends EventEmitter {
       cacheFile: path.join(userData, 'etl-timetable.json'),
       workspaceDir: () => this.workspaceDir(),
     });
+    this.boardSession = createBoardSession();   // LearningX's token, in memory only (board.js)
     this.notifier = null;
     this.tracker = null;
     this.bridge = null;
@@ -342,14 +347,34 @@ class EtlFeature extends EventEmitter {
         const token = this.token.load();
         if (!token) throw new Error(NO_TOKEN);
         const client = createClient({ token });
+        const board = () => createBoard({
+          client, session: this.boardSession, owner: crypto.createHash('sha256').update(token).digest('hex'),
+        });
         if (cmd === 'timetable') return this.#timetableAnswer(client, args);
+        if (BOARD_COMMANDS.has(cmd)) return board()[cmd](args);
         if (!FILE_COMMANDS.has(cmd)) return createQueries({ client })[cmd](args);
-        return createFiles({
+        const files = createFiles({
           client, token, workspaceDir: this.workspaceDir(), recordsFile: this.downloadsFile,
-        })[cmd](args);
+        });
+        if (cmd === 'download' && (args.board != null || args.post != null)) return this.#boardDownload(board(), files, args);
+        if (cmd === 'download') {
+          return files.download(args, { findAttachment: () => board().findAttachment({ course: args.course, id: args.id }) });
+        }
+        return files[cmd](args);
       };
     }
     return handlers;
+  }
+
+  // A 게시판 post's attachment: LearningX keeps it as a Canvas file in a hidden folder, so it's
+  // downloaded only once the post itself says the file is attached to it. (A plain download of a
+  // hidden file looks through the course's boards for that post itself.)
+  async #boardDownload(board, files, { course, id, board: boardId, post }) {
+    if (boardId == null || post == null) {
+      throw new Error('게시판 첨부파일을 받으려면 --board와 --post를 함께 지정해 주세요.');
+    }
+    const attachedTo = await board.attachment({ course, board: boardId, post, id });
+    return files.download({ course, id }, { attachedTo });
   }
 
   // The bridge's timetable command: one day (today unless `date`), and with `week` the weekly

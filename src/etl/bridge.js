@@ -59,6 +59,13 @@ const dateArg = (extra = {}) => ({ test: isDateString, rule: 'YYYY-MM-DD 형식�
 
 const flag = (extra = {}) => ({ test: (v) => typeof v === 'boolean', rule: 'true 또는 false여야 합니다.', ...extra });
 
+// A search word for a board's post titles: 1-100 characters, no control characters.
+const searchText = (extra = {}) => ({
+  test: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= 100 && !/[\u0000-\u001f\u007f]/.test(v),
+  rule: '1~100자의 검색어여야 합니다.',
+  ...extra,
+});
+
 // A Canvas API path for the `api` command: /api/v1/… with an optional query, nothing that could
 // leave the API (no scheme, host, '..', '//', backslash or fragment), printable ASCII only. Paths
 // about access tokens are refused outright, and so is /api/v1/login/…: its session_token answers
@@ -85,6 +92,7 @@ const apiPath = (extra = {}) => ({
 
 // The whitelist: command -> { argument -> rule }. Nothing else gets through. `api` reads any
 // /api/v1/ path with GET (the client never sends anything else); the rest are the fixed lookups.
+// boards, posts and post read LearningX's 게시판 (board.js).
 const COMMANDS = {
   check: {},
   briefing: {},
@@ -94,8 +102,17 @@ const COMMANDS = {
   announcements: { days: intBetween(1, 60, { default: 7 }), course: positiveInt() },
   grades: { course: positiveInt() },
   files: { course: positiveInt({ required: true }) },
-  download: { course: positiveInt({ required: true }), id: positiveInt({ required: true }) },
+  // With board and post (both), a 게시판 post's attachment: the pet checks it's attached there.
+  download: { course: positiveInt({ required: true }), id: positiveInt({ required: true }), board: positiveInt(), post: positiveInt() },
   timetable: { date: dateArg(), week: flag({ default: false }) },
+  boards: { course: positiveInt({ required: true }) },
+  posts: {
+    course: positiveInt({ required: true }),
+    board: positiveInt({ required: true }),
+    page: intBetween(1, 1000, { default: 1 }),
+    keyword: searchText(),
+  },
+  post: { course: positiveInt({ required: true }), board: positiveInt({ required: true }), id: positiveInt({ required: true }) },
   api: { path: apiPath({ required: true }), all: flag({ default: false }) },
 };
 

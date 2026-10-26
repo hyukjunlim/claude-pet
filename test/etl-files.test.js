@@ -293,6 +293,55 @@ test('videos, oversized, locked, hidden and unavailable files return only their 
   assert.deepEqual(fs.readdirSync(s.root), []);
 });
 
+test('a hidden file is downloaded only as a confirmed board attachment, and the other limits still apply', async (t) => {
+  const s = setup(t);
+  const attachedTo = { title: '비공식 강의노트', url: `${BASE}/learningx/redirect/courses/7/external_tools/85?post_id=9` };
+  s.state.metadata.set(2, file(2, { hidden_for_user: true }));
+  assert.equal((await s.api.download({ course: 7, id: 2 })).downloaded, false);
+
+  const out = await s.api.download({ course: 7, id: 2 }, { attachedTo });
+  assert.equal(out.downloaded, true);
+  assert.equal(out.post, '비공식 강의노트');
+  assert.equal(out.url, attachedTo.url);
+  assert.equal(fs.readFileSync(out.path, 'utf8'), 'data');
+  assert.equal((await s.api.download({ course: 7, id: 2 }, { attachedTo })).reused, true);
+  assertPrivate(out);
+
+  for (const [i, extra] of [[3, { 'content-type': 'video/mp4' }], [4, { locked_for_user: true }], [5, { size: MAX_BYTES + 1 }]]) {
+    s.state.metadata.set(i, file(i, { hidden_for_user: true, ...extra }));
+    const skipped = await s.api.download({ course: 7, id: i }, { attachedTo });
+    assert.equal(skipped.downloaded, false, JSON.stringify(extra));
+    assert.equal(skipped.url, attachedTo.url);
+  }
+  assert.equal(s.fetched.length, 1);
+});
+
+test('a plain download of a hidden file looks for it on the boards, and only for a hidden file', async (t) => {
+  const s = setup(t);
+  const post = { title: '강의 공지', url: `${BASE}/learningx/redirect/courses/7/external_tools/85?post_id=9` };
+  const asked = [];
+  const finder = (answer) => () => { asked.push(answer); return typeof answer === 'function' ? answer() : answer; };
+
+  s.state.metadata.set(2, file(2, { hidden_for_user: true }));
+  const out = await s.api.download({ course: 7, id: 2 }, { findAttachment: finder(post) });
+  assert.equal(out.downloaded, true);
+  assert.equal(out.post, '강의 공지');
+
+  s.state.metadata.set(3, file(3, { hidden_for_user: true }));
+  assert.equal((await s.api.download({ course: 7, id: 3 }, { findAttachment: finder(null) })).skip, '숨겨진 파일입니다. eTL에서 확인해 주세요.');
+  const down = finder(() => { throw new EtlError('board down'); });
+  assert.equal((await s.api.download({ course: 7, id: 3 }, { findAttachment: down })).downloaded, false);
+  const expired = finder(() => { throw new EtlAuthError('/tabs'); });
+  await assert.rejects(s.api.download({ course: 7, id: 3 }, { findAttachment: expired }), EtlAuthError);
+
+  s.state.metadata.set(4, file(4));
+  s.state.metadata.set(5, file(5, { hidden_for_user: true, 'content-type': 'video/mp4' }));
+  asked.length = 0;
+  await s.api.download({ course: 7, id: 4 }, { findAttachment: finder(post) });
+  await s.api.download({ course: 7, id: 5 }, { findAttachment: finder(post) });
+  assert.deepEqual(asked, [], 'not asked for a visible file or one skipped anyway');
+});
+
 test('a file linked in an announcement or submitted by the user can use fresh global metadata', async (t) => {
   const s = setup(t);
   s.state.denied.add('/api/v1/courses/7/files/2');

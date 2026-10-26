@@ -17,7 +17,7 @@ allowed-tools: Bash(node etl.js *) PowerShell(node etl.js *)
 | 과목 메뉴(탭) | `/api/v1/courses/<cid>/tabs` |
 | 모듈과 그 안의 항목 (주차별 구성) | `/api/v1/courses/<cid>/modules?include[]=items&per_page=50` |
 | 페이지 목록 / 페이지 본문 | `/api/v1/courses/<cid>/pages?per_page=100` / `/api/v1/courses/<cid>/pages/<url 또는 id>` |
-| 토론 게시판 목록 | `/api/v1/courses/<cid>/discussion_topics?per_page=50` |
+| Canvas 토론 목록 (과목 메뉴의 "게시판"은 `boards` 명령) | `/api/v1/courses/<cid>/discussion_topics?per_page=50` |
 | 토론 글과 댓글 전체 | `/api/v1/courses/<cid>/discussion_topics/<id>/view` |
 | 퀴즈 목록 / 상세 | `/api/v1/courses/<cid>/quizzes` / `/api/v1/courses/<cid>/quizzes/<id>` |
 | 내 퀴즈 응시 기록 | `/api/v1/courses/<cid>/quizzes/<id>/submissions` |
