@@ -1,9 +1,12 @@
 'use strict';
 
 // Tells whether the Claude app's window is the one in front (Windows only). A small PowerShell
-// helper hooks the system's "foreground window changed" event, so it doesn't poll, and prints
-// the name of the process that owns each new front window. The pet runs it only while it needs
-// to know, and the helper exits by itself if the pet goes away.
+// helper hooks the system's "foreground window changed" event, so it doesn't poll, and once the
+// events have stopped for a moment prints the name of the process that owns the window then in
+// front. It asks Windows which window that is rather than trusting the events' own: Windows 11's
+// Alt+Tab switcher (explorer) reports itself once more just after the chosen window came to the
+// front. The pet runs it only while it needs to know, and the helper exits by itself if the pet
+// goes away.
 
 const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
@@ -21,8 +24,12 @@ public static class PetFront {
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
   [DllImport("user32.dll")] static extern int GetMessage(out MSG msg, IntPtr hwnd, uint min, uint max);
+  [DllImport("user32.dll")] static extern IntPtr SetTimer(IntPtr hwnd, IntPtr id, uint ms, IntPtr proc);
+  [DllImport("user32.dll")] static extern bool KillTimer(IntPtr hwnd, IntPtr id);
   [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int x; public int y; }
+  const uint SETTLE_MS = 150;   // quiet this long after the last event before looking
   static WinEventProc keep;
+  static IntPtr timer = IntPtr.Zero;
   static string last;
   static void Report(IntPtr hwnd) {
     uint pid;
@@ -43,11 +50,17 @@ public static class PetFront {
     });
     watch.IsBackground = true;
     watch.Start();
-    keep = (hook, ev, hwnd, obj, child, thread, time) => Report(hwnd);
+    // Each event (re)starts the timer; passing the running timer's id resets it.
+    keep = (hook, ev, hwnd, obj, child, thread, time) => { timer = SetTimer(IntPtr.Zero, timer, SETTLE_MS, IntPtr.Zero); };
     SetWinEventHook(3, 3, IntPtr.Zero, keep, 0, 0, 0);   // EVENT_SYSTEM_FOREGROUND, delivered here
     Report(GetForegroundWindow());
     MSG msg;
-    while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) { }
+    while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
+      if (msg.message != 0x0113 || msg.wParam != timer) continue;   // WM_TIMER
+      KillTimer(IntPtr.Zero, timer);
+      timer = IntPtr.Zero;
+      Report(GetForegroundWindow());
+    }
   }
 }
 '@
