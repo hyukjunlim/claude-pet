@@ -251,6 +251,18 @@ test("a 401 for one thing the user may not see is a plain error, not a bad token
   });
 });
 
+test('the same denial in Korean (an account set to Korean) is not a bad token either', async () => {
+  const denied = { status: 401, body: { status: '권한이 없음', errors: [{ message: '사용자에게 이 동작을 수행할 권한이 없음' }] } };
+  const { api } = client({ '/api/v1/courses/7/files?per_page=100': denied });
+  await assert.rejects(api.getAll('/api/v1/courses/7/files?per_page=100'), (e) => {
+    assert.ok(!(e instanceof EtlAuthError));
+    assert.equal(e.status, 401);
+    return true;
+  });
+  const { api: bad } = client({ '/api/v1/users/self': { status: 401, body: { errors: [{ message: '잘못된 액세스 토큰입니다.' }] } } });
+  await assert.rejects(bad.self(), EtlAuthError);
+});
+
 test('an unauthorized status with an invalid token message still expires the token', async () => {
   const { api } = client({ '/api/v1/users/self': { status: 401, body: {
     status: 'unauthorized', errors: [{ message: 'Invalid access token.' }],

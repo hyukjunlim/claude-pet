@@ -56,9 +56,11 @@ async function notAuthorizedHere(res) {
     const j = JSON.parse(String(body).replace(XSSI_PREFIX, ''));
     const messages = (Array.isArray(j?.errors) ? j.errors : []).map((e) => String(e?.message || ''));
     // `status: unauthorized` is shared by resource denials and invalid-token errors. Only
-    // an explicit resource-denial message is enough to keep using the token.
-    if (messages.some((m) => /(?:invalid|expired).*token|token.*(?:invalid|expired)/i.test(m))) return false;
-    return messages.some((m) => /not authorized/i.test(m));
+    // an explicit resource-denial message is enough to keep using the token. Canvas words it in
+    // the user's language: "user not authorized to perform that action", or in Korean
+    // "사용자에게 이 동작을 수행할 권한이 없음".
+    if (messages.some((m) => /(?:invalid|expired).*token|token.*(?:invalid|expired)|토큰/i.test(m))) return false;
+    return messages.some((m) => /not authorized|권한이 없/i.test(m));
   } catch {
     return false;
   }
