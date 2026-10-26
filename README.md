@@ -339,6 +339,7 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   them every 30 s, so a resumed old thread can take that long to show. It exits as soon as the
   pet quits, even if the pet crashes. Tray menu → *Sources* → *Follow Codex on SSH hosts* turns
   this off. The host needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
+  It can be Linux, macOS or Windows (Windows' OpenSSH server, whose shell is cmd.exe or PowerShell).
 - **dot:** the app's *dots* (the assistant you message, named dot) run in the cloud and leave no
   history file to follow, so there's no step to show. The pet goes by what the app keeps in its
   state file: a dot is *working* from a message the app stamps to the millisecond until the
@@ -471,7 +472,7 @@ Claude Code reads the same settings whether you start it from a terminal or the 
   unticking it removes the mod and forgets the host. To read the hosts' figures, the pet keeps one
   SSH connection per host with a small read-only Python watcher that sends the file when it
   changes; tray menu → *Sources* → *Live Claude usage* → *Read usage on SSH hosts* turns that off.
-  As for Codex, the host needs `python3` and a key that works without a prompt.
+  As for Codex, the host needs `python3` and a key that works without a prompt, and can run Windows.
 
 Sessions you start after setting it up use it; sessions already open don't. When the pet updates,
 it brings the copies of the mod it set up up to date too. Unticking a machine removes the entries

@@ -11,7 +11,7 @@ const { PassThrough } = require('node:stream');
 const {
   CODEX_LOCATOR, archiveCodexChat, archiveThrough, canDelete, claudeDeleteScript, deleteClaudeSession, isChat,
 } = require('../src/chat-delete');
-const { LOADER } = require('../src/ssh-watcher');
+const { BOOTSTRAP, LOADER } = require('../src/ssh-watcher');
 
 const ID = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 const NOW = Date.parse('2026-10-25T12:00:00Z');
@@ -80,7 +80,7 @@ test('on an SSH host one command removes it, and says when it was gone already',
   await deleteClaudeSession({ sessionId: ID, place: 'ssh', host, spawnFn });
   const [{ cmd, args, child }] = runs;
   assert.equal(cmd, 'ssh');
-  assert.deepEqual(args.slice(-4), ['-p', '2222', 'lab', `exec python3 -u -c '${LOADER}'`]);
+  assert.deepEqual(args.slice(-4), ['-p', '2222', 'lab', BOOTSTRAP]);
   assert.deepEqual(child.written, [claudeDeleteScript(ID)], 'the script reaches the host on stdin');
   await assert.rejects(deleteClaudeSession({ sessionId: ID, place: 'ssh', host, spawnFn }), /no longer on lab/);
   assert.throws(() => claudeDeleteScript('../x'), /session id/);
@@ -156,7 +156,7 @@ test('each place starts its own app-server', async () => {
   assert.deepEqual(runs.map((r) => [r.cmd, r.args[0], r.args[1], r.args.at(-1)]), [
     ['C:\\codex.exe', 'app-server', undefined, 'app-server'],
     ['wsl.exe', '-d', 'Ubuntu', LOADER],
-    ['ssh', '-o', 'BatchMode=yes', `exec python3 -u -c '${LOADER}'`],
+    ['ssh', '-o', 'BatchMode=yes', BOOTSTRAP],
   ]);
   await assert.rejects(archiveCodexChat({ threadId: ID, place: 'local', spawnFn, codexExe: () => null }), /Couldn't find Codex/);
   await assert.rejects(archiveCodexChat({ threadId: 'nope', place: 'local', spawnFn }), /thread id/);
@@ -171,6 +171,26 @@ test('the locator says when there is no Codex', { skip: !python && 'Python 3 is 
     const out = spawnSync(exe, ['-c', LOADER], { input: `${JSON.stringify(CODEX_LOCATOR)}\n`, env, encoding: 'utf8' });
     assert.equal(out.error, undefined);
     assert.deepEqual(JSON.parse(out.stdout), { error: 'Codex is not installed there' });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("on a Windows host the locator finds the VS Code extension's codex.exe and runs it as a child", {
+  skip: (process.platform !== 'win32' && 'Windows only') || (!python && 'Python 3 is not installed'),
+}, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-wincodex-'));
+  try {
+    // A stand-in codex.exe: Node itself, which exits with an error on `app-server`. (Not Python:
+    // the Microsoft Store's python.exe is an alias that can't be copied.)
+    const exe = spawnSync(python, ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).stdout.trim();
+    const bin = path.join(home, '.vscode-server', 'extensions', 'openai.chatgpt-26.5.1-win32-x64', 'bin', 'windows-x86_64');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.copyFileSync(process.execPath, path.join(bin, 'codex.exe'));
+    const env = { ...process.env, HOME: home, USERPROFILE: home, PATH: path.dirname(exe) };
+    const out = spawnSync(exe, ['-c', LOADER], { input: `${JSON.stringify(CODEX_LOCATOR)}\n`, env, encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(out.stdout.split(/\r?\n/)[0]), { ready: path.join(bin, 'codex.exe') });
+    assert.notEqual(out.status, 0, "the child's exit code comes back");
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }

@@ -6,7 +6,7 @@
 // host's clock from the {"now": <host time, s>} line every watcher sends every few seconds.
 //
 // The connection uses your ~/.ssh/config, so `ssh <host>` must work without a prompt, and the host
-// needs python3.
+// needs python3. The host may be Linux, macOS or Windows (OpenSSH's cmd.exe or PowerShell).
 
 const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
@@ -14,7 +14,10 @@ const { EventEmitter } = require('node:events');
 // The watcher arrives as the first line on stdin, and stdin then stays open: each watcher reads it
 // to the end and exits when it closes, which is when the pet quits, or dies.
 const LOADER = 'import sys, json; exec(json.loads(sys.stdin.readline()))';
-const BOOTSTRAP = `exec python3 -u -c '${LOADER}'`;
+// One command that sh, cmd.exe and PowerShell all read the same way: no `exec` (cmd has none, and
+// sh runs a lone command in its own place anyway) and double quotes (cmd has no single ones).
+// LOADER has nothing any of them would expand inside double quotes.
+const BOOTSTRAP = `python3 -u -c "${LOADER}"`;
 const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-T'];
 const RETRY_MS = [5000, 30_000, 2 * 60_000, 10 * 60_000];
 const STEADY_MS = 60_000;   // a connection that lasted this long resets the retry delay

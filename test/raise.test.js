@@ -117,6 +117,8 @@ test("a session's machine gives the VS Code window to look for, and the folder t
   const connections = [{ hostId: 'remote-ssh-discovered:lab', name: 'lab', target: 'lab', port: null }];
   assert.deepEqual(vsCodePlace({ kind: 'codex', client: 'vscode', hostId: 'remote-ssh-discovered:lab', cwd: '/data/proj' }, { connections, sshHosts }).marks, ['[SSH: lab]']);
   assert.deepEqual(vsCodePlace({ kind: 'codex', client: 'vscode', hostId: 'local', machineKey: 'wsl:Ubuntu', cwd: '/home/me' }).marks, ['[WSL: Ubuntu]']);
+  assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: 'ssh:me@192.0.2.10:22', machine: '192.0.2.10', cwd: 'C:\\Users\\me\\my proj' }, { sshHosts }).folder,
+    'vscode://vscode-remote/ssh-remote+lab/C:/Users/me/my%20proj', "a Windows host's folder");
   assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: null, cwd: 'C:\\Users\\me\\proj' }), { marks: [], folder: 'vscode://file/C:/Users/me/proj' });
   assert.deepEqual(vsCodePlace({ kind: 'cli', machineKey: null, cwd: null }), { marks: [], folder: '' });
 });

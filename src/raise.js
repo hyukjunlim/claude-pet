@@ -210,6 +210,7 @@ function raiseBrowserWindow({ hostPid, title, spawnFn = spawn, platform = proces
 function vsCodePlace(s, { connections = [], sshHosts = [] } = {}) {
   const cwd = typeof s?.cwd === 'string' ? s.cwd : '';
   const posix = cwd.startsWith('/') ? encodeURI(cwd) : '';
+  const win = /^[a-z]:[\\/]/i.test(cwd) ? encodeURI(cwd.replace(/\\/g, '/')) : '';
   const wsl = /^wsl:(.+)$/.exec(s?.machineKey || '')?.[1];
   if (wsl) return { marks: [`[WSL: ${wsl}]`], folder: posix && `vscode://vscode-remote/wsl+${encodeURIComponent(wsl)}${posix}` };
   const names = (target, port, extra) => {
@@ -224,9 +225,10 @@ function vsCodePlace(s, { connections = [], sshHosts = [] } = {}) {
     hosts = names(c?.target || s.hostId.replace(/^remote-ssh-discovered:/, ''), c?.port ?? null, [c?.name, s.remote]);
   }
   if (hosts.length) {
-    return { marks: hosts.map((n) => `[SSH: ${n}]`), folder: posix && `vscode://vscode-remote/ssh-remote+${encodeURIComponent(hosts[0])}${posix}` };
+    // A Windows host's folder goes in the link as /C:/Users/…
+    const remote = posix || (win && `/${win}`);
+    return { marks: hosts.map((n) => `[SSH: ${n}]`), folder: remote && `vscode://vscode-remote/ssh-remote+${encodeURIComponent(hosts[0])}${remote}` };
   }
-  const win = /^[a-z]:[\\/]/i.test(cwd) ? encodeURI(cwd.replace(/\\/g, '/')) : '';
   return { marks: [], folder: win && `vscode://file/${win}` };
 }
 

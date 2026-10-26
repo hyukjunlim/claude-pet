@@ -14,13 +14,12 @@ const fsp = fs.promises;
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { LOADER, sshArgs } = require('./ssh-watcher');
+const { BOOTSTRAP, LOADER, sshArgs } = require('./ssh-watcher');
 
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const QUIET_MS = 2 * 60 * 1000;            // a chat written this recently may still be open
 const BUSY = new Set(['running', 'waiting', 'background']);
 const TIMEOUT_MS = 60 * 1000;
-const SSH_PYTHON = `exec python3 -u -c '${LOADER}'`;
 
 // Whether a sidebar row is a chat that can be deleted: Claude Code's or Codex's, from VS Code or a
 // terminal (not the apps' own), and nothing going on in it.
@@ -56,7 +55,7 @@ print(gone)
 async function deleteClaudeSession({ sessionId, place, file = null, host = null, trashItem, spawnFn = spawn }) {
   if (!ID_RE.test(sessionId)) throw new Error('Not a Claude Code session id');
   if (place === 'ssh') {
-    const { code, stdout, stderr } = await run(spawnFn, 'ssh', sshArgs(host, SSH_PYTHON), `${JSON.stringify(claudeDeleteScript(sessionId))}\n`);
+    const { code, stdout, stderr } = await run(spawnFn, 'ssh', sshArgs(host, BOOTSTRAP), `${JSON.stringify(claudeDeleteScript(sessionId))}\n`);
     const gone = Number(stdout.trim());
     if (code !== 0 || !Number.isFinite(gone)) throw new Error(lastLine(stderr) || `ssh ${host.name || host.target} failed`);
     if (gone < 1) throw new Error(`It's no longer on ${host.name || host.target}.`);
@@ -79,19 +78,27 @@ async function deleteClaudeSession({ sessionId, place, file = null, host = null,
 // Runs in WSL or on an SSH host: finds Codex (the newest VS Code extension's copy, else `codex` on
 // the PATH, else ~/.local/bin/codex), says so, and becomes its app-server on the same stdin. The
 // pet sends nothing more until it has heard back, so none of the app-server's input is lost in
-// Python's buffer.
+// Python's buffer. A Windows host has no execv that keeps the stdio, so there the app-server runs
+// as a child on the same handles (and `codex` on the PATH is npm's codex.cmd).
 const CODEX_LOCATOR = String.raw`
-import glob, json, os, re, shutil, sys
+import glob, json, os, re, shutil, subprocess, sys
+WINDOWS = os.name == 'nt'
 def version(p):
     m = re.search(r'openai\.chatgpt-([0-9.]+)', p)
     return [int(x) for x in m.group(1).split('.') if x] if m else []
-found = sorted(glob.glob(os.path.expanduser('~/.vscode-server/extensions/openai.chatgpt-*/bin/linux-*/codex')), key=version)
+if WINDOWS:
+    patterns = ['~/.vscode-server/extensions/openai.chatgpt-*/bin/windows-*/codex.exe', '~/.vscode/extensions/openai.chatgpt-*/bin/windows-*/codex.exe']
+else:
+    patterns = ['~/.vscode-server/extensions/openai.chatgpt-*/bin/linux-*/codex']
+found = sorted((os.path.normpath(p) for pat in patterns for p in glob.glob(os.path.expanduser(pat))), key=version)
 codex = found[-1] if found else (shutil.which('codex') or os.path.expanduser('~/.local/bin/codex'))
-if not os.access(codex, os.X_OK):
+if not (os.path.isfile(codex) and os.access(codex, os.X_OK)):
     print(json.dumps({'error': 'Codex is not installed there'}))
     sys.exit(0)
 print(json.dumps({'ready': codex}))
 sys.stdout.flush()
+if WINDOWS:
+    sys.exit(subprocess.call([codex, 'app-server']))
 os.execv(codex, [codex, 'app-server'])
 `;
 
@@ -128,7 +135,7 @@ async function archiveCodexChat({ threadId, place, distro = null, host = null, s
   } else if (place === 'wsl') {
     child = spawnFn('wsl.exe', ['-d', distro, '-e', 'python3', '-u', '-c', LOADER], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   } else {
-    child = spawnFn('ssh', sshArgs(host, SSH_PYTHON), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawnFn('ssh', sshArgs(host, BOOTSTRAP), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   }
   return archiveThrough(child, threadId, { locate: place !== 'local', timeoutMs });
 }
