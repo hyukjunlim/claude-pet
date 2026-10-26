@@ -134,5 +134,6 @@ test('a tab reported through a real host and pipe becomes a bubble, and its clic
   input.end();                                  // the browser closed: its host and its tabs go
   while (f.sockets.size && Date.now() < deadline + END_GRACE_MS + 2000) await new Promise((r) => setTimeout(r, 20));
   assert.equal(f.sockets.size, 0);
-  assert.deepEqual(f.target(item.id).tab, null);   // the Ready chat stays, to open by its address
+  assert.equal(f.target(item.id), null);           // and the Ready chat with them
+  assert.deepEqual(changes.at(-1), []);
 });

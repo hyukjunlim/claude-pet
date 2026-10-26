@@ -392,10 +392,10 @@ and Gemini chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini 
   `resources\app\browser-extension` next to `Ttokttok Pet.exe` in a downloaded copy. Loading it
   (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
 - **Running** while a reply is being written, **Ready** once it's done. Ready stays until you close
-  it with × (or the sidebar's *Mark as done*) or send another message, looked at or not. A
-  conversation open in several tabs gets one bubble.
-- **Clicking** brings the chat's tab and its browser window to the front. If the tab is gone, the
-  chat's address opens in your default browser.
+  it with × (or the sidebar's *Mark as done*), send another message, or close its tab, looked at or
+  not. A conversation open in several tabs gets one bubble, which goes once none of them shows it:
+  closed, moved on to another conversation, or gone with the browser.
+- **Clicking** brings the chat's tab and its browser window to the front.
 - **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
   reply is being written and whether you're looking at it. Never the messages. The extension only
   reads the page and makes no requests of its own; the host hands the tabs' reports to the pet over

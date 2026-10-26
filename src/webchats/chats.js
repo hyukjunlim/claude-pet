@@ -3,8 +3,8 @@
 // What the pet makes of the browser extension's reports: a bubble for each claude.ai or ChatGPT
 // conversation, the way it shows a Claude session. It's Running while a reply is being written in
 // any of the conversation's tabs, and Ready once the reply is done. Ready stays until you close it
-// with its × (or the sidebar's Mark as done) or send another message, looked at or not; it outlives
-// its tab, and then a click opens the conversation's address.
+// with its × (or the sidebar's Mark as done), send another message, or close its tabs, looked at
+// or not: a conversation no tab shows any more is gone.
 //
 // Each report is one tab's state, sent whenever it changes (content.js, through host.js):
 // { tabId, windowId, site, url, title, generating, looking }. "Looking" means the tab is the one
@@ -118,8 +118,9 @@ class WebChats extends EventEmitter {
     const before = this.tabs.get(tk);
     if (!before && this.tabs.size >= MAX_TABS) return;
     const key = r.conversation ? `${r.site}:${r.conversation}` : `tab:${source}:${r.tabId}`;
-    // A new chat that the site just gave an address carries on as that conversation.
-    if (before && before.key !== key && !this.chats.has(key) && !this.#hasOtherTab(before.key, tk)) {
+    // A new chat that the site just gave an address carries on as that conversation. A tab that
+    // goes from one conversation to another leaves the first behind instead.
+    if (before?.key.startsWith('tab:') && before.key !== key && !this.chats.has(key) && !this.#hasOtherTab(before.key, tk)) {
       const chat = this.chats.get(before.key);
       if (chat) {
         this.chats.delete(before.key);
@@ -192,8 +193,8 @@ class WebChats extends EventEmitter {
     return out;
   }
 
-  // Every conversation the pet knows (a tab shows it, or it's Ready), quiet ones too, for folder
-  // mode's list; one with nothing going on is idle.
+  // Every conversation a tab shows, quiet ones too, for folder mode's list; one with nothing going
+  // on is idle.
   all() {
     return [...this.chats.values()].map((chat) => ({
       id: `web:${chat.key}`,
@@ -240,12 +241,11 @@ class WebChats extends EventEmitter {
     if (!chat) return;
     const tabs = this.#tabsOf(key);
     if (!tabs.length) {
-      // Nothing shows it any more. A reply being written can't be followed from here; a Ready
-      // conversation stays, and its address still opens it.
+      // Nothing shows it any more: its tabs were closed, went on to another conversation, or left
+      // with their browser. It's done with, Ready or not, and a reply being written can't be
+      // followed from here.
       this.clearTimer(chat.endTimer);
-      chat.endTimer = null;
-      chat.looking = false;
-      if (chat.status !== 'review') this.chats.delete(key);
+      this.chats.delete(key);
       return;
     }
     const shown = tabs.find((t) => t.looking) || tabs.find((t) => t.generating) || tabs[0];

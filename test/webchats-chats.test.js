@@ -122,18 +122,40 @@ test('its × marks a Ready chat as done; a reply still being written has none', 
   assert.deepEqual(bubbles(c), []);
 });
 
-test('closing the tab drops a reply in progress but keeps a Ready chat, which then opens by its address', () => {
+test('closing its last tab drops a chat, a reply in progress or a Ready one', () => {
   const { c, advance, tab } = chats();
   c.report('h1', tab({ generating: true }));
   c.closed('h1', 7);
   assert.deepEqual(bubbles(c), []);
   c.report('h1', tab({ tabId: 8, generating: true }));
+  c.report('h1', tab({ tabId: 9 }));
   c.report('h1', tab({ tabId: 8, generating: false }));
   advance(END_GRACE_MS);
   assert.deepEqual([c.target(`web:claude:${CONV}`).tab.tabId, c.target(`web:claude:${CONV}`).tab.hostPid], [8, 100]);
   c.closed('h1', 8);
+  assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);   // tab 9 still shows it
+  c.closed('h1', 9);
+  assert.deepEqual(bubbles(c), []);
+  assert.deepEqual(c.all(), []);
+  assert.equal(c.target(`web:claude:${CONV}`), null);
+  advance(END_GRACE_MS);                                          // nothing comes back
+  assert.deepEqual(c.all(), []);
+});
+
+test('a Ready chat goes when its tab moves on to another conversation, or its browser closes', () => {
+  const { c, advance, tab } = chats();
+  c.report('h1', tab({ generating: true }));
+  c.report('h1', tab({ generating: false }));
+  advance(END_GRACE_MS);
   assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);
-  assert.deepEqual(c.target(`web:claude:${CONV}`), { url: `https://claude.ai/chat/${CONV}`, tab: null });
+  c.report('h1', tab({ url: `https://claude.ai/chat/${OTHER}`, title: 'Other - Claude' }));
+  assert.deepEqual(c.all().map((it) => [it.title, it.status]), [['Other', 'idle']]);
+  c.report('h1', tab({ tabId: 8, generating: true }));
+  c.report('h1', tab({ tabId: 8, generating: false }));
+  advance(END_GRACE_MS);
+  assert.deepEqual(bubbles(c), [['review', 'Refactor plan']]);
+  c.removeSource('h1');
+  assert.deepEqual(c.all(), []);
 });
 
 test('a host that goes away takes its tabs with it, and tab ids of two hosts never mix', () => {
