@@ -605,10 +605,12 @@ class CodexTracker extends EventEmitter {
         ...derived,
       };
     };
-    // Threads whose history we can see, here or on an SSH host, say what they're doing.
+    // Threads whose history we can see, here or on an SSH host, say what they're doing. Codex's
+    // helper threads stay unread for good (nobody opens them), so their unread flag is no news.
     const follow = (s, hostId, skew) => {
-      if (!s.threadId || s.subagent) return;
+      if (!s.threadId) return;
       followed.add(s.threadId);
+      if (s.subagent) return;
       const derived = rolloutStatus(s, {
         now, skew, unread: this.unread.has(s.threadId), dismissedAt: this.dismissed.get(`codex:${s.threadId}`),
       });
@@ -626,8 +628,11 @@ class CodexTracker extends EventEmitter {
       const host = this.catalog.get(threadId)?.hostId || hostId;
       const dotAt = Math.min(this.aeons.get(threadId)?.activity || 0, now);   // when a dot last spoke
       const since = Math.max(this.catalog.get(threadId)?.updatedAt || 0, this.unreadSince.get(threadId) || 0, dotAt);
+      // No time at all: unread since before we started, and not in the catalog (a helper thread
+      // whose rollout we no longer follow, or one long gone). Nothing says it's recent news.
+      if (!since) continue;
       const dismissedAt = this.dismissed.get(`codex:${threadId}`) || 0;
-      if ((dismissedAt && dismissedAt >= since) || (since && now - since > UNREAD_WINDOW_MS)) continue;
+      if ((dismissedAt && dismissedAt >= since) || now - since > UNREAD_WINDOW_MS) continue;
       byThread.set(threadId, session(threadId, host, null, { status: 'review', detail: '', since }));
     }
     // A dot with a turn under way is working, even if an earlier reply is still unread.

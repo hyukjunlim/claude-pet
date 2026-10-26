@@ -214,6 +214,39 @@ test('the tracker combines running threads here with unread threads on other hos
   }
 });
 
+test("unread threads with nothing to date them, and Codex's helper threads, aren't Ready", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  try {
+    const stale = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6d';    // unread for weeks, no catalog row or rollout
+    const helper = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6e';   // a subagent, which nobody opens
+    const stateFile = path.join(home, '.codex-global-state.json');
+    const unread = (ids) => fs.writeFileSync(stateFile, JSON.stringify({
+      'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`local:${'d'.repeat(64)}`]: ids } } },
+    }));
+    const day = path.join(home, 'sessions', '2026', '09', '25');
+    fs.mkdirSync(day, { recursive: true });
+    const done = [
+      { ...meta({ id: helper, source: { subagent: { thread_spawn: { parent_thread_id: THREAD, depth: 1 } } } }), timestamp: new Date().toISOString() },
+      { timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Done.' } },
+    ];
+    fs.writeFileSync(path.join(day, `rollout-2026-09-25T13-00-00-${helper}.jsonl`), done.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    let clock = Date.now();
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => clock });
+    unread([stale]);
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);
+
+    // The helper finishes while we watch, and the app lists it as unread too.
+    clock += 5000;
+    unread([stale, helper]);
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 // ------------------------------------------------------------------ dot
 
 const DOT = '0199d0d0-0001-7000-8000-00000000d071';
