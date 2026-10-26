@@ -3,10 +3,12 @@
 // Checks eTL every half hour and keeps the eTL bubbles, the way CodexTracker keeps Codex's.
 //
 // Each check fetches courses, their assignments and the last 14 days of announcements, and
-// hands them to watch.diff, which says what's news. The bubbles it makes stay until they expire
-// (a reminder at the due time, the rest after 3 days) or you close them. All of it lives in one
-// state file (userData/etl-state.json), written atomically:
-//   { version: 1, watch: <watch.js state>, items: [bubble item], lastChecked: ms | null }
+// hands them to watch.diff, which says what's news. The bubbles it makes stay 3 days or until you
+// close them. Each assignment due in the next 24 hours also gets one, made afresh from the last
+// check's records whenever the bubbles are drawn (watch.deadlineItems); closing it hides it for an
+// hour. All of it lives in one state file (userData/etl-state.json), written atomically:
+//   { version: 1, watch: <watch.js state>, items: [bubble item], hidden: { id: until },
+//     lastChecked: ms | null }
 // A closed bubble is taken out of `items`, so it stays closed across restarts without the
 // 24-hour dismissal list main.js keeps for sessions (dismissedSnapshot() is empty).
 //
@@ -17,7 +19,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { EtlAuthError } = require('./client');
 const { currentCourses, remaining } = require('./model');
-const { diff, priorityOf, resetTokenExpired } = require('./watch');
+const { deadlineItems, diff, priorityOf, resetTokenExpired } = require('./watch');
 const { compareSessions } = require('../transcript');
 
 const STATE_VERSION = 1;
@@ -27,17 +29,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const ANNOUNCE_DAYS = 14;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;             // setTimeout's limit
-const REMIND_RE = /^etl:remind\d+h:(.+)$/;
-const COUNTDOWN_MS = 60 * 1000;                 // how often reminders' time left is redone
+const OLD_REMINDER_RE = /^etl:remind\d+h:/;      // before deadline bubbles, one per reminder time
+const COUNTDOWN_MS = 60 * 1000;                 // how often deadlines' time left is redone
+const HIDE_MS = 60 * 60 * 1000;                 // how long a closed deadline bubble stays hidden
+const DEADLINE_LEAD_MS = DAY_MS;                // a deadline's bubble comes this long before it (watch.js)
 const PROJECT_LIMIT = 80;
 
 // 'YYYY-MM-DD' of the KST day `ms` falls in.
 const kstDate = (ms) => new Date(ms + KST_OFFSET_MS).toISOString().slice(0, 10);
 
-// A reminder shows the time left as of now, not as of the check that made it.
+// A deadline bubble shows the time left as of now, not as of the check that made it.
 function withTimeLeft(it, now) {
   if (!Number.isFinite(it.dueAt) || typeof it.course !== 'string') return it;
-  const project = `${remaining(it.dueAt, now)} · ${it.course}`;
+  const project = `${it.timePrefix ?? ''}${remaining(it.dueAt, now)} · ${it.course}`;
   return { ...it, project: project.length > PROJECT_LIMIT ? `${project.slice(0, PROJECT_LIMIT - 1)}…` : project };
 }
 
@@ -73,6 +77,7 @@ class EtlTracker extends EventEmitter {
     this.unauthorized = false;     // eTL said 401: no requests until a new token is registered
     this.watch = null;
     this.itemList = [];
+    this.hidden = {};              // deadline bubble id -> until when it stays closed
     this.lastChecked = null;
     this.lastError = null;
     this.lastEmitted = null;
@@ -141,6 +146,12 @@ class EtlTracker extends EventEmitter {
 
   dismiss(id) {
     if (!this.running || !String(id).startsWith('etl:')) return;
+    if (String(id).startsWith('etl:deadline:')) {   // back in an hour, until the due time
+      this.hidden = { ...this.liveHidden(this.now()), [id]: this.now() + HIDE_MS };
+      this.save();
+      this.publish(true);
+      return;
+    }
     const before = this.itemList.length;
     this.itemList = this.itemList.filter((it) => it.id !== id);
     if (this.itemList.length === before) return;
@@ -156,7 +167,17 @@ class EtlTracker extends EventEmitter {
   items() {
     if (!this.running) return [];
     const now = this.now();
-    return sortItems(this.itemList.filter((it) => !(it.expiresAt <= now)).map((it) => withTimeLeft(it, now)));
+    return sortItems([...this.itemList.filter((it) => !(it.expiresAt <= now)), ...this.deadlines(now)].map((it) => withTimeLeft(it, now)));
+  }
+
+  // The deadline bubbles due now (see the top of this file).
+  deadlines(now) {
+    return deadlineItems(this.watch?.assignments, now, this.hidden);
+  }
+
+  // The closed deadline bubbles still to stay hidden.
+  liveHidden(now) {
+    return Object.fromEntries(Object.entries(this.hidden).filter(([, until]) => until > now));
   }
 
   status() {
@@ -200,7 +221,7 @@ class EtlTracker extends EventEmitter {
     if (stale()) return;
 
     const now = this.now();
-    const { state, alerts, resolved } = diff(this.watch, snapshot, now);
+    const { state, alerts } = diff(this.watch, snapshot, now);
     if (snapshot.unauthorized) {
       this.unauthorized = true;
     } else if (state) {
@@ -211,7 +232,7 @@ class EtlTracker extends EventEmitter {
       return;
     }
     this.watch = state;
-    this.merge(alerts, resolved, now);
+    this.merge(alerts, now);
     if (!snapshot.unauthorized) this.lastChecked = now;
     this.save();
     this.setStatus(snapshot.unauthorized ? '토큰이 만료되었습니다. 새 토큰을 등록해 주세요.'
@@ -234,21 +255,11 @@ class EtlTracker extends EventEmitter {
     return { unauthorized: false, results: byCourse.results, errors: byCourse.errors, announcements };
   }
 
-  // New bubbles replace any with the same id (watch makes each one once per event), and a new
-  // reminder replaces the earlier one for that assignment; reminders for assignments now handed
-  // in go; expired ones go; then the cap.
-  merge(alerts, resolved, now) {
-    const done = new Set(resolved);
+  // New bubbles replace any with the same id (watch makes each one once per event); expired ones
+  // go; then the cap.
+  merge(alerts, now) {
     const fresh = new Set(alerts.map((a) => a.id));
-    for (const a of alerts) {
-      const m = REMIND_RE.exec(a.id);
-      if (m) done.add(m[1]);
-    }
-    const kept = this.itemList.filter((it) => {
-      if (fresh.has(it.id) || it.expiresAt <= now) return false;
-      const m = REMIND_RE.exec(it.id);
-      return !(m && done.has(m[1]));
-    });
+    const kept = this.itemList.filter((it) => !fresh.has(it.id) && !(it.expiresAt <= now));
     this.itemList = capItems([...alerts, ...kept]);
   }
 
@@ -257,17 +268,22 @@ class EtlTracker extends EventEmitter {
     this.emit('status', this.status());
   }
 
-  // Send the visible bubbles if they changed, and wake up when the next one expires, or in a
-  // minute while a reminder's time left is counting down.
+  // Send the visible bubbles if they changed, and wake up when the next one expires, a deadline
+  // comes within 24 hours or a closed one is due back, or in a minute while a deadline's time
+  // left is counting down.
   publish(force = false) {
     if (!this.running) return;
     const now = this.now();
     const live = this.itemList.filter((it) => !(it.expiresAt <= now));
-    if (live.length !== this.itemList.length) {
+    const hidden = this.liveHidden(now);
+    if (live.length !== this.itemList.length || Object.keys(hidden).length !== Object.keys(this.hidden).length) {
       this.itemList = live;
+      this.hidden = hidden;
       this.save();
     }
-    const out = sortItems(live.map((it) => withTimeLeft(it, now)));
+    const deadlines = this.deadlines(now);
+    const shown = [...live, ...deadlines];
+    const out = sortItems(shown.map((it) => withTimeLeft(it, now)));
     const key = JSON.stringify(out);
     if (force || key !== this.lastEmitted) {
       this.lastEmitted = key;
@@ -275,8 +291,10 @@ class EtlTracker extends EventEmitter {
     }
     this.timers.clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
-    const countdown = live.some((it) => Number.isFinite(it.dueAt)) ? now + COUNTDOWN_MS : Infinity;
-    const next = Math.min(countdown, ...live.map((it) => it.expiresAt).filter(Number.isFinite));
+    const countdown = shown.some((it) => Number.isFinite(it.dueAt)) ? now + COUNTDOWN_MS : Infinity;
+    const coming = Object.values(this.watch?.assignments || {})
+      .map((rec) => rec?.due - DEADLINE_LEAD_MS).filter((t) => Number.isFinite(t) && t > now);
+    const next = Math.min(countdown, ...shown.map((it) => it.expiresAt).filter(Number.isFinite), ...coming, ...Object.values(hidden));
     if (Number.isFinite(next)) {
       this.expiryTimer = this.timers.setTimeout(() => {
         this.expiryTimer = null;
@@ -297,14 +315,20 @@ class EtlTracker extends EventEmitter {
     if (!j || typeof j !== 'object') j = {};
     this.watch = j.watch && typeof j.watch === 'object' ? j.watch : null;
     this.itemList = Array.isArray(j.items)
-      ? j.items.filter((it) => it && typeof it.id === 'string' && it.id.startsWith('etl:') && it.kind === 'etl')
+      ? j.items.filter((it) => it && typeof it.id === 'string' && it.id.startsWith('etl:') && it.kind === 'etl'
+        && !OLD_REMINDER_RE.test(it.id))   // the deadline bubbles take their place
       : [];
+    this.hidden = j.hidden && typeof j.hidden === 'object'
+      ? Object.fromEntries(Object.entries(j.hidden).filter(([id, until]) => id.startsWith('etl:deadline:') && Number.isFinite(until)))
+      : {};
     this.lastChecked = Number.isFinite(j.lastChecked) ? j.lastChecked : null;
   }
 
   save() {
     if (!this.running) return;
-    const data = JSON.stringify({ version: STATE_VERSION, watch: this.watch, items: this.itemList, lastChecked: this.lastChecked });
+    const data = JSON.stringify({
+      version: STATE_VERSION, watch: this.watch, items: this.itemList, hidden: this.hidden, lastChecked: this.lastChecked,
+    });
     const tmp = `${this.stateFile}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });

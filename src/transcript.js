@@ -4,9 +4,9 @@
 // ~/.claude/projects/<project>/<session>.jsonl) into a pet status.
 //
 // Statuses, highest priority first (the first four in the order ChatGPT's pet uses):
-//   waiting    - Claude is blocked on you (a question, a plan to approve, or the
-//                desktop app's end-of-turn summary says it needs a decision; sessions.js
-//                adds permission prompts, from the app's log)
+//   waiting    - Claude is blocked on you (a question, a plan to approve, a question in the
+//                desktop app's next-step box, or the app's end-of-turn summary says it needs a
+//                decision; sessions.js adds permission prompts, from the app's log)
 //   failed     - the turn ended with an API error
 //   review     - the turn finished and you haven't looked at it yet
 //   running    - a turn is in progress
@@ -18,6 +18,8 @@
 const path = require('node:path');
 
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+const NEXT_STEP_TOOL = 'mcp__ccd_turn__wrap_up';   // fills the desktop app's next-step box
+const NEXT_STEP_SHOWN = /^\s*Shown in the next-step box\b/;   // how its result starts when the box shows
 const NEEDS_YOU = new Set(['blocked', 'need_input']);   // end-of-turn summaries the app marks yellow
 const END_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'refusal']);
 const TASK_ENDED = new Set(['completed', 'failed', 'killed', 'stopped']);   // <status> of a task's last notice
@@ -44,9 +46,17 @@ function createTurnState() {
     error: null,
     retrying: false,
     interrupted: false,
+    // The question in the app's next-step box. It stands until you send a prompt, a newer box
+    // replaces it or you dismiss it; turns a background task or another session starts don't
+    // answer it. Work after the box in the turn that asks it drops it.
+    question: null,
+    questionAt: 0,               // when the box showed it, then when its turn ended
+    questionThisTurn: false,     // the running (or last) turn showed a next-step box
     backgroundTasks: new Map(),  // task id -> { detail, at }: sent to the background, no ending notice yet
     title: null,
+    aiTitle: null,               // the title Claude Code gave the session itself (ai-title)
     cwd: null,
+    entrypoint: null,            // what started it: claude-desktop, claude-vscode, cli, sdk-…
     // Used to tell whether an SSH session's copied transcript has caught up with the desktop index.
     lastStampAt: 0,              // newest timestamp in the file, on the clock of the machine that wrote it
     lastUserAt: 0,               // newest user entry (a prompt, a tool result or a meta message)
@@ -130,23 +140,39 @@ function describeAsk(name) {
   return oneLine(`Asking to use ${tool || 'a tool'}`, 60);
 }
 
-function startTurn(state, at) {
+// `fromYou`: a prompt you sent, which answers (or sets aside) a standing question.
+function startTurn(state, at, { fromYou = false } = {}) {
   if (!state.turnActive) {
     state.turnStartedAt = at;
     state.turnAssistantUuids = [];
+    state.questionThisTurn = false;
   }
   state.turnActive = true;
   state.error = null;
   state.retrying = false;
   state.interrupted = false;
+  if (fromYou) state.question = null;
 }
 
+// The closing reply after the next-step box, or the app's own end-of-turn entries, end the turn
+// that asks its question.
 function endTurn(state, at, { interrupted = false } = {}) {
   state.turnActive = false;
   state.turnEndedAt = at || state.lastEventAt;
   state.pendingTools.clear();
   state.retrying = false;
   state.interrupted = interrupted;
+  if (interrupted) state.question = null;
+  if (state.questionThisTurn) state.questionAt = state.turnEndedAt;
+}
+
+// Whether you sent a prompt, rather than something on your behalf: a background task's ending
+// notice, a message from another session, a schedule. Older transcripts don't say; a notice still
+// shows by its tag.
+function promptFromYou(entry, text) {
+  const origin = entry.origin?.kind ?? entry.turnOrigin;
+  if (origin) return origin === 'human';
+  return !/^\s*<task-notification>/.test(text);
 }
 
 // The id of the task a tool result says went to the background, or null: a command (also one
@@ -193,10 +219,14 @@ function applyEntry(state, entry) {
   if (at > state.lastStampAt) state.lastStampAt = at;
   if (entry.isSidechain) return;
   if (entry.cwd && typeof entry.cwd === 'string') state.cwd = entry.cwd;
+  if (entry.entrypoint && typeof entry.entrypoint === 'string') state.entrypoint = entry.entrypoint;
 
   switch (entry.type) {
     case 'custom-title':
       if (typeof entry.customTitle === 'string') state.title = entry.customTitle;
+      return;
+    case 'ai-title':
+      if (typeof entry.aiTitle === 'string') state.aiTitle = entry.aiTitle;
       return;
     case 'summary':
       if (typeof entry.summary === 'string' && !state.title) state.title = entry.summary;
@@ -229,11 +259,19 @@ function applyUser(state, entry, at) {
 
   if (Array.isArray(content) && content.some((c) => c?.type === 'tool_result')) {
     let interrupted = false;
+    const endsTurn = entry.mcpMeta?._meta?.['claude/endTurn'] === true;
     // One entry holds one result, so its structured toolUseResult says what the call did.
     const single = content.filter((c) => c?.type === 'tool_result').length === 1;
     for (const c of content) {
       if (c?.type !== 'tool_result') continue;
       const call = state.pendingTools.get(c.tool_use_id);
+      // The next-step box's result says whether the box shows ("Not shown: …" if not). A box that
+      // shows replaces the one before it, with its own question or none.
+      if (call?.name === NEXT_STEP_TOOL && (endsTurn || NEXT_STEP_SHOWN.test(textOf(c.content)))) {
+        state.question = call.question;
+        state.questionAt = at;
+        state.questionThisTurn = true;
+      }
       const result = single ? entry.toolUseResult : null;
       const task = launchedTask(result, call);
       if (task) startBackgroundTask(state, task, { detail: call?.detail || 'a task', at });
@@ -245,6 +283,12 @@ function applyUser(state, entry, at) {
     }
     if (interrupted) {
       endTurn(state, at, { interrupted: true });
+      return;
+    }
+    // A tool's result can end the turn, with no reply after it. (The next-step box's did in
+    // earlier versions of the app; now a closing reply follows it.)
+    if (endsTurn) {
+      endTurn(state, at);
       return;
     }
     // A tool result means a turn is in flight, even if we started reading mid-turn.
@@ -260,7 +304,7 @@ function applyUser(state, entry, at) {
   // Local slash commands (/config, /clear, …) echo into the transcript without a model turn.
   if (/<local-command-(stdout|stderr|caveat)>|^\s*<command-name>/.test(text)) return;
   if (!text.trim() && !(Array.isArray(content) && content.length)) return;
-  startTurn(state, at);
+  startTurn(state, at, { fromYou: promptFromYou(entry, text) });
 }
 
 function applyAssistant(state, entry, at) {
@@ -288,7 +332,9 @@ function applyAssistant(state, entry, at) {
   if (Array.isArray(msg.content)) {
     for (const c of msg.content) {
       if (c?.type === 'tool_use' && c.id) {
-        state.pendingTools.set(c.id, { name: c.name, detail: describeTool(c.name, c.input), at });
+        if (c.name !== NEXT_STEP_TOOL && state.questionThisTurn) state.question = null;   // work went on after the box
+        const question = c.name === NEXT_STEP_TOOL && typeof c.input?.ask === 'string' && c.input.ask.trim() ? c.input.ask : null;
+        state.pendingTools.set(c.id, { name: c.name, detail: describeTool(c.name, c.input), at, question });
       }
     }
   }
@@ -302,7 +348,10 @@ function applySystem(state, entry, at) {
     case 'stop_hook_summary':
     case 'turn_duration':
       if (state.turnActive) endTurn(state, at);
-      else if (at > state.turnEndedAt && state.turnEndedAt) state.turnEndedAt = at;
+      else if (at > state.turnEndedAt && state.turnEndedAt) {
+        state.turnEndedAt = at;
+        if (state.questionThisTurn) state.questionAt = at;
+      }
       return;
     case 'api_error':
       if (at) state.lastEventAt = Math.max(state.lastEventAt, at);
@@ -313,7 +362,8 @@ function applySystem(state, entry, at) {
   }
 }
 
-// meta: { lastFocusedAt, dismissedAt, summary: postTurnSummary from the desktop session file }
+// meta: { lastFocusedAt, dismissedAt, summary: postTurnSummary from the desktop session file,
+// readyFrom: turns that end from then on are Ready until dismissed, looked at or not }
 function deriveStatus(state, meta = {}, now = Date.now()) {
   const derived = turnStatus(state, meta, now);
   // Between the turn that starts a background task and the one its notice starts, Claude isn't
@@ -335,6 +385,11 @@ function turnStatus(state, meta, now) {
   if (asking && !(meta.dismissedAt >= asking.at)) {   // dismissed, it shows as the running turn it is
     return { status: 'waiting', detail: asking.detail, since: asking.at };
   }
+  // So does a question in the next-step box (the app's summary may still call the turn completed),
+  // until you answer it or a newer box replaces it. Looking at it doesn't settle it; the × does.
+  if (state.question && !(meta.dismissedAt >= state.questionAt)) {
+    return { status: 'waiting', detail: oneLine(state.question), since: state.questionAt };
+  }
 
   if (state.turnActive) {
     if (now - state.lastEventAt > STALE_RUNNING_MS) return { status: 'idle', detail: '', since: state.lastEventAt };
@@ -344,20 +399,25 @@ function turnStatus(state, meta, now) {
   }
 
   const ended = state.turnEndedAt;
-  if (!ended || state.interrupted || now - ended > UNREAD_WINDOW_MS) return { status: 'idle', detail: '', since: ended };
-  // How the turn ended matters only until you've seen it.
-  const seenAt = Math.max(meta.lastFocusedAt || 0, meta.dismissedAt || 0);
-  if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
-
-  if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
+  // A turn that ended before `readyFrom` went quiet once you had looked at it, or after 12 hours.
+  // One since stays until you mark it done (dismissedAt) or start another turn.
+  const old = !(meta.readyFrom <= ended);
+  if (!ended || state.interrupted || (old && now - ended > UNREAD_WINDOW_MS)) return { status: 'idle', detail: '', since: ended };
 
   const summary = meta.summary;
   const current = summary && summary.summarizes_uuid && state.turnAssistantUuids.includes(summary.summarizes_uuid) ? summary : null;
   const detail = current ? oneLine(current.needs_action || current.status_detail || '', 120) : '';
-  // It ended waiting on your answer or decision (the app's yellow marker).
-  if (current && NEEDS_YOU.has(current.status_category)) {
+  // It ended waiting on your answer or decision (the app's yellow marker). Like a question, that
+  // stands until you answer it or dismiss it.
+  if (!state.error && current && NEEDS_YOU.has(current.status_category) && !(meta.dismissedAt >= ended)) {
     return { status: 'waiting', detail: detail || 'Needs your decision', since: ended };
   }
+
+  // How else the turn ended matters until you mark it done (or, before `readyFrom`, look at it).
+  const seenAt = Math.max(old ? meta.lastFocusedAt || 0 : 0, meta.dismissedAt || 0);
+  if (ended <= seenAt) return { status: 'idle', detail: '', since: ended };
+
+  if (state.error) return { status: 'failed', detail: state.error.message, since: ended };
 
   if (current) {
     if (current.status_category === 'failed' || current.status_category === 'error') {

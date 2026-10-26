@@ -1,9 +1,9 @@
 {
-  "name": "claude-pet",
-  "version": "0.2.0",
-  "description": "A floating desktop pet that shows what your Claude desktop Code sessions and Codex threads are doing.",
+  "name": "ttokttok-pet",
+  "version": "0.8.0",
+  "description": "A floating desktop pet that keeps track of your Claude Code sessions, Codex threads, web chats and SNU eTL deadlines.",
   "author": "hyukjunlim",
-  "repository": "github:hyukjunlim/claude-pet",
+  "repository": "github:hyukjunlim/ttokttok-pet",
   "main": "src/main.js",
   "private": true,
   "license": "MIT",
@@ -20,8 +20,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.hyukjunlim.claude-pet",
-    "productName": "Claude Pet",
+    "appId": "com.hyukjunlim.ttokttok-pet",
+    "productName": "Ttokttok Pet",
     "asar": false,
     "directories": {
       "output": "dist"
@@ -33,6 +33,7 @@
       "claude-mod/**/*",
       "!claude-mod/**/*.test.ts",
       "etl-workspace/**/*",
+      "browser-extension/**/*",
       "LICENSE"
     ],
     "win": {
@@ -51,14 +52,14 @@
         }
       ],
       "icon": "assets/icon.png",
-      "artifactName": "Claude-Pet-${version}-win.${ext}"
+      "artifactName": "Ttokttok-Pet-${version}-win.${ext}"
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "Claude-Pet-Setup-${version}.${ext}"
+      "artifactName": "Ttokttok-Pet-Setup-${version}.${ext}"
     }
   }
 }

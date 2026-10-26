@@ -30,7 +30,7 @@ function fakeSafeStorage({ available = true } = {}) {
 }
 
 function tokenFile(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-etl-token-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-etl-token-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return path.join(dir, 'nested', 'etl-token.bin');
 }

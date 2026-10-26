@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// SNU eTL 조회 CLI (읽기 전용). Claude Pet이 eTL 토큰을 갖고 조회하며, 이 스크립트는 펫의
-// 로컬 조회 브리지(Windows 이름 있는 파이프, 그 밖에는 ~/.claude-pet/etl.sock)에 요청 한 줄을
+// SNU eTL 조회 CLI (읽기 전용). Ttokttok Pet이 eTL 토큰을 갖고 조회하며, 이 스크립트는 펫의
+// 로컬 조회 브리지(Windows 이름 있는 파이프, 그 밖에는 ~/.ttokttok-pet/etl.sock)에 요청 한 줄을
 // 보내고 받은 응답을 출력한다. 의존성 없음. 이 파일은 펫이 관리하므로 고치지 않는다.
 //
 // The pipe path below repeats defaultPipePath() in the pet's src/etl/bridge.js; keep them in step.
@@ -15,14 +15,14 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 
-const NOT_RUNNING = 'Claude Pet이 실행 중이 아니거나 eTL 기능이 꺼져 있습니다. 펫을 켜고 eTL을 켜 주세요.';
+const NOT_RUNNING = 'Ttokttok Pet이 실행 중이 아니거나 eTL 기능이 꺼져 있습니다. 펫을 켜고 eTL을 켜 주세요.';
 const TIMEOUT_MS = 35000;
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000 + 15000;   // the pet allows a download 5 minutes
-const FILE_BRIDGE = process.env.CLAUDE_PET_ETL_DIR || path.join(__dirname, '.etl-bridge');
+const FILE_BRIDGE = process.env.TTOKTTOK_PET_ETL_DIR || path.join(__dirname, '.etl-bridge');
 const PICKUP_MS = 3000;           // the pet takes a request within a poll; longer means it isn't there
 const POLL_MS = 100;
 
-const HELP = `SNU eTL 조회 CLI (읽기 전용, Claude Pet을 통해 조회)
+const HELP = `SNU eTL 조회 CLI (읽기 전용, Ttokttok Pet을 통해 조회)
 
 사용법: node etl.js <명령> [옵션]
 
@@ -72,9 +72,9 @@ function userTag() {
 }
 
 function pipePath() {
-  if (process.env.CLAUDE_PET_ETL_PIPE) return process.env.CLAUDE_PET_ETL_PIPE;
-  if (process.platform === 'win32') return `\\\\.\\pipe\\claude-pet-etl-${userTag()}`;
-  return path.join(os.homedir(), '.claude-pet', 'etl.sock');
+  if (process.env.TTOKTTOK_PET_ETL_PIPE) return process.env.TTOKTTOK_PET_ETL_PIPE;
+  if (process.platform === 'win32') return `\\\\.\\pipe\\ttokttok-pet-etl-${userTag()}`;
+  return path.join(os.homedir(), '.ttokttok-pet', 'etl.sock');
 }
 
 // Turns the command line into { help } or { request } or { error }. Values that look like whole

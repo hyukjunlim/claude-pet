@@ -48,10 +48,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files=("dist/Claude-Pet-Setup-$VERSION.exe" "dist/Claude-Pet-$VERSION-win.zip")
+          files=("dist/Ttokttok-Pet-Setup-$VERSION.exe" "dist/Ttokttok-Pet-$VERSION-win.zip")
           ls -l "${files[@]}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" --clobber "${files[@]}"
           else
-            gh release create "$GITHUB_REF_NAME" --title "Claude Pet $VERSION" --generate-notes "${files[@]}"
+            gh release create "$GITHUB_REF_NAME" --title "Ttokttok Pet $VERSION" --generate-notes "${files[@]}"
           fi

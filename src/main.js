@@ -3,10 +3,11 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFile, execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage,
+  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage,
   screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
@@ -21,18 +22,35 @@ const { isSameHost, sshConfigHosts } = require('./ssh-config');
 const { cleanShape, shapeForWindow, NO_SHAPE } = require('./shape');
 const { DemoTracker } = require('./demo');
 const { checkForRelease, checkForUpdate, startUpdate } = require('./updater');
-const { raiseCodexWindow } = require('./raise');
+const { raiseBrowserWindow, raiseCodexWindow, raiseVsCodeWindow, vsCodePlace } = require('./raise');
+const { archiveCodexChat, canDelete, deleteClaudeSession, isChat } = require('./chat-delete');
+const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
+const { WebChatsFeature } = require('./webchats/feature');
+const { FolderWindow, displayChoices } = require('./folder-mode');
+const { buildTree } = require('./folder-tree');
+const { settleMarks } = require('./marks');
+const { settleHidden } = require('./hidden');
+const { maximizeApps } = require('./maximize');
+const { StepKeys } = require('./step-keys');
+const { moveFolder, previous } = require('./migrate');
+const { GettingStarted } = require('./onboarding');
 
 const DEMO = process.argv.includes('--demo');
-const DEBUG_CAPTURE_DIR = process.env.CLAUDE_PET_CAPTURE_DIR || null;
-const DEBUG_OPEN_AFTER_MS = Number(process.env.CLAUDE_PET_DEBUG_OPEN_AFTER_MS) || 0;
+// Debug aid: TTOKTTOK_PET_USER_DATA=<dir> keeps settings, the log and the single-instance lock
+// there, so a second copy can run next to the one you use.
+const DEBUG_USER_DATA = process.env.TTOKTTOK_PET_USER_DATA || null;
+const DEBUG_CAPTURE_DIR = process.env.TTOKTTOK_PET_CAPTURE_DIR || null;
+const DEBUG_OPEN_AFTER_MS = Number(process.env.TTOKTTOK_PET_DEBUG_OPEN_AFTER_MS) || 0;
 
 const APP_ROOT = path.join(__dirname, '..');
 // A clone runs as `electron <folder>`, so the folder goes on the command line whenever the pet
 // starts itself again; a downloaded copy (an installer or zip, see "build" in package.json) is
 // its own exe and needs no argument.
 const ROOT_ARGS = app.isPackaged ? [] : [APP_ROOT];
+// The pet and what it starts (its PowerShell helpers, the updater) work in the home folder, not the
+// one the pet was started in, so they never keep that folder from being moved or deleted.
+process.chdir(os.homedir());
 const RENDERER_DIR = path.join(__dirname, 'renderer');
 const CELL = { width: 192, height: 208 };
 const WIN_WIDTH = 400;
@@ -55,10 +73,12 @@ const MAX_MOMENTUM_MS = 900;
 const MIN_THROW_SPEED = 450;
 const STATUS_LABEL = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
 const DESKTOP_SESSION_RE = /^local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const CLI_SESSION_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;   // a VS Code or terminal session's
 const APP_LINK = { claude: 'claude://hotkey', codex: 'codex://launch' };   // bring the app's window forward
 const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;   // the only pages an eTL bubble opens
+const WEB_LINK = /^https:\/\/(claude\.ai|chatgpt\.com|gemini\.google\.com)\//;   // and a web chat's
 const FOREGROUND_HANDOFF_MS = 1500;
-const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as claude-pet.old.log
+const LOG_MAX_BYTES = 1024 * 1024;  // then the log starts over, keeping the last one as ttokttok-pet.old.log
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'pet', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -68,6 +88,7 @@ let settings;
 let tracker;
 let codex = null;               // Codex threads, when Codex is installed and shown
 let etl = null;                 // SNU eTL notices, when turned on (see etl/feature.js)
+let webchats = null;            // claude.ai and ChatGPT chats, when turned on (see webchats/feature.js)
 let win = null;
 let tray = null;
 let pets = [];
@@ -79,17 +100,33 @@ let shapeKey = '';              // the shape last set on the window, to skip set
 let drag = null;
 let momentumTimer = null;
 let trayHeight = TRAY_HEIGHT;   // what the bubbles need, as the page measures it
-let sessions = [];              // Claude, Codex and eTL together, most urgent first
+let sessions = [];              // Claude, Codex, eTL and web chats together, most urgent first
 let claudeSessions = [];
 let codexSessions = [];
 let etlSessions = [];
+let webSessions = [];
+let folder = null;              // folder mode's sidebar (see folder-mode.js)
+let stepKeys = null;            // Ctrl+Tab through the sidebar (see step-keys.js)
+let claudeAll = [];             // every Claude session, Codex thread and web chat, quiet ones too, for folder mode
+let codexAll = [];
+let webAll = [];
+const deleted = new Map();      // id -> when: chats deleted in the sidebar, left out until the trackers see them go
+let treeKey = '';
+let quitting = false;
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
 let localMod = null;            // the pet's Claude Code mod on this PC (see claude-mod.js)
 let modBusy = null;             // what the Live Claude usage menu is doing, while it does it
+let userDataNote = null;        // what became of an older install's %APPDATA% folder, for the log (userDataDir)
+let gettingStarted = null;      // the Getting started window and its practice items (see onboarding.js)
+let usageSetupErrors = {};      // Getting started's Claude usage step: place key -> why it couldn't be set up
 const modUpdated = new Set();   // SSH hosts whose copy of the mod was brought up to date this run
 const wslAsked = new Set();     // the WSL distros checkWsl has asked this run
 let wslTimer = null;
+let wslChatsTimer = null;       // syncWslChats, while the pet runs
+const wslHomes = new Map();     // WSL distro -> its $HOME, asked while it ran
+let wslRunning = new Set();     // the distros running at syncWslChats's last look
+let wslChatsKey = '';
 let usageKey = '';
 let usageTimer = null;
 let logFile = null;
@@ -97,17 +134,17 @@ let logBytes = 0;
 let update = null;              // what the last check found, when there's an update waiting
 let updateBusy = null;          // 'checking' while looking, 'asking' while a dialog is up
 
-// The pet usually runs without a console, so lines also go to claude-pet.log in the app's logs
-// folder (%APPDATA%\claude-pet\logs on Windows).
+// The pet usually runs without a console, so lines also go to ttokttok-pet.log in the app's logs
+// folder (%APPDATA%\ttokttok-pet\logs on Windows).
 function log(...args) {
   const now = new Date();
   const pad = (n, width = 2) => String(n).padStart(width, '0');
   const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const line = `[claude-pet ${day} ${now.toTimeString().slice(0, 8)}.${pad(now.getMilliseconds(), 3)}] ${format(...args)}`;
+  const line = `[ttokttok-pet ${day} ${now.toTimeString().slice(0, 8)}.${pad(now.getMilliseconds(), 3)}] ${format(...args)}`;
   console.log(line);
   try {
     if (!logFile) {
-      logFile = path.join(app.getPath('logs'), 'claude-pet.log');
+      logFile = path.join(app.getPath('logs'), 'ttokttok-pet.log');
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       logBytes = fs.statSync(logFile, { throwIfNoEntry: false })?.size || 0;
     }
@@ -124,8 +161,8 @@ function log(...args) {
 
 // ---------------------------------------------------------------- geometry
 
-function petScale() {
-  let s = settings.get('scale');
+// The floating pet's scale (tray menu → Appearance → Size), or `s`: folder mode's pet has a size of its own.
+function petScale(s = settings.get('scale')) {
   if (currentPet?.pixelArt) {
     // Snap so every art pixel (4 atlas px) covers a whole number of device pixels.
     const dpr = displayForPet().scaleFactor || 1;
@@ -271,7 +308,7 @@ function finishMove() {
 function createWindow() {
   win = new BrowserWindow({
     ...windowBounds(),
-    title: 'Claude Pet',
+    title: 'Ttokttok Pet',
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -296,10 +333,9 @@ function createWindow() {
       spellcheck: false,
     },
   });
-  // On Windows, Electron puts a 'floating' window just behind the taskbar, so when the taskbar
-  // wasn't always on top at that moment (as it isn't at times when it hides itself), the pet
-  // wasn't either, and other windows went over it. There the other levels are all simply
-  // always on top.
+  watchWindowOrder(win, { log });
+  // Windows puts the floating level behind the taskbar; pop-up-menu avoids that
+  // anchor changing the pet's topmost status when the taskbar hides.
   win.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
   win.setMenuBarVisibility(false);
   // Until the page says where the pet is, the window takes no mouse at all.
@@ -314,7 +350,7 @@ function createWindow() {
     if (details.reason !== 'clean-exit') setTimeout(() => replaceWindow(created), 1000);
   });
   win.once('ready-to-show', () => {
-    if (settings.get('visible')) {
+    if (settings.get('visible') && settings.get('mode') !== 'folder') {
       win.showInactive();
       wake();
     }
@@ -333,6 +369,43 @@ function replaceWindow(old) {
 
 function setVisible(visible) {
   settings.set({ visible });
+  applyMode();
+  gettingStarted?.visibilityChanged(visible);
+}
+
+// The monitor the sidebar docks on: the one picked in the tray menu while it's connected, else
+// the floating pet's.
+function folderDisplay() {
+  const id = settings.get('folderDisplay');
+  return screen.getAllDisplays().find((d) => d.id === id) ?? displayForPet();
+}
+
+// The tray menu's Sidebar position: the sidebar opens again on `display` (an id), against `edge`.
+async function placeSidebar({ display = settings.get('folderDisplay'), edge = settings.get('folderEdge') }) {
+  settings.set({ folderDisplay: display, folderEdge: edge === 'right' ? 'right' : 'left' });
+  log(`sidebar: ${settings.get('folderEdge')} edge of display ${display ?? '(the pet’s)'}`);
+  if (settings.get('mode') !== 'folder' || !settings.get('visible')) return;
+  await folder.close();
+  applyMode();
+}
+
+// Shows the floating pet or the folder sidebar, whichever the mode is, if the pet is to be seen.
+function applyMode() {
+  const visible = settings.get('visible');
+  if (settings.get('mode') === 'folder') {
+    if (win && !win.isDestroyed()) win.hide();
+    if (visible) {
+      folder.show(folderDisplay(), settings.get('folderEdge'));
+      treeKey = '';
+      stepKeys.start();
+    } else {
+      stepKeys.stop();
+      folder.close();
+    }
+    return;
+  }
+  stepKeys.stop();
+  folder.close();
   if (!win || win.isDestroyed()) return;
   if (visible) {
     win.showInactive();
@@ -342,8 +415,16 @@ function setVisible(visible) {
   }
 }
 
+function setMode(mode) {
+  if ((mode !== 'pet' && mode !== 'folder') || mode === settings.get('mode')) return;
+  settings.set({ mode, visible: true });
+  log(`mode: ${mode}`);
+  applyMode();
+}
+
 function wake() {
   win?.webContents.send('pet:wake');
+  folder?.send('folder:wake');
 }
 
 // ---------------------------------------------------------------- pets
@@ -365,18 +446,22 @@ function loadPets() {
 }
 
 function sendPet() {
-  if (!win || win.isDestroyed() || !currentPet) return;
-  win.webContents.send('pet:pet', {
+  if (!currentPet) return;
+  const payload = {
     key: currentPet.key,
     displayName: currentPet.displayName,
     url: sheetUrl(currentPet),
     rows: currentPet.rows,
     pixelArt: currentPet.pixelArt,
-  });
+  };
+  if (win && !win.isDestroyed()) win.webContents.send('pet:pet', payload);
+  folder?.send('folder:pet', { ...payload, scale: petScale(settings.get('folderPetScale')) });
 }
 
 function sendMotion() {
-  if (win && !win.isDestroyed()) win.webContents.send('pet:motion', { alwaysAnimate: settings.get('alwaysAnimate') === true });
+  const motion = { alwaysAnimate: settings.get('alwaysAnimate') === true };
+  if (win && !win.isDestroyed()) win.webContents.send('pet:motion', motion);
+  folder?.send('folder:motion', motion);
 }
 
 function selectPet(key) {
@@ -420,15 +505,316 @@ function handleProtocol(request) {
 // ---------------------------------------------------------------- sessions
 
 function sendSessions() {
+  // Folder mode: the pet acts out the most urgent session, as the floating pet does, and eTL's
+  // notices sit under the tree.
+  folder?.send('folder:status', sessions[0]?.status || 'idle');
+  folder?.send('folder:notices', etlSessions);
   if (!win || win.isDestroyed()) return;
-  win.webContents.send('pet:sessions', { sessions, showActivity: settings.get('showActivity') });
+  // Getting started's practice bubble goes first, and shows even with the bubbles turned off.
+  const practice = gettingStarted?.petItems() ?? [];
+  win.webContents.send('pet:sessions', { sessions: [...practice, ...sessions], showActivity: settings.get('showActivity') || practice.length > 0 });
   if (tray) tray.setToolTip(trayTooltip());
 }
 
 function mergeSessions() {
-  sessions = [...claudeSessions, ...codexSessions, ...etlSessions].sort(compareSessions);
+  sessions = [...claudeSessions, ...codexSessions, ...etlSessions, ...webSessions].filter((s) => !isDeleted(s.id)).sort(compareSessions);
   sendSessions();
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
+}
+
+// Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
+function sendTree() {
+  const marked = currentMarks();
+  const hidden = currentHidden();
+  if (!folder?.open) return;
+  const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id) && !isDeleted(s.id));
+  const hosts = buildTree({
+    claude: shown(claudeAll),
+    codex: shown(codexAll),
+    chats: shown(webAll),
+    sshHosts: sshConfigHosts(),
+    codexConnections: codex?.connections ?? [],
+    defaultWsl: wslDistros()[0] ?? null,
+    marked,
+  });
+  const practice = gettingStarted?.folderHost();   // Getting started's practice sessions, on top
+  if (practice) hosts.unshift(practice);
+  const key = JSON.stringify(hosts);
+  if (key === treeKey) return;
+  treeKey = key;
+  folder.send('folder:tree', hosts);
+}
+
+// The sessions you marked as Ready (marks.js), less the ones you've since sent a message. Marks
+// were follow-up flags before; those carry over.
+function currentMarks() {
+  const flags = settings.get('flags');
+  if (flags) settings.set({ marked: { ...flags, ...settings.get('marked') }, flags: undefined });
+  const saved = settings.get('marked') || {};
+  const left = settleMarks(saved, [...claudeAll, ...codexAll, ...webAll]);
+  if (left !== saved) settings.set({ marked: left });
+  return left;
+}
+
+// Mark as Ready: a session you'd marked done gets back what it had (a question still in the
+// next-step box is Needs you again); a quiet one shows as Ready until you mark it done or message it.
+function markReady(id) {
+  trackerFor(id)?.undismiss?.(id);   // the lists update right away
+  persistDismissed();
+  const s = [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((x) => x.id === id), null);
+  if (!s || s.status === 'idle') settings.set({ marked: { ...currentMarks(), [id]: Date.now() } });
+  sendTree();
+}
+
+// Mark as done: a session's Ready, Error or Needs you is settled, as its bubble's × settles it,
+// and your mark on it goes.
+function markDone(ids) {
+  const marked = { ...currentMarks() };
+  for (const id of ids) {
+    trackerFor(id)?.dismiss(id);
+    delete marked[id];
+  }
+  settings.set({ marked });
+  persistDismissed();
+  sendTree();
+}
+
+// The sessions you hid from the sidebar (hidden.js), less the ones with something new in them.
+function currentHidden() {
+  const saved = settings.get('hidden') || {};
+  const left = settleHidden(saved, [...claudeAll, ...codexAll, ...webAll]);
+  if (left !== saved) settings.set({ hidden: left });
+  return left;
+}
+
+// `ids` null: every hidden session shows again.
+function setHidden(ids, on) {
+  const hidden = ids == null ? {} : { ...currentHidden() };
+  const now = Date.now();
+  for (const id of ids ?? []) {
+    if (on) hidden[id] = now;
+    else delete hidden[id];
+  }
+  settings.set({ hidden });
+  sendTree();
+}
+
+// A sidebar row's own menu: a session's (mark it done or Ready, hide it, delete a VS Code or
+// terminal chat), or a machine's or a folder's (fold it, hide what's in it). Null for anywhere
+// else, which gets the tray menu.
+function rowMenu(target) {
+  const known = (id) => typeof id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === id));
+  if (target?.kind === 'session' && known(target.id)) {
+    const { id } = target;
+    const s = listedSession(id);
+    const status = s?.status;
+    const pending = Object.hasOwn(currentMarks(), id) || status === 'review' || status === 'failed' || status === 'waiting';
+    return Menu.buildFromTemplate([
+      pending ? { label: 'Mark as done', click: () => markDone([id]) } : { label: 'Mark as Ready', click: () => markReady(id) },
+      { label: 'Hide from the sidebar', click: () => setHidden([id], true) },
+      // Not while it's working or was written to just now: it may still be open.
+      ...(isChat(s) ? [{ type: 'separator' }, { label: 'Delete…', enabled: canDelete(s), click: () => deleteChat(id) }] : []),
+    ]);
+  }
+  if (target?.kind === 'folder' && typeof target.key === 'string' && Array.isArray(target.ids)) {
+    const { key } = target;
+    const open = target.open === true;
+    const ids = target.ids.filter(known);
+    return Menu.buildFromTemplate([
+      { label: open ? 'Collapse' : 'Expand', click: () => folder?.send('folder:fold', { key, open: !open }) },
+      { type: 'separator' },
+      { label: 'Hide from the sidebar', enabled: ids.length > 0, click: () => setHidden(ids, true) },
+    ]);
+  }
+  return null;
+}
+
+// A session as the full lists have it (with its machine), whether or not it has a bubble.
+function listedSession(id) {
+  return [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null);
+}
+
+// Left out for two minutes after you deleted it, by when its tracker has looked again. One still
+// there after that wasn't deleted, and shows again.
+function isDeleted(id) {
+  const at = deleted.get(id);
+  if (at && Date.now() - at > 2 * 60_000) deleted.delete(id);
+  return deleted.has(id);
+}
+
+// The sidebar's Delete, once you confirm it (chat-delete.js): a Claude Code session's files go,
+// a Codex chat is archived by Codex.
+async function deleteChat(id) {
+  const s = listedSession(id);
+  if (!canDelete(s)) return;
+  const job = deleteJob(s);
+  if (!job) {
+    dialog.showMessageBox({ type: 'error', title: 'Ttokttok Pet', message: `Couldn't find where "${s.title}" is kept.`, buttons: ['OK'] });
+    return;
+  }
+  const options = {
+    type: 'warning',
+    title: 'Ttokttok Pet',
+    message: job.archive ? `Archive "${s.title}" in Codex?` : `Delete "${s.title}"?`,
+    detail: job.detail,
+    buttons: [job.archive ? 'Archive' : 'Delete', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const parent = folder?.open ? folder.win : null;
+  const answer = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  if (answer.response !== 0) return;
+  try {
+    await job.run();
+  } catch (err) {
+    log(`delete ${id}:`, err.message);
+    dialog.showMessageBox({ type: 'error', title: 'Ttokttok Pet', message: `Couldn't delete "${s.title}"`, detail: err.message, buttons: ['OK'] });
+    return;
+  }
+  log(`deleted ${id} (${job.where})`);
+  deleted.set(id, Date.now());
+  const marked = { ...currentMarks() };
+  delete marked[id];
+  settings.set({ marked });
+  setHidden([id], false);   // sends the tree
+  mergeSessions();
+  if (s.kind === 'codex') codex?.rescan();
+  else tracker?.kick?.({ projects: true });
+}
+
+// What deleting `s` takes, and what the confirmation says: null if it can't be found.
+function deleteJob(s) {
+  const record = "Claude Code's record of this session (its transcript and folder)";
+  const gone = "It won't be in /resume or in VS Code's past sessions any more.";
+  if (s.kind === 'codex') {
+    const threadId = s.id.slice('codex:'.length);
+    const at = codex?.chatPlace(threadId);
+    if (!at) return null;
+    const where = at.place === 'wsl' ? `WSL (${at.distro})` : at.place === 'ssh' ? at.host.name : 'this PC';
+    return {
+      archive: true,
+      where,
+      detail: `Codex on ${where} archives this chat. You can bring it back from Codex's archived chats.`,
+      run: () => archiveCodexChat({ threadId, ...at }),
+    };
+  }
+  const sessionId = s.sessionId;
+  const ssh = /^ssh:/.test(s.machineKey || '');
+  if (ssh) {
+    const host = claudeUsage?.hostFor(s.machineKey);
+    if (!host) return null;
+    return {
+      where: host.name,
+      detail: `${record} is deleted on ${host.name}, for good. ${gone}`,
+      run: () => deleteClaudeSession({ sessionId, place: 'ssh', host }),
+    };
+  }
+  const c = tracker?.cliSessions?.get(sessionId);
+  if (!c?.file) return null;
+  const wsl = /^wsl:(.+)$/.exec(c.machineKey || '')?.[1];
+  return {
+    where: wsl ? `WSL (${wsl})` : 'this PC',
+    detail: wsl
+      ? `${record} is deleted in WSL (${wsl}), for good: the Recycle Bin can't take files from WSL. ${gone}`
+      : `${record} goes to the Recycle Bin. ${gone}`,
+    run: () => deleteClaudeSession({ sessionId, place: wsl ? 'wsl' : 'local', file: c.file, trashItem: (p) => shell.trashItem(p) }),
+  };
+}
+
+// ---------------------------------------------------------------- Getting started (see onboarding.js)
+
+function startGettingStarted() {
+  gettingStarted = new GettingStarted({
+    log,
+    state: gettingStartedState,
+    changed: () => {
+      sendSessions();
+      sendTree();
+    },
+    // Its Claude usage step asked, if it had somewhere to set the mod up; otherwise the pet still
+    // asks once Claude Code turns up (offerLiveUsage).
+    closed: () => {
+      if (usagePlaces().length) settings.set({ claudeModOffered: true });
+    },
+    actions: {
+      mode: (mode) => {
+        setMode(mode);
+        setTimeout(() => gettingStarted.raise(), 1500);   // after the sidebar docks and the apps move
+      },
+      usage: setUpUsage,
+      etl: () => etl?.setEnabled(true, { openChat: false }),
+      web: (on) => webchats?.setEnabled(on, { quiet: true }),
+      extensionFolder: () => webchats?.openExtensionFolder(),
+      doc: (name) => name === 'usage' && shell.openExternal(LIVE_USAGE_DOC),
+    },
+  });
+}
+
+function gettingStartedState() {
+  return {
+    mode: settings.get('mode'),
+    pet: currentPet ? { url: sheetUrl(currentPet), pixelArt: currentPet.pixelArt === true } : null,
+    usage: { places: usagePlaces(), busy: modBusy, errors: usageSetupErrors },
+    etl: { available: Boolean(etl), enabled: Boolean(etl?.enabled) },
+    web: {
+      available: Boolean(webchats),
+      on: Boolean(webchats?.enabled),
+      connected: webchats?.chats.connected() ?? 0,
+      folder: webchats?.extensionDir() ?? '',
+    },
+  };
+}
+
+// Where Claude Code is, for the mod: this PC, its WSL distros, the SSH hosts the pet reads.
+function usagePlaces() {
+  if (!localMod) return [];
+  const local = localMod.status();
+  const places = [];
+  if (localMod.hasClaudeCode() || local.version != null) {
+    places.push({ key: 'pc', label: 'This PC', note: 'Claude Code in ~/.claude', set: local.installed });
+  }
+  for (const distro of wslDistros()) {
+    places.push({ key: `wsl:${distro}`, label: `WSL: ${distro}`, note: 'Runs this PC’s copy of the mod', set: settings.get('claudeModWsl')?.[distro] === true });
+  }
+  for (const h of sshHosts()) {
+    places.push({ key: `ssh:${h.key}`, label: `SSH: ${h.name}`, note: h.mod ? 'One of the Claude app’s SSH connections' : 'Connecting…', set: h.mod?.enabled === true });
+  }
+  return places;
+}
+
+// The usage step's button: the mod on each of `keys` (usagePlaces), one after another; what
+// failed says why next to its place.
+async function setUpUsage(keys) {
+  if (modBusy) return;
+  usageSetupErrors = {};
+  modBusy = 'Setting up';
+  gettingStarted?.send();
+  try {
+    for (const key of keys) {
+      try {
+        if (key === 'pc') await setLocal(true);
+        else if (key.startsWith('wsl:')) await setWsl(key.slice('wsl:'.length), true);
+        else if (key.startsWith('ssh:')) {
+          const h = sshHosts().find((x) => `ssh:${x.key}` === key);
+          if (h) await setSsh(h, true);
+        }
+      } catch (err) {
+        log('mod:', err.message);
+        usageSetupErrors = { ...usageSetupErrors, [key]: String(err.message).split('\n')[0].slice(0, 80) };
+      }
+    }
+  } finally {
+    modBusy = null;
+  }
+}
+
+// A practice session's menu, as a real one's: either item settles it, and it goes.
+function practiceRowMenu(id) {
+  return Menu.buildFromTemplate([
+    { label: 'Mark as done', click: () => gettingStarted?.remove(id) },
+    { label: 'Hide from the sidebar', click: () => gettingStarted?.remove(id) },
+  ]);
 }
 
 function codexInstalled() {
@@ -454,10 +840,17 @@ function startCodex() {
     ...codexPaths(),
     watchHosts: settings.get('codexOverSsh'),
     dismissed: settings.get('dismissed') || {},
+    readyFrom: readyFrom(),
+    cliReadyFrom: cliReadyFrom(),
   });
+  codex.setChatRoots(wslRoots('.codex\\sessions'));
   codex.on('change', (list) => {
     codexSessions = list;
     mergeSessions();
+  });
+  codex.on('list', (list) => {
+    codexAll = list;
+    sendTree();
   });
   codex.on('usage', setUsage);
   codex.on('error', (err) => log('codex tracker error:', err?.message || err));
@@ -468,7 +861,9 @@ function stopCodex() {
   codex?.stop();
   codex = null;
   codexSessions = [];
+  codexAll = [];
   mergeSessions();
+  sendTree();
   setUsage({ codex: null });
 }
 
@@ -488,8 +883,29 @@ function startEtl() {
   etl.start();
 }
 
+function startWebChats() {
+  webchats = new WebChatsFeature({
+    electron: { dialog, shell },
+    settings,
+    appRoot: APP_ROOT,
+    userData: app.getPath('userData'),
+    exe: process.execPath,
+    log,
+  });
+  webchats.on('change', (list) => {
+    webSessions = list;
+    mergeSessions();
+  });
+  webchats.on('list', (list) => {
+    webAll = list;
+    sendTree();
+  });
+  webchats.start().catch((err) => log('web chats:', err.message));
+}
+
 function trackerFor(id) {
   if (String(id).startsWith('etl:')) return etl;
+  if (String(id).startsWith('web:')) return webchats;
   return String(id).startsWith('codex:') ? codex : tracker;
 }
 
@@ -506,12 +922,12 @@ function currentUsage() {
 
 // Also runs every minute: a week can turn over, and figures can get old, with no news.
 function sendUsage(force = false) {
-  if (!win || win.isDestroyed()) return;
   const items = settings.get('showUsage') ? currentUsage() : [];
   const key = JSON.stringify(items);
   if (key === usageKey && force !== true) return;
   usageKey = key;
-  win.webContents.send('pet:usage', items);
+  if (win && !win.isDestroyed()) win.webContents.send('pet:usage', items);
+  folder?.send('folder:usage', items);
 }
 
 // "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h · as of 2h ago"
@@ -526,7 +942,7 @@ function usageLabel(u) {
 
 // ---------------------------------------------------------------- live Claude usage (see claude-mod.js)
 
-const LIVE_USAGE_DOC = 'https://github.com/hyukjunlim/claude-pet#live-claude-usage';
+const LIVE_USAGE_DOC = 'https://github.com/hyukjunlim/ttokttok-pet#live-claude-usage';
 const WSL_CHECK_MS = 5 * 60_000;
 
 // The WSL distros Claude Code is known to be in: those the desktop app has run sessions in, and
@@ -631,7 +1047,7 @@ async function runModTask(label, task) {
   } catch (err) {
     log('mod:', err.message);
     await dialog.showMessageBox({
-      type: 'warning', title: 'Claude Pet', message: "Couldn't change Claude Pet's mod for Claude Code.", detail: err.message,
+      type: 'warning', title: 'Ttokttok Pet', message: "Couldn't change Ttokttok Pet's mod for Claude Code.", detail: err.message,
     });
   } finally {
     modBusy = null;
@@ -694,6 +1110,7 @@ function liveUsageMenu() {
 // Code turns up on this PC or in WSL.
 async function offerLiveUsage() {
   if (DEMO || modBusy || settings.get('claudeModOffered') || modSetUpAnywhere()) return;
+  if (gettingStarted?.isOpen) return;   // its Claude usage step asks; see startGettingStarted's closed
   const here = localMod.hasClaudeCode();
   const distros = wslDistros();
   const hosts = sshHosts().filter((h) => !h.fromConfig);
@@ -702,17 +1119,17 @@ async function offerLiveUsage() {
   settings.set({ claudeModOffered: true });   // before the dialog: checkWsl may call again while it's up
   const answer = await dialog.showMessageBox({
     type: 'question',
-    title: 'Claude Pet',
+    title: 'Ttokttok Pet',
     message: "Show Claude's weekly limit?",
     detail: [
-      "Claude Pet reads Claude's usage from a small mod for Claude Code, which saves your plan's",
+      "Ttokttok Pet reads Claude's usage from a small mod for Claude Code, which saves your plan's",
       "usage after each reply, as Claude reports it: how much of the weekly limit you've used,",
       'and when the week resets.',
       '',
-      'It puts the mod in ~/.claude-pet and adds two entries to the "env" of ~/.claude/settings.json',
+      'It puts the mod in ~/.ttokttok-pet and adds two entries to the "env" of ~/.claude/settings.json',
       `${here ? '' : `in ${elsewhere.join(', ')} `}(a backup is kept). Sessions you start from now on use it.`,
       '',
-      'Tray menu → Live Claude usage changes this later.',
+      'Tray menu → Sources → Live Claude usage changes this later.',
     ].join('\n'),
     buttons: ['Set it up', 'Not now'],
     defaultId: 0,
@@ -743,13 +1160,13 @@ async function offerEtlConnection() {
 
   const answer = await dialog.showMessageBox({
     type: 'question',
-    title: 'Claude Pet',
+    title: 'Ttokttok Pet',
     message: 'eTL에 연결할까요?',
     detail: [
       '서울대 eTL을 쓰는 경우 과제 마감과 공지를 펫 알림으로 받을 수 있습니다.',
       '연결을 누르면 토큰 입력 창이 열립니다. eTL의 계정 → 설정 → 새 액세스 토큰에서 발급해 붙여 넣으면 됩니다.',
       '토큰은 이 컴퓨터에 암호화해 저장됩니다.',
-      '지금 건너뛰어도 트레이 메뉴의 eTL에서 언제든 연결할 수 있습니다.',
+      '지금 건너뛰어도 트레이 메뉴의 Sources → eTL에서 언제든 연결할 수 있습니다.',
     ].join('\n'),
     buttons: ['eTL 연결', '나중에'],
     defaultId: 1,
@@ -793,6 +1210,7 @@ async function checkWsl() {
     wslAsked.add(distro);
     const r = await wslInstaller(distro, { action: 'status', windowsDir: localMod.dir });
     if (!r.ok) continue;
+    await moveWsl(distro, r.legacy === true);
     rememberWsl(distro, r.enabled);
     const had = settings.get('claudeCodeWsl')?.[distro] === true;
     if (r.claude === had) continue;
@@ -802,10 +1220,52 @@ async function checkWsl() {
   return found;
 }
 
+// WSL's VS Code and terminal sessions: the trackers read each distro's ~/.claude/projects and
+// ~/.codex/sessions from here (\\wsl.localhost\…), but only while the distro runs, which this
+// checks every 15 s. Reading a stopped distro's files would start it, and with the pet reading
+// every second it would never stop again (SessionTracker.setCliRoots, CodexTracker.setChatRoots).
+const WSL_CHATS_MS = 15_000;
+
+async function syncWslChats() {
+  if (process.platform !== 'win32' || DEMO) return;
+  const running = await runningWslDistros();
+  for (const distro of running) {
+    if (wslHomes.has(distro)) continue;
+    const home = await wslHome(distro);
+    if (home) wslHomes.set(distro, home);
+  }
+  wslRunning = running;
+  const key = JSON.stringify(wslRoots(''));
+  if (key === wslChatsKey) return;
+  wslChatsKey = key;
+  tracker?.setCliRoots?.(wslRoots('.claude\\projects'));
+  codex?.setChatRoots(wslRoots('.codex\\sessions'));
+}
+
+// `folder` (Windows-style) in the home folder of each WSL distro seen running, and whether it runs.
+function wslRoots(folder) {
+  return [...wslHomes].map(([distro, home]) => ({
+    root: `\\\\wsl.localhost\\${distro}${home.replace(/\//g, '\\')}\\${folder}`,
+    machineKey: `wsl:${distro}`,
+    machine: distro,
+    active: wslRunning.has(distro),
+  }));
+}
+
+// A running distro's home folder, e.g. /home/me; null if it won't say.
+function wslHome(distro) {
+  return new Promise((resolve) => {
+    execFile('wsl.exe', ['-d', distro, '-e', 'sh', '-c', 'printf %s "$HOME"'], { windowsHide: true, timeout: 10_000 }, (err, stdout) => {
+      const home = String(stdout || '').trim();
+      resolve(!err && /^\/[^\\]*$/.test(home) ? home.replace(/\/+$/, '') : null);
+    });
+  });
+}
+
 function trayTooltip() {
-  if (!sessions.length) return 'Claude Pet: all quiet';
+  if (!sessions.length) return 'Ttokttok Pet: all quiet';
   const top = sessions[0];
-  return `Claude Pet: ${top.badge || STATUS_LABEL[top.status]} · ${top.title}`.slice(0, 120);
+  return `Ttokttok Pet: ${top.badge || STATUS_LABEL[top.status]} · ${top.title}`.slice(0, 120);
 }
 
 // Claude's claude://code/continue?session=… links sit behind a server-side flag and quietly
@@ -813,9 +1273,19 @@ function trayTooltip() {
 // desktop session (local_<uuid>), it opens that session as-is, SSH sessions included. Only
 // sessions that are still in the desktop index get a link, so resume never imports a copy.
 function sessionUrl(s) {
-  if (s?.kind === 'codex') return s.url || null;   // codex://threads/<id>?hostId=…
+  // codex://threads/<id>?hostId=…, or the VS Code extension's vscode://openai.chatgpt/local/<id>
+  if (s?.kind === 'codex') return s.url || null;
   if (s?.kind === 'etl' && s.assistant) return etl?.assistantLinks().at(-1) || null;   // the eTL chat
   if (s?.kind === 'etl') return ETL_LINK.test(s.url || '') ? s.url : null;
+  if (s?.kind === 'web') {
+    const url = webchats?.target(s.id)?.url || '';
+    return WEB_LINK.test(url) ? url : null;
+  }
+  // Claude Code in VS Code opens its session itself, in the window that runs it (a WSL or SSH
+  // window for a session there); a terminal session has nothing to open.
+  if (s?.kind === 'cli') {
+    return s.client === 'vscode' && CLI_SESSION_RE.test(s.sessionId || '') ? `vscode://anthropic.claude-code/open?session=${s.sessionId}` : null;
+  }
   const m = DESKTOP_SESSION_RE.exec(s?.hostSessionId || '');
   if (!m || !tracker.desktop?.has(s.hostSessionId)) return null;
   return `claude://resume?session=${m[1]}`;
@@ -843,7 +1313,7 @@ function focusHandoffWindow() {
       resizable: false,
       skipTaskbar: true,
       show: false,
-      title: 'Claude Pet focus helper',
+      title: 'Ttokttok Pet focus helper',
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
   }
@@ -853,33 +1323,90 @@ function focusHandoffWindow() {
   handoffWin.focus();
 }
 
-function openApp(url) {
-  if (process.platform === 'win32') {
-    clearTimeout(handoffTimer);
-    focusHandoffWindow();
-    handoffTimer = setTimeout(() => {
-      if (!handoffWin || handoffWin.isDestroyed()) return;
-      if (DEBUG_OPEN_AFTER_MS) log(`debug: hiding focus helper (focused=${handoffWin.isFocused()})`);
-      handoffWin.hide();
-    }, FOREGROUND_HANDOFF_MS);
-  }
+function handOffFocus() {
+  if (process.platform !== 'win32') return;
+  clearTimeout(handoffTimer);
+  focusHandoffWindow();
+  handoffTimer = setTimeout(() => {
+    if (!handoffWin || handoffWin.isDestroyed()) return;
+    if (DEBUG_OPEN_AFTER_MS) log(`debug: hiding focus helper (focused=${handoffWin.isFocused()})`);
+    handoffWin.hide();
+  }, FOREGROUND_HANDOFF_MS);
+}
+
+// `handoff: false` for a click in folder mode's sidebar, which has the focus to hand on itself.
+function openApp(url, { handoff = true } = {}) {
+  if (handoff) handOffFocus();
   shell.openExternal(url).catch((err) => log(`could not open ${url.split(':')[0]}:`, err.message));
   if (url.startsWith('codex:')) raiseCodexWindow();   // a reopened Codex window stays behind otherwise
 }
 
-function openSession(id) {
-  const s = sessions.find((x) => x.id === id);
-  if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(openApp));   // the eTL chat
+// A web chat opens in the tab that shows it: the extension brings the tab forward in its window,
+// and the pet brings that window to the front. With no such tab left, its address opens instead.
+function openWebChat(s, { handoff = true } = {}) {
+  const target = webchats?.target(s.id);
+  if (target?.tab && webchats.focus(s.id)) {
+    if (handoff) handOffFocus();
+    raiseBrowserWindow({ hostPid: target.tab.hostPid, title: target.tab.rawTitle });
+  } else {
+    const url = sessionUrl(s);
+    if (!url) return false;
+    openApp(url, { handoff });
+  }
+  return true;
+}
+
+// A VS Code extension's link goes to the VS Code window you used last, and the extension there
+// knows only its own machine's chats. So the window for the chat's machine comes to the front
+// first (raise.js). With none open, that machine's folder opens in VS Code instead, and a second
+// click, once it's connected, opens the chat.
+async function openInVsCode(s, url, { handoff }) {
+  if (handoff) handOffFocus();
+  const where = vsCodePlace(s, { connections: codex?.connections ?? [], sshHosts: sshConfigHosts() });
+  const raised = await raiseVsCodeWindow({ marks: where.marks });
+  if (raised === false && where.folder) {
+    log(`VS Code: no window for ${where.marks.join(' or ') || 'this PC'}; opening the folder there`);
+    shell.openExternal(where.folder).catch((err) => log('could not open vscode:', err.message));
+    return;
+  }
+  if (raised) await new Promise((resolve) => setTimeout(resolve, 300));   // VS Code notes which window is in front
+  shell.openExternal(url).catch((err) => log('could not open vscode:', err.message));
+}
+
+// A bubble's session, or (from folder mode) any session in the full lists. `fill`: maximize the
+// app beside the sidebar.
+function openSession(id, { handoff = true, fill = false } = {}) {
+  const s = [sessions, claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((x) => x.id === id), null);
+  const open = (url) => openApp(url, { handoff });
+  if (s?.kind === 'etl' && s.assistant) return Boolean(etl?.openAssistant(open));   // the eTL chat
+  if (s?.kind === 'web') return openWebChat(s, { handoff });
   const url = s && sessionUrl(s);
   if (!url) return false;
-  openApp(url);
-  // A finished session or a one-off notice is done with once opened; a class bubble
-  // (`keepOnOpen`, etl/timetable.js) stays until the class ends or its × is clicked.
-  if (s.status !== 'running' && s.status !== 'background' && !s.keepOnOpen) {
+  if (url.startsWith('vscode://')) openInVsCode(listedSession(id) ?? s, url, { handoff });
+  else open(url);
+  if (fill && (s.kind === 'desktop' || (s.kind === 'codex' && !s.client))) maximizeApps('open', s.kind === 'codex' ? 'codex' : 'claude');
+  // Opening a session doesn't settle it: Ready, Error and Needs you stay until you mark it done
+  // (its ×, or the sidebar's Mark as done) or send it a message. A one-off eTL notice is done with
+  // once opened; a class bubble (`keepOnOpen`, etl/timetable.js) stays until the class ends or its
+  // × is clicked.
+  if (s.kind === 'etl' && s.status !== 'running' && s.status !== 'background' && s.status !== 'idle' && !s.keepOnOpen) {
     trackerFor(s.id)?.dismiss(s.id);
     persistDismissed();
   }
   return true;
+}
+
+// From when on a look at a session no longer counts as done with it: set the first time this
+// version runs, so what was settled before stays settled.
+function readyFrom() {
+  if (!settings.get('readyFrom')) settings.set({ readyFrom: Date.now() });
+  return settings.get('readyFrom');
+}
+
+// The same for VS Code and terminal sessions, which were Ready for only a few minutes before.
+function cliReadyFrom() {
+  if (!settings.get('cliReadyFrom')) settings.set({ cliReadyFrom: Date.now() });
+  return settings.get('cliReadyFrom');
 }
 
 function persistDismissed() {
@@ -967,6 +1494,10 @@ function registerIpc() {
   });
   ipcMain.on('pet:activate', (e, id) => {
     if (!fromPet(e)) return;
+    if (gettingStarted?.isPractice(id)) {   // the page has the pet wave; nothing to open
+      gettingStarted.tried('click');
+      return;
+    }
     if (typeof id === 'string') {
       if (!openSession(id)) wake();     // terminal sessions have nothing to open
       return;
@@ -977,6 +1508,11 @@ function registerIpc() {
   });
   ipcMain.on('pet:dismiss', (e, id) => {
     if (!fromPet(e) || typeof id !== 'string') return;
+    if (gettingStarted?.isPractice(id)) {
+      gettingStarted.tried('dismiss');
+      gettingStarted.remove(id);
+      return;
+    }
     trackerFor(id)?.dismiss(id);
     persistDismissed();
   });
@@ -990,8 +1526,99 @@ function registerIpc() {
   ipcMain.on('pet:context-menu', (e, p) => {
     if (!fromPet(e)) return;
     const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
+    gettingStarted?.tried('menu');
     tray?.popUpContextMenu(buildMenu(), position);
   });
+
+  // Folder mode's sidebar.
+  const fromFolder = (event) => Boolean(folder?.owns(event.sender));
+  // The sidebar's folding, folder order and text size, kept in settings.json. The page asks as it
+  // starts, before it draws the tree.
+  ipcMain.on('folder:prefs', (e) => {
+    e.returnValue = fromFolder(e)
+      ? {
+        fold: settings.get('folderFold') || {}, order: settings.get('folderOrder') || {}, zoom: settings.get('folderZoom') ?? null,
+        edge: folder.edge,   // the page puts its drag edge and border on the inner side
+      }
+      : null;
+  });
+  ipcMain.on('folder:save-prefs', (e, p) => {
+    if (!fromFolder(e) || !p || typeof p !== 'object') return;
+    const patch = {};
+    if (isMapOf(p.fold, (v) => typeof v === 'boolean')) patch.folderFold = p.fold;
+    if (isMapOf(p.order, (v) => Array.isArray(v) && v.every((k) => typeof k === 'string'))) patch.folderOrder = p.order;
+    if (Number.isFinite(p.zoom) && p.zoom >= 0.5 && p.zoom <= 3) patch.folderZoom = p.zoom;
+    if (Object.keys(patch).length) settings.set(patch);
+  });
+  ipcMain.on('folder:ready', (e) => {
+    if (!fromFolder(e)) return;
+    treeKey = '';
+    sendTree();
+    sendPet();
+    sendMotion();
+    sendSessions();
+    sendUsage(true);
+  });
+  // A click in the sidebar has the focus to hand on; Ctrl+Tab (`via` 'key') comes while Claude
+  // or Codex is in front, so the pet takes the focus first, as a click on the floating pet does.
+  ipcMain.on('folder:open', (e, id, via) => {
+    if (!fromFolder(e) || typeof id !== 'string') return;
+    if (gettingStarted?.isPractice(id)) {   // Ctrl+Tab counts where it's pressed (onStep)
+      if (via !== 'key') gettingStarted.tried('click');
+      return;
+    }
+    if (!openSession(id, { handoff: via === 'key', fill: true })) log('folder: nothing to open for', id);
+  });
+  ipcMain.on('folder:pet-click', (e) => {
+    if (!fromFolder(e)) return;
+    const url = mainAppLink();
+    if (!url) return;
+    openApp(url, { handoff: false });
+    maximizeApps('open', url === APP_LINK.codex ? 'codex' : 'claude');
+  });
+  // Dragging the sidebar's edge: the window follows the cursor, and the drop docks it at the new
+  // width; a double-click goes back to the default.
+  ipcMain.on('folder:resize', (e, phase) => {
+    if (!fromFolder(e)) return;
+    if (phase === 'reset') settings.set({ folderWidth: folder.setWidth(DEFAULTS.folderWidth) });
+    else if (phase === 'end') settings.set({ folderWidth: folder.setWidth(folder.widthAtCursor()) });
+    else if (phase === 'move') folder.preview(folder.widthAtCursor());
+  });
+  ipcMain.on('folder:context-menu', (e, p) => {
+    if (!fromFolder(e)) return;
+    const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
+    const target = p?.target;
+    if (target?.kind === 'session' && gettingStarted?.isPractice(target.id)) {
+      gettingStarted.tried('rowMenu');
+      tray?.popUpContextMenu(practiceRowMenu(target.id), position);
+      return;
+    }
+    const menu = rowMenu(target);
+    if (!menu) gettingStarted?.tried('menu');
+    tray?.popUpContextMenu(menu ?? buildMenu(), position);
+  });
+}
+
+// Light or dark, for every page of the pet's (the sidebar, the bubbles, the eTL window). The
+// pages' own CSS goes by prefers-color-scheme, which follows this.
+const THEMES = [
+  { label: 'System (Windows app mode)', value: 'system' },
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+];
+
+function themeOf() {
+  const theme = settings.get('theme');
+  return THEMES.some((t) => t.value === theme) ? theme : 'system';
+}
+
+function applyTheme() {
+  nativeTheme.themeSource = themeOf();
+}
+
+// A plain object whose values all pass `ok`.
+function isMapOf(value, ok) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(ok);
 }
 
 function isPoint(p) {
@@ -1013,35 +1640,154 @@ function applyLoginFlag(argv) {
   log(`start at login: ${app.getLoginItemSettings(loginItemOptions()).openAtLogin ? 'on' : 'off'}`);
 }
 
+// `--mode=pet` / `--mode=folder` switch the mode, as the tray menu does (also when the pet is
+// already running: starting it again hands the flag over). Returns whether there was one.
+function applyModeFlag(argv) {
+  const flag = argv.find((a) => a.startsWith('--mode='));
+  if (!flag) return false;
+  if (settings.get('mode') === flag.slice('--mode='.length)) setVisible(true);
+  else setMode(flag.slice('--mode='.length));
+  return true;
+}
+
 function buildMenu() {
   const items = [];
-  items.push({ label: sessions.length ? `Sessions (${sessions.length} active)` : 'No active sessions', enabled: false });
-  const tags = { cli: ' (terminal)', codex: ' (Codex)', etl: ' (eTL)' };
-  for (const s of sessions.slice(0, 8)) {
-    items.push({
-      label: `${s.badge || STATUS_LABEL[s.status]} · ${truncate(s.title, 42)}${tags[s.kind] || ''}`,
-      enabled: Boolean(sessionUrl(s)),
-      click: () => openSession(s.id),
-    });
-  }
-  for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
-  items.push({ type: 'separator' });
+  const folderMode = settings.get('mode') === 'folder';
+  // The sessions themselves are in the bubbles and the sidebar. The weekly limits in words are
+  // in the sidebar meter's hover text; the floating pet's meter has none, so they're here.
+  if (!folderMode) for (const u of currentUsage()) items.push({ label: usageLabel(u), enabled: false });
+  if (items.length) items.push({ type: 'separator' });
   items.push({
-    label: 'Show pet',
+    label: folderMode ? 'Show sidebar' : 'Show pet',
     type: 'checkbox',
     checked: settings.get('visible'),
     accelerator: settings.get('shortcut'),
     click: (mi) => setVisible(mi.checked),
   });
   items.push({
-    label: 'Show activity bubbles',
-    type: 'checkbox',
-    checked: settings.get('showActivity'),
-    click: (mi) => {
-      settings.set({ showActivity: mi.checked });
-      sendSessions();
-    },
+    label: 'Mode',
+    submenu: [
+      { label: 'Floating pet', type: 'radio', checked: !folderMode, click: () => setMode('pet') },
+      { label: 'Folder sidebar (every session, by machine and folder)', type: 'radio', checked: folderMode, click: () => setMode('folder') },
+    ],
   });
+  // The sessions you hid from the sidebar, to bring back (one whose session is gone isn't listed).
+  if (folderMode) {
+    const hidden = Object.keys(currentHidden())
+      .map((id) => [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null))
+      .filter(Boolean);
+    if (hidden.length) {
+      items.push({
+        label: `Hidden from the sidebar (${hidden.length})`,
+        submenu: [
+          ...hidden.map((s) => ({ label: truncate(s.title, 42), click: () => setHidden([s.id], false) })),
+          { type: 'separator' },
+          { label: 'Show them all', click: () => setHidden(null) },
+        ],
+      });
+    }
+  }
+  items.push({ type: 'separator' }, appearanceMenu(folderMode));
+  const sources = sourcesMenu();
+  if (sources) items.push(sources);
+  items.push({ type: 'separator' });
+  items.push({
+    label: 'Start at login',
+    type: 'checkbox',
+    checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
+    click: (mi) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: mi.checked }),
+  });
+  if (!DEMO) {
+    items.push({
+      label: updateLabel(),
+      enabled: !updateBusy,
+      click: () => (update ? offerUpdate() : checkUpdates()),
+    });
+  }
+  if (gettingStarted) items.push({ label: 'Getting started…', click: () => gettingStarted.open() });
+  items.push({ type: 'separator' });
+  if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
+  if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
+  items.push({ label: 'Restart Ttokttok Pet', click: restart });
+  items.push({ label: 'Quit Ttokttok Pet', click: () => app.quit() });
+  return Menu.buildFromTemplate(items);
+}
+
+// How the pet looks. The bubbles and the position are the floating pet's, so folder mode leaves
+// them out; there, Size is the pet's at the foot of the sidebar.
+function appearanceMenu(folderMode) {
+  const items = [];
+  items.push({
+    label: 'Pet',
+    submenu: [
+      ...pets.map((p) => ({
+        label: `${p.displayName}${p.source === 'codex' ? '  (from Codex)' : ''}${p.version === 1 ? '  (v1)' : ''}`,
+        type: 'radio',
+        checked: p.key === currentPet?.key,
+        click: () => selectPet(p.key),
+      })),
+      { type: 'separator' },
+      { label: 'Open my pets folder', click: openPetsFolder },
+      { label: 'Reload pets', click: () => { loadPets(); selectPet(currentPet?.key); } },
+    ],
+  });
+  const sizeKey = folderMode ? 'folderPetScale' : 'scale';
+  items.push({
+    label: 'Size',
+    submenu: SCALES.map((s) => ({
+      label: s.label,
+      type: 'radio',
+      checked: settings.get(sizeKey) === s.value,
+      click: () => {
+        if (folderMode) {
+          settings.set({ folderPetScale: s.value });
+          sendPet();
+        } else {
+          resizeInPlace(() => settings.set({ scale: s.value }));
+        }
+      },
+    })),
+  });
+  items.push({
+    label: 'Theme',
+    submenu: THEMES.map((t) => ({
+      label: t.label,
+      type: 'radio',
+      checked: themeOf() === t.value,
+      click: () => {
+        settings.set({ theme: t.value });
+        applyTheme();
+      },
+    })),
+  });
+  // Which monitor the sidebar docks on, and which of its edges.
+  if (folderMode) {
+    const on = folderDisplay().id;
+    const edge = settings.get('folderEdge');
+    items.push({
+      label: 'Sidebar position',
+      submenu: [
+        ...displayChoices(screen.getAllDisplays(), screen.getPrimaryDisplay().id).map((d) => ({
+          label: d.label, type: 'radio', checked: d.id === on, click: () => placeSidebar({ display: d.id }),
+        })),
+        { type: 'separator' },
+        { label: 'Left edge', type: 'radio', checked: edge !== 'right', click: () => placeSidebar({ edge: 'left' }) },
+        { label: 'Right edge', type: 'radio', checked: edge === 'right', click: () => placeSidebar({ edge: 'right' }) },
+      ],
+    });
+  }
+  items.push({ type: 'separator' });
+  if (!folderMode) {
+    items.push({
+      label: 'Show activity bubbles',
+      type: 'checkbox',
+      checked: settings.get('showActivity'),
+      click: (mi) => {
+        settings.set({ showActivity: mi.checked });
+        sendSessions();
+      },
+    });
+  }
   items.push({
     label: 'Show weekly limits',
     type: 'checkbox',
@@ -1051,7 +1797,34 @@ function buildMenu() {
       sendUsage();
     },
   });
-  if (localMod && liveUsageWanted()) items.push(liveUsageMenu());
+  items.push({
+    label: 'Animate even with Windows animation effects off',
+    type: 'checkbox',
+    checked: settings.get('alwaysAnimate') === true,
+    click: (mi) => {
+      settings.set({ alwaysAnimate: mi.checked });
+      sendMotion();
+    },
+  });
+  if (!folderMode) {
+    items.push({ type: 'separator' });
+    items.push({
+      label: 'Reset position',
+      click: () => {
+        layout = 'above';
+        petPos = clampPet(defaultPosition());
+        finishMove();
+        wake();
+      },
+    });
+  }
+  return { label: 'Appearance', submenu: items };
+}
+
+// What the pet watches besides Claude: Codex, live usage, web chats and eTL. Null when none of
+// them is around.
+function sourcesMenu() {
+  const items = [];
   if (codexInstalled() && !DEMO) {
     items.push({
       label: 'Show Codex threads',
@@ -1074,67 +1847,10 @@ function buildMenu() {
       },
     });
   }
+  if (localMod && liveUsageWanted()) items.push(liveUsageMenu());
+  if (webchats) items.push(webchats.menu());
   if (etl) items.push(etl.menu());
-  items.push({
-    label: 'Pet',
-    submenu: [
-      ...pets.map((p) => ({
-        label: `${p.displayName}${p.source === 'codex' ? '  (from Codex)' : ''}${p.version === 1 ? '  (v1)' : ''}`,
-        type: 'radio',
-        checked: p.key === currentPet?.key,
-        click: () => selectPet(p.key),
-      })),
-      { type: 'separator' },
-      { label: 'Open my pets folder', click: openPetsFolder },
-      { label: 'Reload pets', click: () => { loadPets(); selectPet(currentPet?.key); } },
-    ],
-  });
-  items.push({
-    label: 'Animate even with Windows animation effects off',
-    type: 'checkbox',
-    checked: settings.get('alwaysAnimate') === true,
-    click: (mi) => {
-      settings.set({ alwaysAnimate: mi.checked });
-      sendMotion();
-    },
-  });
-  items.push({
-    label: 'Size',
-    submenu: SCALES.map((s) => ({
-      label: s.label,
-      type: 'radio',
-      checked: settings.get('scale') === s.value,
-      click: () => resizeInPlace(() => settings.set({ scale: s.value })),
-    })),
-  });
-  items.push({
-    label: 'Reset position',
-    click: () => {
-      layout = 'above';
-      petPos = clampPet(defaultPosition());
-      finishMove();
-      wake();
-    },
-  });
-  items.push({
-    label: 'Start at login',
-    type: 'checkbox',
-    checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
-    click: (mi) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: mi.checked }),
-  });
-  if (!DEMO) {
-    items.push({
-      label: updateLabel(),
-      enabled: !updateBusy,
-      click: () => (update ? offerUpdate() : checkUpdates()),
-    });
-  }
-  items.push({ type: 'separator' });
-  if (claudeInstalled()) items.push({ label: 'Open Claude', click: () => openApp(APP_LINK.claude) });
-  if (codexInstalled()) items.push({ label: 'Open Codex', click: () => openApp(APP_LINK.codex) });
-  items.push({ label: 'Restart Claude Pet', click: restart });
-  items.push({ label: 'Quit Claude Pet', click: () => app.quit() });
-  return Menu.buildFromTemplate(items);
+  return items.length ? { label: 'Sources', submenu: items } : null;
 }
 
 // Starts a fresh pet as this one exits. The single-instance lock is let go first, so the new
@@ -1161,7 +1877,7 @@ function createTray() {
   tray.on('right-click', show);
 }
 
-// Debug aid: CLAUDE_PET_CAPTURE_DIR=<dir> saves a PNG of the pet window after each change.
+// Debug aid: TTOKTTOK_PET_CAPTURE_DIR=<dir> saves a PNG of the pet window after each change.
 let captureCount = 0;
 function debugCapture(list) {
   const n = ++captureCount;
@@ -1183,7 +1899,7 @@ function truncate(s, n) {
 // ---------------------------------------------------------------- updates (see updater.js)
 
 const updateResultFile = () => path.join(app.getPath('userData'), 'update-result.json');
-const updateBox = (options) => dialog.showMessageBox({ title: 'Claude Pet', buttons: ['OK'], ...options });
+const updateBox = (options) => dialog.showMessageBox({ title: 'Ttokttok Pet', buttons: ['OK'], ...options });
 
 function updateLabel() {
   if (updateBusy === 'checking') return 'Checking for updates…';
@@ -1205,10 +1921,10 @@ async function checkUpdates() {
   if (update) return offerUpdate();
   if (found.status === 'current') {
     const at = app.isPackaged ? `Version ${app.getVersion()}.` : `Version ${app.getVersion()} (${found.head.slice(0, 7)}).`;
-    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: at });
+    return updateBox({ type: 'info', message: 'Ttokttok Pet is up to date.', detail: at });
   }
   if (found.status === 'none') {
-    return updateBox({ type: 'info', message: 'Claude Pet is up to date.', detail: `Version ${app.getVersion()}. ${found.message}` });
+    return updateBox({ type: 'info', message: 'Ttokttok Pet is up to date.', detail: `Version ${app.getVersion()}. ${found.message}` });
   }
   return updateBox({ type: 'warning', message: "Couldn't check for updates.", detail: found.message });
 }
@@ -1221,7 +1937,7 @@ async function offerRelease() {
   try {
     answer = await updateBox({
       type: 'question',
-      message: `Claude Pet ${version} is available to download.`,
+      message: `Ttokttok Pet ${version} is available to download.`,
       detail: [
         ...(changes.length ? ["What's new:", ...changes.map((line) => `• ${line}`), ''] : []),
         `This copy (${app.getVersion()}) was installed from a download, so it can't update itself. Get the new ` +
@@ -1247,7 +1963,7 @@ async function offerUpdate() {
   try {
     answer = await updateBox({
       type: 'question',
-      message: 'A new version of Claude Pet is available.',
+      message: 'A new version of Ttokttok Pet is available.',
       detail: [
         "What's new:",
         ...changes.map((subject) => `• ${subject}`),
@@ -1289,25 +2005,98 @@ async function showUpdateResult() {
     return;   // no update was run
   }
   if (result.ok) {
-    await updateBox({ type: 'info', message: 'Claude Pet was updated.', detail: `Now at ${String(result.to).slice(0, 7)}.` });
+    await updateBox({ type: 'info', message: 'Ttokttok Pet was updated.', detail: `Now at ${String(result.to).slice(0, 7)}.` });
   } else {
     await updateBox({
       type: 'warning',
       message: "The update didn't work.",
-      detail: `${result.message}\n\nClaude Pet is still on the old version. The log has the details.`,
+      detail: `${result.message}\n\nTtokttok Pet is still on the old version. The log has the details.`,
     });
   }
 }
 
+// ---------------------------------------------------------------- an older install (see migrate.js)
+
+// An older install kept its settings in %APPDATA%\<previous name>. The folder comes along whole
+// (the eTL token's key is in its Local State), copied if a browser's web chats host holds it. If
+// even that fails, this run stays there and the next one tries again.
+function userDataDir() {
+  const dir = path.join(app.getPath('appData'), 'ttokttok-pet');
+  const legacy = path.join(app.getPath('appData'), previous.dir);
+  try {
+    userDataNote = moveFolder(legacy, dir);
+    return dir;
+  } catch (err) {
+    userDataNote = `couldn't move ${legacy} (${err.code || err.message})`;
+    return fs.existsSync(dir) ? dir : legacy;
+  }
+}
+
+// The rest of the older install's, once: Start at login under its name, and its home folder
+// (LocalMod.adoptLegacy). Its copy of the mod stays until the WSL distros set up with it have
+// moved over too (moveWsl).
+function adoptPrevious() {
+  if (userDataNote) log(userDataNote);
+  moveLoginItem();
+  try {
+    const moved = localMod.adoptLegacy();
+    if (!moved.length) return;
+    log(`moved from ~/${previous.homeDir} to ~/.ttokttok-pet: ${moved.join(', ')}`);
+    if (moved.includes('mod') && settings.get('claudeModWslToMove') == null) {
+      const wsl = settings.get('claudeModWsl');
+      settings.set({ claudeModWslToMove: Object.keys(wsl).filter((d) => wsl[d]) });
+    }
+    if (!settings.get('claudeModWslToMove')?.length) localMod.dropLegacy();
+  } catch (err) {
+    log(`couldn't move ~/${previous.homeDir}:`, err.message);
+  }
+}
+
+// The older install started at login under its own name; if it did, this pet does in its place.
+function moveLoginItem() {
+  if (process.platform !== 'win32') return;
+  const run = ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', previous.loginItem];
+  try {
+    execFileSync('reg.exe', ['query', ...run], { stdio: 'ignore', windowsHide: true });
+  } catch {
+    return;   // not there
+  }
+  try {
+    execFileSync('reg.exe', ['delete', ...run, '/f'], { stdio: 'ignore', windowsHide: true });
+    app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: true });
+    log(`Start at login: ${previous.loginItem} replaced`);
+  } catch (err) {
+    log(`couldn't replace Start at login's ${previous.loginItem}:`, err.message);
+  }
+}
+
+// A distro still loading the older install's copy of the mod loads the new one from now on. Once
+// none is left to move, that copy goes.
+async function moveWsl(distro, legacy) {
+  const left = settings.get('claudeModWslToMove');
+  if (!legacy && !left?.includes(distro)) return;
+  if (legacy) {
+    const r = await wslInstaller(distro, { action: 'update', windowsDir: localMod.dir });
+    if (!r.ok) {
+      log(`mod move in WSL ${distro} failed: ${r.error}`);
+      return;
+    }
+    log(`mod moved to ~/.ttokttok-pet in WSL ${distro}`);
+  }
+  const rest = (left ?? []).filter((d) => d !== distro);
+  settings.set({ claudeModWslToMove: rest });
+  if (!rest.length) localMod.dropLegacy();
+}
+
 // ---------------------------------------------------------------- lifecycle
 
-// A downloaded copy is named "Claude Pet", which would give it its own %APPDATA%\Claude Pet.
-// Settings, pets and the log stay where a clone keeps them (%APPDATA%\claude-pet, and
-// ~/Library/Logs/claude-pet on macOS), so going from one kind of install to the other loses
+// A downloaded copy is named "Ttokttok Pet", which would give it its own %APPDATA%\Ttokttok Pet.
+// Settings, pets and the log stay where a clone keeps them (%APPDATA%\ttokttok-pet, and
+// ~/Library/Logs/ttokttok-pet on macOS), so going from one kind of install to the other loses
 // nothing. Set before the single-instance lock, which lives in that folder too.
-app.setPath('userData', path.join(app.getPath('appData'), 'claude-pet'));
+app.setPath('userData', DEBUG_USER_DATA || userDataDir());
 app.setAppLogsPath(process.platform === 'darwin'
-  ? path.join(app.getPath('home'), 'Library', 'Logs', 'claude-pet')
+  ? path.join(app.getPath('home'), 'Library', 'Logs', 'ttokttok-pet')
   : path.join(app.getPath('userData'), 'logs'));
 
 if (!app.requestSingleInstanceLock()) {
@@ -1315,9 +2104,10 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_event, argv) => {
     applyLoginFlag(argv);
-    setVisible(true);
+    if (argv.includes('--getting-started')) gettingStarted?.open();
+    else if (!applyModeFlag(argv)) setVisible(true);
   });
-  app.setAppUserModelId('ClaudePet');
+  app.setAppUserModelId('TtokttokPet');
 
   app.whenReady().then(() => {
     settings = new Settings(path.join(app.getPath('userData'), 'settings.json'));
@@ -1328,32 +2118,58 @@ if (!app.requestSingleInstanceLock()) {
     }
     applyLoginFlag(process.argv);
     protocol.handle('pet', handleProtocol);
+    if (!DEMO) {
+      localMod = new LocalMod();
+      adoptPrevious();   // before loadPets: your own pets may still be in the older install's folder
+    }
     loadPets();
     const saved = settings.get('position');
     petPos = clampPet(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : defaultPosition());
     layout = 'above';
     layout = chooseLayout(petPos);
 
+    applyTheme();
     registerIpc();
     createTray();
+    // Each time the sidebar docks, the Claude and Codex windows are maximized beside it.
+    folder = new FolderWindow({
+      log, width: settings.get('folderWidth'), edge: settings.get('folderEdge'), onDocked: () => maximizeApps('all'),
+    });
+    // Taken while Claude, Codex (ChatGPT.exe) or the sidebar (this app) is in front.
+    stepKeys = new StepKeys({
+      apps: ['claude', 'chatgpt', path.parse(process.execPath).name],
+      onStep: (direction) => {
+        gettingStarted?.tried('step', direction);
+        folder.send('folder:step', direction);
+      },
+      globalShortcut,
+      log,
+    });
+    const modeFlag = process.argv.find((a) => a.startsWith('--mode='))?.slice('--mode='.length);
+    if (modeFlag === 'pet' || modeFlag === 'folder') settings.set({ mode: modeFlag });
     createWindow();
+    if (settings.get('mode') === 'folder') applyMode();
     if (!DEMO) showUpdateResult();
 
     tracker = DEMO
       ? new DemoTracker()
       : new SessionTracker({
-        ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {}, seen: settings.get('seen') || {},
+        ...defaultPaths(app.getPath('appData')), dismissed: settings.get('dismissed') || {},
+        readyFrom: readyFrom(),
+        cliReadyFrom: cliReadyFrom(),
       });
     tracker.on('change', (list) => {
       claudeSessions = list;
       mergeSessions();
     });
-    tracker.on('seen', () => settings.set({ seen: tracker.seenSnapshot() }));
+    tracker.on('list', (list) => {
+      claudeAll = list;
+      sendTree();
+    });
     tracker.on('error', (err) => log('tracker error:', err?.message || err));
     if (DEMO) {
       tracker.on('usage', ({ claude, codex }) => setUsage({ claude: claude ? [claude] : [], codex }));
     } else {
-      localMod = new LocalMod();
       updateLocalMod();
       claudeUsage = new ClaudeUsage({
         usageFile: localMod.usageFile,
@@ -1362,7 +2178,11 @@ if (!app.requestSingleInstanceLock()) {
         watchHosts: settings.get('claudeUsageOverSsh'),
       });
       claudeUsage.on('change', (readings) => setUsage({ claude: readings }));
-      claudeUsage.on('hosts', updateHostMods);
+      claudeUsage.on('hosts', () => {
+        updateHostMods();
+        gettingStarted?.send();   // a host's mod turned up, or changed
+      });
+      claudeUsage.on('chats', (chats) => tracker.setRemoteChats?.(chats));
       claudeUsage.on('error', (err) => log('claude usage:', err?.message || err));
       claudeUsage.start();
       // once the desktop index (for WSL distros) and the SSH connections have been read
@@ -1377,16 +2197,26 @@ if (!app.requestSingleInstanceLock()) {
             .then((found) => found && offerLiveUsage())
             .catch((err) => log('WSL check:', err.message));
         }, WSL_CHECK_MS);
+        syncWslChats().catch((err) => log('WSL sessions:', err.message));
+        wslChatsTimer = setInterval(() => syncWslChats().catch((err) => log('WSL sessions:', err.message)), WSL_CHATS_MS);
       }, 8000);
     }
     tracker.start();
     startCodex();
     if (!DEMO) startEtl();
+    if (!DEMO) startWebChats();
+    if (!DEMO) {
+      startGettingStarted();
+      // A new install: Getting started has the eTL step, so the one-time eTL offer doesn't come too
+      // (the Claude usage offer waits for it to close). `--getting-started` opens it any time.
+      if (settings.firstRun) settings.set({ etlOnboardingOffered: true });
+      if (settings.firstRun || process.argv.includes('--getting-started')) gettingStarted.open();
+    }
     usageTimer = setInterval(sendUsage, 60_000);
 
     const shortcut = settings.get('shortcut');
     try {
-      if (shortcut && !globalShortcut.register(shortcut, () => setVisible(!win?.isVisible()))) {
+      if (shortcut && !globalShortcut.register(shortcut, () => setVisible(!settings.get('visible')))) {
         log(`shortcut ${shortcut} is taken by another app`);
       }
     } catch (err) {
@@ -1397,16 +2227,23 @@ if (!app.requestSingleInstanceLock()) {
       petPos = clampPet(petPos);
       finishMove();
     };
-    // Debug aid: CLAUDE_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
+    // Debug aid: TTOKTTOK_PET_DEBUG_OPEN_AFTER_MS=<ms> simulates clicking the pet.
     if (DEBUG_OPEN_AFTER_MS) {
       setTimeout(() => {
         log('debug: simulating a pet click (openApp)');
         openApp(mainAppLink() || APP_LINK.claude);
       }, DEBUG_OPEN_AFTER_MS);
     }
-    screen.on('display-metrics-changed', onDisplaysChanged);
-    screen.on('display-added', onDisplaysChanged);
-    screen.on('display-removed', onDisplaysChanged);
+    screen.on('display-metrics-changed', (_e, _display, changed) => {
+      onDisplaysChanged();
+      folder.onDisplayChanged(changed);
+    });
+    for (const event of ['display-added', 'display-removed']) {
+      screen.on(event, () => {
+        onDisplaysChanged();
+        folder.onDisplayChanged();
+      });
+    }
     log(`watching ${os.homedir()} sessions${codex ? ' and Codex threads' : ''}; press ${shortcut} to show/hide`);
   });
 
@@ -1419,13 +2256,23 @@ if (!app.requestSingleInstanceLock()) {
     // Keep running in the tray.
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (e) => {
+    // The sidebar's strip is given back before the pet goes, so maximized windows fill it again.
+    if (folder?.open && !quitting) {
+      e.preventDefault();
+      quitting = true;
+      folder.close().finally(() => app.quit());
+      return;
+    }
     clearInterval(usageTimer);
     clearInterval(wslTimer);
+    clearInterval(wslChatsTimer);
     stopMomentum();
+    stepKeys?.stop();
     tracker?.stop();
     codex?.stop();
     etl?.stop();
+    webchats?.stop();
     claudeUsage?.stop();
     if (settings) settings.save();
   });

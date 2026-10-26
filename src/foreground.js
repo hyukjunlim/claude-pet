@@ -55,7 +55,8 @@ public static class PetFront {
 `;
 
 // Emits 'front' (true when Claude's window is in front, false otherwise) whenever that changes,
-// and 'exit' when the helper stops.
+// 'name' (the process that owns the front window, as Windows names it) whenever that does, and
+// 'exit' when the helper stops.
 class ForegroundWatcher extends EventEmitter {
   constructor({ app = 'claude', spawnFn = spawn } = {}) {
     super();
@@ -76,8 +77,10 @@ class ForegroundWatcher extends EventEmitter {
     child.stdout.on('data', (chunk) => {
       buffer += chunk;
       for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
-        const inFront = buffer.slice(0, nl).trim().toLowerCase() === this.app;
+        const name = buffer.slice(0, nl).trim();
+        const inFront = name.toLowerCase() === this.app;
         buffer = buffer.slice(nl + 1);
+        this.emit('name', name);
         if (inFront !== this.inFront) {
           this.inFront = inFront;
           this.emit('front', inFront);

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { diff, priorityOf, resetTokenExpired, MAX_SEEN_ANNOUNCEMENTS, TOKEN_SETTINGS_URL } = require('../src/etl/watch');
+const { deadlineItems, diff, priorityOf, resetTokenExpired, MAX_SEEN_ANNOUNCEMENTS, TOKEN_SETTINGS_URL } = require('../src/etl/watch');
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -65,9 +65,13 @@ test('the first check records everything and only says it is connected, with the
   assert.deepEqual(state.announcementsSeen, ['77']);
 });
 
-test('the first check still reminds about a deadline that is already close', () => {
-  const { alerts } = diff(null, snap([assignment(1, { due_at: iso(T0 + 2 * HOUR) })]), T0);
-  assert.deepEqual(ids(alerts), ['etl:remind3h:100001:1', 'etl:connected']);
+test('a deadline already close at the first check gets its bubble from the records', () => {
+  const { state, alerts } = diff(null, snap([assignment(1, { due_at: iso(T0 + 2 * HOUR) })]), T0);
+  assert.deepEqual(ids(alerts), ['etl:connected']);
+  const [due] = deadlineItems(state.assignments, T0);
+  assert.equal(due.id, 'etl:deadline:100001:1');
+  assert.equal(due.status, 'failed', 'red: 3 hours or less, and not handed in');
+  assert.equal(due.badge, '마감 임박');
 });
 
 test('an assignment not seen before is announced as new, with its course and due time', () => {
@@ -110,62 +114,28 @@ test('a due time that is removed or added reads "없음" on that side', () => {
   assert.match(added.alerts.find((a) => a.id.startsWith('etl:due:')).detail, /없음 →/);
 });
 
-test('pushing a deadline back clears its reminders, so they come again for the new time', () => {
-  let state = baseline([assignment(1)]);
-  ({ state } = diff(state, snap([assignment(1, { due_at: iso(T0 + 20 * HOUR) })]), T0));
-  assert.deepEqual(state.assignments['100001:1'].reminded, ['24h']);
-  // Extended by two days: the 24-hour reminder is due again a day before the new time.
-  const extended = iso(T0 + 68 * HOUR);
-  ({ state } = diff(state, snap([assignment(1, { due_at: extended })]), T0 + HOUR));
-  assert.deepEqual(state.assignments['100001:1'].reminded, []);
-  const { alerts } = diff(state, snap([assignment(1, { due_at: extended })]), T0 + 46 * HOUR);
-  assert.deepEqual(ids(alerts), ['etl:remind24h:100001:1']);
-});
-
-test('moving a deadline earlier keeps the reminders already sent', () => {
-  let state = baseline([assignment(1, { due_at: iso(T0 + 20 * HOUR) })]);
-  ({ state } = diff(state, snap([assignment(1, { due_at: iso(T0 + 20 * HOUR) })]), T0));
-  ({ state } = diff(state, snap([assignment(1, { due_at: iso(T0 + 10 * HOUR) })]), T0));
-  assert.deepEqual(state.assignments['100001:1'].reminded, ['24h']);
-});
-
-test('the 24-hour, 3-hour and 1-hour reminders come once each', () => {
+test("a deadline's bubble shows from 24 hours before until the due time: yellow, red in its last 3 hours", () => {
   const a = assignment(1, { due_at: iso(T0 + 30 * HOUR) });
-  let state = baseline([a]);
-  let alerts;
-  ({ state, alerts } = diff(state, snap([a]), T0));
-  assert.deepEqual(alerts, []);                                      // 30 hours left
-  ({ state, alerts } = diff(state, snap([a]), T0 + 8 * HOUR));       // 22 hours left
-  assert.deepEqual(ids(alerts), ['etl:remind24h:100001:1']);
-  assert.equal(alerts[0].status, 'waiting');
-  assert.equal(alerts[0].badge, '마감 임박');
-  assert.equal(alerts[0].project, '22시간 0분 남음 · 공학 세미나');
-  assert.equal(alerts[0].expiresAt, T0 + 30 * HOUR);
-  ({ state, alerts } = diff(state, snap([a]), T0 + 9 * HOUR));
-  assert.deepEqual(alerts, []);
-  ({ state, alerts } = diff(state, snap([a]), T0 + 28 * HOUR));      // 2 hours left
-  assert.deepEqual(ids(alerts), ['etl:remind3h:100001:1']);
-  assert.equal(alerts[0].expiresAt, T0 + 30 * HOUR);
-  ({ state, alerts } = diff(state, snap([a]), T0 + 28.5 * HOUR));
-  assert.deepEqual(alerts, []);
-  ({ state, alerts } = diff(state, snap([a]), T0 + 29.5 * HOUR));    // 30 minutes left
-  assert.deepEqual(ids(alerts), ['etl:remind1h:100001:1']);
-  assert.equal(alerts[0].project, '30분 남음 · 공학 세미나');
-  assert.equal(alerts[0].dueAt, T0 + 30 * HOUR);
-  ({ state, alerts } = diff(state, snap([a]), T0 + 29.75 * HOUR));
-  assert.deepEqual(alerts, []);
+  const { assignments } = diff(baseline([a]), snap([a]), T0).state;
+  assert.deepEqual(deadlineItems(assignments, T0), [], '30 hours left');
+  const [due] = deadlineItems(assignments, T0 + 8 * HOUR);           // 22 hours left
+  assert.equal(due.id, 'etl:deadline:100001:1');
+  assert.equal(due.kind, 'etl');
+  assert.equal(due.status, 'waiting');
+  assert.equal(due.badge, '마감 임박');
+  assert.equal(due.title, '과제 1');
+  assert.equal(due.project, '미제출 · 22시간 0분 남음 · 공학 세미나');
+  assert.match(due.detail, /^공학 세미나 · 마감 /);
+  assert.equal(due.url, 'https://myetl.snu.ac.kr/courses/100001/assignments/1');
+  assert.equal(due.since, T0 + 6 * HOUR, 'since it came within 24 hours, the same each time');
+  assert.equal(due.expiresAt, T0 + 30 * HOUR);
+  assert.equal(due.dueAt, T0 + 30 * HOUR);
+  assert.equal(due.course, '공학 세미나');
+  assert.equal(deadlineItems(assignments, T0 + 28 * HOUR)[0].status, 'failed', '2 hours left');
+  assert.deepEqual(deadlineItems(assignments, T0 + 30 * HOUR), [], 'due');
 });
 
-test('a deadline first seen two hours out gets only the 3-hour reminder, and the 24-hour one counts as sent', () => {
-  const state = baseline([]);
-  const a = assignment(1, { due_at: iso(T0 + 2 * HOUR) });
-  const first = diff(state, snap([a]), T0);
-  assert.deepEqual(ids(first.alerts), ['etl:remind3h:100001:1', 'etl:new:100001:1']);
-  assert.deepEqual(first.state.assignments['100001:1'].reminded, ['24h', '3h']);
-  assert.deepEqual(diff(first.state, snap([a]), T0 + 0.5 * HOUR).alerts, []);
-});
-
-test('no reminders for work handed in, on paper, or past its due time', () => {
+test('handed in, the bubble stays, green; work handed in on paper shows gray; none without a due time', () => {
   const soon = iso(T0 + 2 * HOUR);
   const list = [
     assignment(1, { due_at: soon, submission: { workflow_state: 'submitted', submitted_at: iso(T0) } }),
@@ -174,17 +144,45 @@ test('no reminders for work handed in, on paper, or past its due time', () => {
     assignment(4, { due_at: iso(T0 - HOUR) }),
     assignment(5, { due_at: null }),
   ];
-  const state = baseline(list);
-  assert.deepEqual(diff(state, snap(list), T0).alerts, []);
+  const { assignments } = diff(baseline(list), snap(list), T0).state;
+  const shown = deadlineItems(assignments, T0).map((it) => [it.id, it.status, it.badge]);
+  assert.deepEqual(shown, [
+    ['etl:deadline:100001:1', 'review', '제출함'],
+    ['etl:deadline:100001:2', 'background', '오프라인'],
+    ['etl:deadline:100001:3', 'background', '오프라인'],
+  ]);
+  assert.equal(deadlineItems(assignments, T0)[0].project, '마감 2시간 0분 남음 · 공학 세미나');
 });
 
-test('assignments handed in are reported as resolved', () => {
-  const state = baseline([assignment(1), assignment(2)]);
-  const { resolved } = diff(state, snap([
+test('a closed deadline bubble stays out of sight until its hide time', () => {
+  const a = assignment(1, { due_at: iso(T0 + 10 * HOUR) });
+  const { assignments } = diff(baseline([a]), snap([a]), T0).state;
+  const hidden = { 'etl:deadline:100001:1': T0 + HOUR };
+  assert.deepEqual(deadlineItems(assignments, T0, hidden), []);
+  assert.deepEqual(ids(deadlineItems(assignments, T0 + HOUR, hidden)), ['etl:deadline:100001:1']);
+});
+
+test('pushing a deadline back moves its bubble with it', () => {
+  let state = baseline([assignment(1)]);
+  ({ state } = diff(state, snap([assignment(1, { due_at: iso(T0 + 20 * HOUR) })]), T0));
+  assert.deepEqual(ids(deadlineItems(state.assignments, T0)), ['etl:deadline:100001:1']);
+  // Extended by two days: it comes again a day before the new time.
+  ({ state } = diff(state, snap([assignment(1, { due_at: iso(T0 + 68 * HOUR) })]), T0 + HOUR));
+  assert.deepEqual(deadlineItems(state.assignments, T0 + HOUR), []);
+  assert.deepEqual(ids(deadlineItems(state.assignments, T0 + 46 * HOUR)), ['etl:deadline:100001:1']);
+});
+
+test('the records keep whether work is handed in, handed in through eTL, and its link', () => {
+  const { assignments } = diff(baseline([assignment(1), assignment(2)]), snap([
     assignment(1, { submission: { workflow_state: 'pending_review' } }),
-    assignment(2),
-  ]), T0);
-  assert.deepEqual(resolved, ['100001:1']);
+    assignment(2, { submission_types: ['on_paper'] }),
+  ]), T0).state;
+  assert.equal(assignments['100001:1'].submitted, true);
+  assert.equal(assignments['100001:1'].online, true);
+  assert.equal(assignments['100001:1'].url, 'https://myetl.snu.ac.kr/courses/100001/assignments/1');
+  assert.equal(assignments['100001:2'].submitted, false);
+  assert.equal(assignments['100001:2'].online, false);
+  assert.equal('reminded' in assignments['100001:1'], false);
 });
 
 test('a new or changed grade is announced as score / points', () => {
@@ -323,10 +321,10 @@ test('nothing is saved when every course and the announcements failed', () => {
     errors: [{ course: { id: COURSE.id, name: COURSE.name }, error: 'eTL 연결 실패' }],
     announcements: null,
   }, T0);
-  assert.deepEqual(out, { state: null, alerts: [], resolved: [] });
+  assert.deepEqual(out, { state: null, alerts: [] });
 });
 
-test('alerts come in priority order: reminder, due change, new, grade, announcement', () => {
+test('alerts come in priority order: due change, new, grade, announcement; deadline bubbles before them', () => {
   const state = baseline([assignment(1), assignment(2)]);
   const { alerts } = diff(state, snap([
     assignment(1, { submission: graded(5) }),
@@ -334,11 +332,11 @@ test('alerts come in priority order: reminder, due change, new, grade, announcem
     assignment(3),
   ], { announcements: [announcement(9)] }), T0);
   assert.deepEqual(ids(alerts), [
-    'etl:remind3h:100001:2',
     `etl:due:100001:2:${T0 + 2 * HOUR}`,
     'etl:new:100001:3',
     'etl:grade:100001:1:5',
     'etl:ann:9',
   ]);
-  assert.ok(priorityOf({ id: 'etl:token' }) < priorityOf({ id: 'etl:remind3h:1:2' }));
+  assert.ok(priorityOf({ id: 'etl:token' }) < priorityOf({ id: 'etl:deadline:1:2' }));
+  assert.ok(priorityOf({ id: 'etl:deadline:1:2' }) < priorityOf({ id: 'etl:due:1:2:3' }));
 });

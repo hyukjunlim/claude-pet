@@ -9,7 +9,11 @@
 //     For SSH (and WSL) sessions the desktop app copies the remote transcript to ssh-<id>/,
 //     but only when a turn ends or you open the session. While a turn runs, the desktop
 //     index (which it saves as prompts and replies arrive) shows what the copy is missing.
-//   - Other recently active transcripts (terminal `claude` sessions) are reported as kind "cli".
+//   - The other transcripts (Claude Code in VS Code, or `claude` in a terminal) are reported as
+//     kind "cli", with `client` 'vscode' or 'terminal' (clientOf): all of them in the sidebar, the
+//     last week's followed as they're written, older ones from a quick look at each (quickState).
+//     Besides this PC's, the ones in WSL (setCliRoots: its ~/.claude/projects, read from here
+//     while the distro runs) and on SSH hosts (setRemoteChats: sent by claude-remote.js's watcher).
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -19,7 +23,6 @@ const { EventEmitter } = require('node:events');
 const {
   STALE_RUNNING_MS, UNREAD_WINDOW_MS, applyEntry, compareSessions, createTurnState, deriveStatus, describeAsk,
 } = require('./transcript');
-const { ForegroundWatcher } = require('./foreground');
 
 const HOST_ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
 const TRANSCRIPT_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
@@ -27,9 +30,12 @@ const INITIAL_TAIL_BYTES = 768 * 1024;
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 const META_SCAN_MS = 3000;
 const PROJECT_SCAN_MS = 15000;
-const DESKTOP_RECENT_MS = 7 * 24 * 60 * 60 * 1000;
-const CLI_RECENT_MS = 30 * 60 * 1000;
-const CLI_REVIEW_MS = 10 * 60 * 1000;
+const DESKTOP_RECENT_MS = 7 * 24 * 60 * 60 * 1000;   // and past it while its last turn may still be Ready
+const CLI_FOLLOW_MS = 7 * 24 * 60 * 60 * 1000;       // VS Code and terminal sessions followed as they're written
+const CLI_PEEK_BYTES = 64 * 1024;                    // ... and older ones looked at this much at each end
+const ENTRYPOINT_RE = /"entrypoint":"([^"\\]*)"/;
+const CLI_REVIEW_MS = 10 * 60 * 1000;                // a turn that ended before cliReadyFrom: Ready this long
+const DISMISSED_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PROJECT_DIRS = 400;
 const CLOCK_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
@@ -42,8 +48,6 @@ const LAUNCH_SETTLE_MS = 5000;
 // The longest to wait for a turn's summary. The app waits 5 s before it notifies you, but they
 // often take 3–4 s, and the wait ends as soon as one comes.
 const SUMMARY_WAIT_MS = 10_000;
-const FRONT_RETRY_MS = 60_000;   // after the front-window helper failed, try again this much later
-const SEEN_SAVE_MS = 60_000;     // save "seen with the app in front" at most this often per session
 const KICK_DELAY_MS = 100;          // lets a burst of file changes settle into one update
 const PROJECT_KICK_MIN_MS = 2000;   // scanning every project folder is the costly part
 
@@ -183,15 +187,7 @@ class AppLogFollower extends FileFollower {
     super(file, LOG_TAIL_BYTES);
     this.turns = new Map();   // hostSessionId -> { running, at }, from the newest line about it
     this.asks = new Map();    // requestId -> { sessionId, tool, at }, until you answer
-    this.selected = null;     // the session selected in the app, if any
-    this.selectedAt = 0;
-    this.left = new Map();    // hostSessionId -> when you last switched away from it in the app
     this.launches = [];       // starts of the app not yet known to be a second copy of it
-  }
-
-  // You were in the app with the session on screen until you switched away from it.
-  leftAt(sessionId) {
-    return this.left.get(sessionId) || 0;
   }
 
   handleLine(line) {
@@ -211,11 +207,6 @@ class AppLogFollower extends FileFollower {
       case 'second':
         this.launches.pop();
         return;
-      case 'focus':
-        if (this.selected && e.sessionId !== this.selected) this.left.set(this.selected, e.at);
-        this.selected = e.sessionId;
-        this.selectedAt = e.at;
-        return;
       case 'start':
         // A new prompt withdraws whatever was asked before it. The end of a turn doesn't: the app
         // asks some questions of its own as a turn ends (whether to load the mods Claude wrote),
@@ -234,7 +225,6 @@ class AppLogFollower extends FileFollower {
     while (this.launches.length && now - this.launches[0] > LAUNCH_SETTLE_MS) restartedAt = this.launches.shift();
     if (!restartedAt) return;
     for (const [id, ask] of this.asks) if (ask.at < restartedAt) this.asks.delete(id);
-    if (this.selectedAt < restartedAt) this.selected = null;
   }
 
   // What the log says about a session: { running, at, asking }, where `asking` is the oldest
@@ -272,8 +262,6 @@ const LOG_EVENTS = [
   // says it isn't the main one and quits.
   [/^Starting app\b/, 'launch'],
   [/^Not main instance\b/, 'second'],
-  // The session you select in the app ("null" in between two, or when none is).
-  [/^\[CCD\] LocalSessions\.setFocusedSession: sessionId=(?:(?<session>local_[\w-]+)|null)\b/, 'focus'],
 ];
 
 // "2026-09-24 23:47:34 [info] Sending message to session local_…" (local time)
@@ -295,19 +283,11 @@ function parseLogLine(line) {
 
 class SessionTracker extends EventEmitter {
   constructor({
-    sessionsRoot, projectsRoot, appLog = null, sshConnections = null, pollMs = 1000, now = Date.now, dismissed = {},
-    seen = {}, foreground = process.platform === 'win32' ? () => new ForegroundWatcher() : null,
+    sessionsRoot, projectsRoot, appLog = null, sshConnections = null, pollMs = 1000, now = Date.now, dismissed = {}, readyFrom = null,
+    cliReadyFrom = null,
   } = {}) {
     super();
     this.sessionsRoot = sessionsRoot;
-    // Whether the app's window is in front, while a turn you may not have seen has ended in the
-    // session selected there (see watchFront).
-    this.foregroundFactory = foreground;
-    this.frontWatcher = null;
-    this.appInFront = null;            // null: not watching (or not known yet)
-    // hostSessionId -> last time it was selected with the app in front (saved across restarts)
-    this.frontSeen = new Map(Object.entries(seen).filter(([, t]) => Number.isFinite(t)));
-    this.frontFailedAt = 0;
     this.projectsRoot = projectsRoot;
     this.appLog = appLog ? new AppLogFollower(appLog) : null;
     this.sshConnectionsFile = sshConnections;
@@ -320,13 +300,22 @@ class SessionTracker extends EventEmitter {
     this.metaCache = new Map();        // index file -> { mtimeMs, size, record }
     this.followers = new Map();        // transcript path -> TranscriptFollower
     this.transcriptFor = new Map();    // cliSessionId -> transcript path
-    this.cliSessions = new Map();      // cliSessionId -> transcript path (not owned by the desktop)
+    this.cliSessions = new Map();      // cliSessionId -> { file, root, machineKey, machine, followed, mtimeMs } (not the desktop's)
+    this.cliPeeks = new Map();         // transcript path -> { mtimeMs, size, state }: an older one's quick look
+    // VS Code and terminal sessions whose turn ended from then on are Ready until marked done (as
+    // the desktop's are from readyFrom); before, Ready for a few minutes, the pet can't tell more.
+    this.cliReadyFrom = cliReadyFrom;
+    this.cliRoots = [];                // WSL's projects folders: { root, machineKey, machine, active }
+    this.remoteChats = [];             // the SSH hosts' VS Code and terminal sessions (setRemoteChats)
     this.projectDirs = [];
     this.dismissed = new Map(Object.entries(dismissed));
+    this.readyFrom = readyFrom;        // turns ending from then on are Ready until dismissed (transcript.js)
     this.lastMetaScan = 0;
     this.lastProjectScan = 0;
     this.lastEmitted = '';
     this.sessions = [];
+    this.all = [];                     // every desktop session in the index, and the week's VS Code and terminal ones, for folder mode
+    this.lastListed = '';
     this.busy = false;
     this.rerun = false;
     this.running = false;
@@ -357,34 +346,6 @@ class SessionTracker extends EventEmitter {
     this.kickTimer = null;
     for (const w of this.watchers) w.close();
     this.watchers = [];
-    this.watchFront(false);
-  }
-
-  // A turn that ends in the session selected in the app is "Ready" only if the app's window
-  // isn't in front, and until it comes to the front: the app can't tell the pet you looked at a
-  // session that was already open. While that's in question, a helper reports the front window.
-  watchFront(needed) {
-    if (needed && !this.frontWatcher && this.foregroundFactory && this.now() - this.frontFailedAt > FRONT_RETRY_MS) {
-      const w = this.foregroundFactory();
-      this.frontWatcher = w;
-      w.on('front', (inFront) => {
-        if (this.frontWatcher !== w) return;
-        this.appInFront = inFront;
-        this.kick();
-      });
-      w.on('exit', () => {
-        if (this.frontWatcher !== w) return;   // we stopped it
-        this.frontWatcher = null;
-        this.appInFront = null;
-        this.frontFailedAt = this.now();
-      });
-      w.start();
-    } else if (!needed && this.frontWatcher) {
-      const w = this.frontWatcher;
-      this.frontWatcher = null;
-      this.appInFront = null;
-      w.stop();
-    }
   }
 
   // React to changes as soon as the OS reports them. The polling timer stays as a fallback,
@@ -438,19 +399,36 @@ class SessionTracker extends EventEmitter {
     }, KICK_DELAY_MS);
   }
 
+  // WSL's projects folders, [{ root, machineKey, machine, active }]. A distro's files are read only
+  // while it runs (`active`): reading them starts it, and it would never stop again. Its sessions
+  // stay as last seen meanwhile.
+  setCliRoots(roots) {
+    this.cliRoots = roots;
+    this.kick({ projects: true });
+  }
+
+  // The SSH hosts' VS Code and terminal sessions: [{ id, sessionId, state, machineKey, machine,
+  // remote, skew }], `state` a turn state (transcript.js) on the host's clock, `skew` how far that
+  // clock is ahead of ours.
+  setRemoteChats(chats) {
+    this.remoteChats = chats;
+    this.recompute();
+  }
+
   dismiss(id) {
     this.dismissed.set(id, this.now());
     this.recompute(true);
   }
 
-  dismissedSnapshot() {
-    const cutoff = this.now() - 24 * 60 * 60 * 1000;
-    return Object.fromEntries([...this.dismissed].filter(([, t]) => t > cutoff));
+  // Undoes dismiss: the session's own Ready, Error or Needs you comes back.
+  undismiss(id) {
+    if (this.dismissed.delete(id)) this.recompute(true);
   }
 
-  seenSnapshot() {
-    const cutoff = this.now() - 24 * 60 * 60 * 1000;
-    return Object.fromEntries([...this.frontSeen].filter(([, t]) => t > cutoff));
+  // Kept as long as the session's last turn could still show as Ready, which only its dismissal ends.
+  dismissedSnapshot() {
+    const cutoff = this.now() - DISMISSED_KEEP_MS;
+    return Object.fromEntries([...this.dismissed].filter(([, t]) => t > cutoff));
   }
 
   // `only` is the set of files reported changed; null (the timer) checks every file.
@@ -477,7 +455,9 @@ class SessionTracker extends EventEmitter {
         await this.scanProjects();
       }
       if (metaDue || projectsDue) await this.resolveTranscripts();
+      const asleep = this.cliRoots.filter((r) => !r.active).map((r) => r.root);
       for (const [file, follower] of this.followers) {
+        if (asleep.some((root) => file.startsWith(root))) continue;   // a stopped WSL distro's
         if (!only || only.has(file) || follower.offset < 0) await follower.poll().catch(() => {});
       }
       if (this.appLog) {
@@ -555,35 +535,40 @@ class SessionTracker extends EventEmitter {
     }
   }
 
-  // The project folders, newest first, and the terminal sessions in them. The desktop app's
-  // copies of SSH sessions (ssh-<id>/, one folder per session, often most of them) are left out:
-  // findTranscript goes straight to the one it needs, and terminal sessions are never there.
+  // The project folders, newest first, and the VS Code and terminal sessions in them, here and in
+  // the WSL distros that run.
   async scanProjects() {
-    const entries = await readdirSafe(this.projectsRoot, { withFileTypes: true });
-    const dirs = [];
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('ssh-')) continue;
-      const full = path.join(this.projectsRoot, e.name);
-      const st = await statSafe(full);
-      if (st) dirs.push({ full, mtimeMs: st.mtimeMs });
-    }
-    dirs.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    this.projectDirs = dirs.slice(0, MAX_PROJECT_DIRS).map((d) => d.full);
-
-    // Terminal sessions: recently written transcripts that the desktop doesn't own.
-    const cutoff = this.now() - CLI_RECENT_MS;
+    this.projectDirs = await projectDirsOf(this.projectsRoot);
     const live = new Map();
-    for (const dir of this.projectDirs) {
+    await this.findChats(this.projectDirs, { root: null, machineKey: null, machine: null }, live);
+    for (const r of this.cliRoots) {
+      if (r.active) await this.findChats(await projectDirsOf(r.root), r, live);
+      else for (const [id, c] of this.cliSessions) if (c.root === r.root) live.set(id, c);
+    }
+    this.cliSessions = live;
+  }
+
+  // Into `live`: the transcripts in `dirs` that the desktop doesn't own. The last week's are
+  // followed; an older one is looked at once (again when it changes) for its title and place.
+  async findChats(dirs, { root, machineKey, machine }, live) {
+    const cutoff = this.now() - CLI_FOLLOW_MS;
+    for (const dir of dirs) {
       for (const name of await readdirSafe(dir)) {
         const m = TRANSCRIPT_RE.exec(name);
         if (!m || this.desktopOwned.has(m[1])) continue;
         const file = path.join(dir, name);
         const st = await statSafe(file);
-        if (!st || st.mtimeMs < cutoff || (await releasedBefore(dir, m[1], st.mtimeMs))) continue;
-        live.set(m[1], file);
+        if (!st || (await releasedBefore(dir, m[1], st.mtimeMs))) continue;
+        const followed = st.mtimeMs >= cutoff;
+        if (!followed) {
+          const peek = this.cliPeeks.get(file);
+          if (!peek || peek.mtimeMs !== st.mtimeMs || peek.size !== st.size) {
+            this.cliPeeks.set(file, { mtimeMs: st.mtimeMs, size: st.size, state: await quickState(file, st.size) });
+          }
+        }
+        live.set(m[1], { file, root, machineKey, machine, followed, mtimeMs: st.mtimeMs });
       }
     }
-    this.cliSessions = live;
   }
 
   async resolveTranscripts() {
@@ -592,16 +577,22 @@ class SessionTracker extends EventEmitter {
       const file = await this.findTranscript(r);
       if (!file) continue;
       const st = await statSafe(file);
-      if (!st || this.now() - st.mtimeMs > DESKTOP_RECENT_MS) continue;
+      if (!st || (this.now() - st.mtimeMs > DESKTOP_RECENT_MS && !this.mayBePending(r))) continue;
       wanted.add(file);
     }
-    for (const file of this.cliSessions.values()) wanted.add(file);
+    for (const c of this.cliSessions.values()) if (c.followed) wanted.add(c.file);
     for (const file of wanted) {
       if (!this.followers.has(file)) this.followers.set(file, new TranscriptFollower(file));
     }
     for (const file of [...this.followers.keys()]) {
       if (!wanted.has(file)) this.followers.delete(file);
     }
+  }
+
+  // Whether the session's last turn could still be Ready (or Error, or Needs you): it ended after
+  // `readyFrom` and you haven't marked it done since. That lasts however long it takes.
+  mayBePending(r) {
+    return this.readyFrom != null && r.lastActivityAt >= this.readyFrom && !(this.dismissed.get(r.hostSessionId) >= r.lastActivityAt);
   }
 
   async findTranscript(r) {
@@ -627,14 +618,8 @@ class SessionTracker extends EventEmitter {
   recompute(force = false) {
     const now = this.now();
     const out = [];
+    const all = [];
     const skews = new Map();
-    const selected = this.appLog?.selected ?? null;
-    if (selected && this.appInFront) {
-      const before = this.frontSeen.get(selected) || 0;
-      this.frontSeen.set(selected, now);
-      if (now - before > SEEN_SAVE_MS) this.emit('seen');   // main.js saves seenSnapshot()
-    }
-    let frontNeeded = false;
     for (const r of this.desktop.values()) {
       const follower = this.followers.get(this.transcriptFor.get(r.cliSessionId));
       let skew = 0;
@@ -644,23 +629,15 @@ class SessionTracker extends EventEmitter {
       }
       const state = follower?.state ?? null;
       const dismissedAt = this.dismissed.get(r.hostSessionId);
-      const seenAt = Math.max(this.frontSeen.get(r.hostSessionId) || 0, this.appLog?.leftAt(r.hostSessionId) || 0);
-      // Selected in the app, with a turn over since you last looked: is the app in front?
-      const inQuestion = r.hostSessionId === selected && Boolean(state && !state.turnActive && state.turnEndedAt)
-        && state.turnEndedAt - skew > Math.max(r.lastFocusedAt || 0, dismissedAt || 0, seenAt || 0)
-        && now - (state.turnEndedAt - skew) < UNREAD_WINDOW_MS;
-      if (inQuestion) frontNeeded = true;
       const name = this.connectionNames.get(r.machineKey);
       const derived = desktopStatus(name ? { ...r, machine: name } : r, state, {
         now,
         skew,
         dismissedAt,
-        seenAt,
-        frontPending: inQuestion && this.appInFront === null && Boolean(this.frontWatcher),
         logTurn: this.appLog?.turnOf(r.hostSessionId) ?? null,
+        readyFrom: this.readyFrom,
       });
-      if (!derived) continue;
-      out.push({
+      const base = {
         id: r.hostSessionId,
         kind: 'desktop',
         hostSessionId: r.hostSessionId,
@@ -668,25 +645,61 @@ class SessionTracker extends EventEmitter {
         remote: r.remote && (name || r.remote),
         project: projectName(r.cwd),
         cwd: r.cwd,
-        ...derived,
+      };
+      if (derived) out.push({ ...base, ...derived });
+      // Folder mode lists every session, with where it runs; one with nothing going on is idle.
+      all.push({
+        ...base,
+        machineKey: r.machineKey,
+        machine: name || r.machine,
+        lastActivityAt: r.lastActivityAt,
+        // Your newest prompt (a task's notice doesn't count), stamped by the CLI's machine.
+        lastPromptAt: r.latestUserFrameAt ? r.latestUserFrameAt - skew : 0,
+        ...(derived ?? { status: 'idle', detail: '', since: r.lastActivityAt }),
       });
     }
-    for (const [cliId, file] of this.cliSessions) {
-      const follower = this.followers.get(file);
-      if (!follower || this.desktopOwned.has(cliId)) continue;
-      const id = `cli:${cliId}`;
-      const derived = deriveStatus(follower.state, {
-        lastFocusedAt: now - CLI_REVIEW_MS,
-        dismissedAt: this.dismissed.get(id),
-      }, now);
-      out.push({
-        id,
+    const chats = [...this.remoteChats];
+    for (const [cliId, c] of this.cliSessions) {
+      if (this.desktopOwned.has(cliId)) continue;
+      const state = c.followed ? this.followers.get(c.file)?.state : this.cliPeeks.get(c.file)?.state;
+      if (!state) continue;
+      chats.push({
+        id: `cli:${cliId}`, sessionId: cliId, state, quiet: !c.followed, machineKey: c.machineKey, machine: c.machine, mtimeMs: c.mtimeMs,
+      });
+    }
+    for (const c of chats) {
+      // Not listed until it's known what started it: it may be the desktop app's (a scheduled
+      // task's earlier runs aren't in its index).
+      const client = clientOf(c.state.entrypoint);
+      if (!client) continue;
+      const skew = c.skew || 0;
+      const there = now + skew;   // the session's own clock (an SSH host's)
+      const dismissedAt = this.dismissed.get(c.id);
+      // Not written to in a week: nothing going on, and only a quick look's worth known.
+      const d = c.quiet ? { status: 'idle', detail: '', since: c.state.lastStampAt || 0 } : deriveStatus(c.state, {
+        readyFrom: this.cliReadyFrom == null ? undefined : this.cliReadyFrom + skew,
+        lastFocusedAt: there - CLI_REVIEW_MS,
+        dismissedAt: dismissedAt == null ? undefined : dismissedAt + skew,
+      }, there);
+      const derived = { ...d, since: d.since ? d.since - skew : d.since };
+      const base = {
+        id: c.id,
         kind: 'cli',
+        client,
+        sessionId: c.sessionId,
         hostSessionId: null,
-        title: follower.state.title || folderName(follower.state.cwd) || 'Claude Code (terminal)',
-        remote: null,
-        project: projectName(follower.state.cwd),
-        cwd: follower.state.cwd,
+        title: c.state.title || c.state.aiTitle || folderName(c.state.cwd) || (client === 'vscode' ? 'Claude Code (VS Code)' : 'Claude Code (terminal)'),
+        remote: c.remote ?? null,
+        project: projectName(c.state.cwd),
+        cwd: c.state.cwd,
+      };
+      out.push({ ...base, ...derived });
+      all.push({
+        ...base,
+        machineKey: c.machineKey ?? null,
+        machine: c.machine ?? null,
+        lastActivityAt: (c.state.lastStampAt ? c.state.lastStampAt - skew : 0) || c.mtimeMs || 0,
+        lastPromptAt: c.state.lastUserAt ? c.state.lastUserAt - skew : 0,
         ...derived,
       });
     }
@@ -698,7 +711,13 @@ class SessionTracker extends EventEmitter {
       this.lastEmitted = key;
       this.emit('change', active);
     }
-    if (this.running) this.watchFront(frontNeeded);
+    all.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    this.all = all;
+    const listKey = JSON.stringify(all);
+    if (force || listKey !== this.lastListed) {
+      this.lastListed = listKey;
+      this.emit('list', all);
+    }
   }
 
   // How far ahead of ours the clock is on the machine behind `machineKey`, measured from the
@@ -729,10 +748,8 @@ function desktopStatus(r, state, opts = {}) {
   return { status: 'waiting', detail: describeAsk(asking.tool), since: asking.at };
 }
 
-// `seenAt`: the last time the session was selected in the app with its window in front. And
-// `frontPending`: whether the pet is still finding out if the window is in front.
 function transcriptStatus(r, state, {
-  now = Date.now(), skew = 0, dismissedAt, seenAt = 0, frontPending = false, logTurn = null,
+  now = Date.now(), skew = 0, dismissedAt, logTurn = null, readyFrom = null,
 } = {}) {
   const hidden = r.mirrored ? turnNotInCopy(r, state, skew, logTurn) : null;
   if (hidden) {
@@ -743,17 +760,17 @@ function transcriptStatus(r, state, {
     return { status: 'running', detail: where ? `Working on ${where}` : 'Working', since: hidden.since };
   }
   if (!state) return null;
-  const looked = Math.max(r.lastFocusedAt || 0, seenAt || 0);
   let derived = deriveStatus(state, {
-    lastFocusedAt: looked && looked + skew,
+    lastFocusedAt: r.lastFocusedAt && r.lastFocusedAt + skew,
     dismissedAt: dismissedAt && dismissedAt + skew,
     summary: r.summary,
+    readyFrom: readyFrom == null ? undefined : readyFrom + skew,
   }, now + skew);
   // The summary that says whether Claude ended the turn waiting on you comes a few seconds after
   // the turn. Like the app, wait for it a moment in sessions that get one, rather than show
-  // "Ready" and then "Needs you". Likewise while finding out whether the app is in front.
+  // "Ready" and then "Needs you".
   const summaryDue = r.summarized && !state.turnAssistantUuids.includes(r.summary?.summarizes_uuid);
-  if (derived.status === 'review' && (summaryDue || frontPending) && now + skew - state.turnEndedAt < SUMMARY_WAIT_MS) {
+  if (derived.status === 'review' && summaryDue && now + skew - state.turnEndedAt < SUMMARY_WAIT_MS) {
     derived = { status: 'running', detail: 'Wrapping up', since: state.turnStartedAt };
   }
   // If we started reading mid-turn, the desktop index knows when you sent the prompt.
@@ -803,6 +820,66 @@ function estimateSkew(samples) {
 }
 
 // When you delete a session, the desktop app leaves a marker next to its transcript.
+// A projects folder's folders, newest first. The desktop app's copies of SSH sessions (ssh-<id>/,
+// one folder per session, often most of them) are left out: findTranscript goes straight to the
+// one it needs, and VS Code and terminal sessions are never there.
+async function projectDirsOf(root) {
+  const dirs = [];
+  for (const e of await readdirSafe(root, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name.startsWith('ssh-')) continue;
+    const full = path.join(root, e.name);
+    const st = await statSafe(full);
+    if (st) dirs.push({ full, mtimeMs: st.mtimeMs });
+  }
+  dirs.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return dirs.slice(0, MAX_PROJECT_DIRS).map((d) => d.full);
+}
+
+// A turn state from a quick look at a transcript: its first and last CLI_PEEK_BYTES. Enough for
+// what an older session is listed with: what started it, its folder, title and last time.
+async function quickState(file, size) {
+  const state = createTurnState();
+  let fh;
+  try {
+    fh = await fsp.open(file, 'r');
+    const read = async (start, length) => {
+      const buf = Buffer.alloc(length);
+      const { bytesRead } = await fh.read(buf, 0, length, start);
+      return buf.subarray(0, bytesRead).toString('utf8');
+    };
+    const headText = await read(0, Math.min(size, CLI_PEEK_BYTES));
+    const tailText = size > CLI_PEEK_BYTES ? await read(Math.max(CLI_PEEK_BYTES, size - CLI_PEEK_BYTES), Math.min(CLI_PEEK_BYTES, size - CLI_PEEK_BYTES)) : '';
+    const head = headText.split('\n');
+    if (size > CLI_PEEK_BYTES) head.pop();   // cut short
+    const tail = tailText.split('\n').slice(1);   // the first starts in the middle of a line
+    for (const line of [...head, ...tail]) {
+      if (!line.trim()) continue;
+      try {
+        applyEntry(state, JSON.parse(line));
+      } catch {
+        // a line cut where the look ends
+      }
+    }
+    // Long lines (a big tool result) can leave no whole entry in either look; what started it is
+    // still in the text, at the end of each entry: so in the file's last bytes, most of all.
+    if (!state.entrypoint) state.entrypoint = ENTRYPOINT_RE.exec(tailText)?.[1] ?? ENTRYPOINT_RE.exec(headText)?.[1] ?? null;
+  } catch {
+    // gone, or not readable: listed with what's known
+  } finally {
+    await fh?.close();
+  }
+  return state;
+}
+
+// Which app a session outside the desktop app runs in, by the transcript's entrypoint: 'vscode'
+// (Claude Code in VS Code) or 'terminal' (`claude`). null for the desktop app's own (claude-desktop,
+// and its variants such as claude-desktop-3p), for programs (the Agent SDK's sdk-…), and while
+// it's unknown, none of which are listed.
+function clientOf(entrypoint) {
+  if (!entrypoint || /^(claude-desktop|sdk)/.test(entrypoint)) return null;
+  return entrypoint === 'claude-vscode' ? 'vscode' : 'terminal';
+}
+
 async function releasedBefore(dir, cliId, mtimeMs) {
   try {
     const marker = JSON.parse(await fsp.readFile(path.join(dir, `${cliId}${RELEASED_SUFFIX}`), 'utf8'));
@@ -882,6 +959,7 @@ module.exports = {
   AppLogFollower,
   FileFollower,
   TranscriptFollower,
+  clientOf,
   defaultPaths,
   folderName,
   readdirSafe,

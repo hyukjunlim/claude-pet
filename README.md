@@ -1,9 +1,10 @@
-# Claude Pet
+# Ttokttok Pet
 
-A small animated companion that floats above your windows and shows what your
-Claude desktop **Code** sessions are doing, and your **Codex** threads too. It works like the
-Pets feature in the ChatGPT/Codex desktop app and uses the same pet format, so ChatGPT/Codex
-pets work here too.
+A small animated companion that floats above your windows and keeps track of what's waiting for
+you: your Claude desktop **Code** sessions, **Codex** threads, chats on claude.ai, ChatGPT and
+Gemini, and SNU eTL deadlines. It works like the Pets feature in the ChatGPT/Codex desktop app and
+uses the same pet format, so ChatGPT/Codex pets work here too. It can also sit as a sidebar that
+lists every session by machine and folder ([Folder mode](#folder-mode)).
 
 ![Clay, the default pet](tools/clay-preview.png)
 
@@ -12,10 +13,10 @@ pets work here too.
 The pet is built and tested on Windows. There are two ways to get it:
 
 - **Download it.** This needs no Node.js or npm. On the
-  [releases page](https://github.com/hyukjunlim/claude-pet/releases/latest), take
-  `Claude-Pet-Setup-<version>.exe` or `Claude-Pet-<version>-win.zip`. The installer puts the
+  [releases page](https://github.com/hyukjunlim/ttokttok-pet/releases/latest), take
+  `Ttokttok-Pet-Setup-<version>.exe` or `Ttokttok-Pet-<version>-win.zip`. The installer puts the
   pet in your user folder (no admin rights needed) and starts it; the zip you unzip anywhere and
-  start with `Claude Pet.exe`. The app isn't code-signed, so Windows SmartScreen may warn the
+  start with `Ttokttok Pet.exe`. The app isn't code-signed, so Windows SmartScreen may warn the
   first time: choose *More info* → *Run anyway*.
 - **Run it from the source**, as below. That's also the copy that updates itself with one click,
   and the one to hack on.
@@ -24,33 +25,34 @@ Both need something to watch:
 
 - **The Claude desktop app** (with Code sessions), **Codex** ([Codex](#codex)), or both. That's
   what the pet watches. With only one of them, the tray menu leaves out the other's items, and
-  clicking the pet opens the one you have. If you run Claude Code from a terminal instead (the
-  `claude` CLI, here, in WSL or over SSH), there are no session bubbles for it, but the weekly
-  limit still works ([Live Claude usage](#live-claude-usage)).
+  clicking the pet opens the one you have. Claude Code and Codex in VS Code or in a terminal
+  count too, here, in WSL and over SSH ([How it knows](#how-it-knows-what-claude-is-doing)).
 
 To run it from the source you also need **Git** and **Node.js 22.12 or newer** (the current LTS is
 fine; `npm install` downloads Electron itself), and optionally Python, only to rebuild the
 built-in pet.
 
 ```bash
-git clone https://github.com/hyukjunlim/claude-pet.git
-cd claude-pet
+git clone https://github.com/hyukjunlim/ttokttok-pet.git
+cd ttokttok-pet
 npm install
 npm start
 ```
 
-On its first start, the pet offers to set up a small mod for Claude Code, which is where it gets
-Claude's weekly limit from ([Live Claude usage](#live-claude-usage)). Say *Set it up*, and that's
-all.
-
-It also offers a one-time, optional connection to SNU eTL. Choose *eTL 연결* to open the token
-form, or *나중에* to skip it; you can connect later from the tray menu's *eTL* item.
+On its first start, the pet opens **Getting started**, which sets it up a step at a time: the mode
+(a floating pet or a sidebar), the small mod for Claude Code that Claude's weekly limit comes from
+([Live Claude usage](#live-claude-usage)), SNU eTL, and the browser extension for chats on
+claude.ai, ChatGPT and Gemini ([Web chats](#web-chats-claudeai-chatgpt-gemini)). Each step can be
+skipped. Then you try the pet out on practice items (a bubble next to the floating pet, or two
+sessions at the top of the sidebar): click, mark done, hide and show with `Ctrl+Alt+P`, step
+through with `Ctrl+Tab`, right-click. Tray menu → *Getting started…* (or `--getting-started`)
+opens it again.
 
 To update, use **Check for updates…** in the tray menu ([Updating](#updating)).
 
 > **Installed it before the tray had *Check for updates…*?** That version can't update itself, so
 > do it by hand once: quit the pet from the tray menu, run `git pull` and then `npm install` in
-> its folder, and start it again (`npm start`, or double-click `Claude Pet.lnk`). Your settings
+> its folder, and start it again (`npm start`, or double-click `Ttokttok Pet.lnk`). Your settings
 > and pets are kept. If `git pull` complains about files you changed, undo those changes first.
 > After this, updates are one click.
 
@@ -60,21 +62,22 @@ To update, use **Check for updates…** in the tray menu ([Updating](#updating))
 npm start          # the pet appears in the bottom-right corner, plus a tray icon
 npm run demo       # cycles through every status with fake sessions
 npm test           # unit tests for the status logic
-npm run shortcut   # creates "Claude Pet.lnk" in this folder (Windows)
+npm run shortcut   # creates "Ttokttok Pet.lnk" in this folder (Windows)
 node src/sessions.js   # print what the pet currently sees, then exit
 npm run dist       # builds the installer and the zip into dist/ (Windows)
 ```
 
 From its first run on, the pet starts at login; untick *Start at login* in the tray menu to stop
-that. To start it yourself without a console window, double-click **Claude Pet.lnk** in this
+that. To start it yourself without a console window, double-click **Ttokttok Pet.lnk** in this
 folder. The flags `--start-at-login` and `--no-start-at-login` set the same option from the
 command line. `Ctrl+Alt+P` shows or hides the pet. Right-click the pet
-(or click the tray icon) for the menu, which also has *Restart Claude Pet* (after you edit its
-code, say).
+(or click the tray icon) for the menu, which also has *Restart Ttokttok Pet* (after you edit its
+code, say). Its settings are in two submenus: *Appearance* (pet, size, theme, weekly limits,
+animation) and *Sources* (Codex, Live Claude usage, Web chats, eTL).
 
-The pet logs what goes wrong (a crash, a link that wouldn't open) to `claude-pet.log` in
-`%APPDATA%\claude-pet\logs` (`~/Library/Logs/claude-pet` on macOS). Past 1 MB it starts over and
-keeps the previous log as `claude-pet.old.log`.
+The pet logs what goes wrong (a crash, a link that wouldn't open) to `ttokttok-pet.log` in
+`%APPDATA%\ttokttok-pet\logs` (`~/Library/Logs/ttokttok-pet` on macOS). Past 1 MB it starts over and
+keeps the previous log as `ttokttok-pet.old.log`.
 
 ## Updating
 
@@ -91,8 +94,8 @@ says it worked, or why it didn't (the old version is kept, and the log has the d
 checks when you ask.
 
 - **Your things are kept.** Settings, your pets and the log live outside this folder
-  (`%APPDATA%\claude-pet` and `~/.claude-pet/pets`), so an update never touches them. Keep a
-  customized pet in `~/.claude-pet/pets`, not in this folder's `pets/`.
+  (`%APPDATA%\ttokttok-pet` and `~/.ttokttok-pet/pets`), so an update never touches them. Keep a
+  customized pet in `~/.ttokttok-pet/pets`, not in this folder's `pets/`.
 - **It needs git** (the pet is a clone of this repo) and Node on your PATH, which the source
   install already asked for. It says why when it can't update: the folder isn't a git clone, isn't on
   `main`, has commits that aren't on GitHub's `main`, or has edited files that an update would
@@ -100,10 +103,22 @@ checks when you ask.
 - **Installed before this existed?** That version has no such menu item. Update it by hand once,
   as described under [Install](#install).
 
+### Upgrading from an older install
+
+An install from before 0.5 kept its things under the name `claude-pet`. The first start moves them
+over: settings and the eTL token (`%APPDATA%\claude-pet`), your pets and the live-usage mod
+(`~/.claude-pet`, also in WSL and on SSH hosts), Start at login and the web chats host. Two things
+are yours to do:
+
+- **The browser extension:** on the extensions page, click its reload button. If you moved the
+  pet's folder, remove it and load it again from there.
+- **An installed copy:** the installer puts the pet beside the old one, not over it. Uninstall the
+  old one ("Claude Pet") in Windows Settings → Apps.
+
 ## Building the installer
 
-`npm run dist` builds `Claude-Pet-Setup-<version>.exe` (a per-user installer) and
-`Claude-Pet-<version>-win.zip` (unzip and run) into `dist/`, with
+`npm run dist` builds `Ttokttok-Pet-Setup-<version>.exe` (a per-user installer) and
+`Ttokttok-Pet-<version>-win.zip` (unzip and run) into `dist/`, with
 [electron-builder](https://www.electron.build/); the settings are under `build` in
 [package.json](package.json). The first build downloads a few tools and takes a while. The app is
 packed as plain files, not an `app.asar`: the pet copies its Claude Code mod and the eTL workspace
@@ -124,9 +139,9 @@ The pet's update dialog lists the notes' bullet points (lines starting with `- `
 
 | Pet animation | Bubble         | Meaning |
 | ------------- | -------------- | ------- |
-| waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, or ended its turn waiting on a decision from you (the app's yellow marker) and you haven't looked at it since |
+| waiting       | **Needs you**  | Claude asked a question, has a plan waiting for approval, wants permission to use a tool, ended its turn on a question in the app's next-step box, or ended it waiting on a decision from you (the app's yellow marker). Opening the session doesn't clear it: it stays until you answer, or click its × |
 | failed        | **Error**      | The turn ended with an API error |
-| review        | **Ready**      | A turn finished and you haven't opened that session since |
+| review        | **Ready**      | A turn finished. It stays until you mark it done or send the session a message; opening it doesn't count |
 | running       | **Running**    | Claude is working |
 | idle          | **Background** | Claude isn't working, but a command, agent or monitor it sent to the background is still going |
 | idle          | none           | Nothing to report |
@@ -134,7 +149,7 @@ The pet's update dialog lists the notes' bullet points (lines starting with `- `
 Every active session gets its own bubble, most urgent first: Needs you, then Error, then Ready,
 then Running (the same order as ChatGPT's pet), and Background last. The pet's animation follows
 the top one. There's no limit: the stack grows as sessions come in, and scrolls (mouse wheel over
-a bubble) once it reaches the edge of the screen. The **×** on a bubble dismisses it.
+a bubble) once it reaches the edge of the screen. The **×** on a bubble marks it done.
 
 A bubble shows the status and the session's title, and under them the app, the project and how
 long it has been in that state, e.g. "Claude · tokenizer · 5m". The project is the session's folder name; it's
@@ -166,8 +181,58 @@ Other things it does:
 - **Stays still while you work:** a status's animation plays twice and then comes to rest on
   its first frame. With nothing going on, the pet idles slowly.
 - **Reduced motion:** the pet animates even when the Windows *Animation effects* setting is off.
-  Untick *Animate even with Windows animation effects off* in the tray menu to get still frames
-  then instead.
+  Untick *Animate even with Windows animation effects off* in tray menu → *Appearance* to get
+  still frames then instead.
+
+## Folder mode
+
+Tray menu → *Mode* → *Folder sidebar* (or `--mode=folder` on the command line) turns the pet into
+a sidebar. It docks to an edge of a monitor as a Windows app bar (the left one, unless you pick
+another), so other windows make room for it, and lists every Claude Code session and Codex
+thread, quiet ones too, by machine and folder. The pet and the weekly limits sit at its foot, with
+eTL's notices just above them when eTL is on. Each time it docks, the Claude and Codex windows are
+maximized beside it, so the conversation you open fills the rest of the screen.
+
+- **Machines and folders:** *Local*, *WSL* and each SSH host, each with its folders. The two apps'
+  names for one server meet under one heading, and a session started in a parent folder stays at
+  the parent. Web chats come first, under *Chat*, with a dot in each site's color, once you've
+  turned them on and loaded the browser extension ([Web chats](#web-chats-claudeai-chatgpt-gemini)).
+  Claude Code sessions and Codex chats run in VS Code or a terminal have a hollow dot in their
+  app's color.
+- **Order:** the sessions in a folder are newest first. Machines and folders keep the order they
+  first showed in, so a folder doesn't jump when a session in it gets busy. Drag a machine's
+  heading or a folder's row to move it among its neighbors (Escape cancels); a folder that turns
+  up later goes on top.
+- **Status:** each session shows what its bubble would (*Needs you*, *Error*, *Ready*, *Running*,
+  *Background*), or when it was last worked on. A folded folder shows a dot when something in it
+  needs you or is working.
+- **Clicks and keys:** click a session to open it in its app, and a folder or a machine to fold it.
+  The button beside the search box folds every folder but those on the way to the session you
+  opened last, or opens them all. **Ctrl+Tab** and **Ctrl+Shift+Tab** step through the list while
+  Claude, Codex or the sidebar is in front.
+- **Mark as done, Mark as Ready:** opening a session leaves its *Ready*, *Error* or *Needs you*.
+  Right-click it → *Mark as done* settles it, as a bubble's × does. *Mark as Ready* undoes that, so a
+  question still in the next-step box is *Needs you* again; on a quiet session it puts it in Ready to
+  come back to, until you mark it done or send it a message.
+- **Hide:** right-click a session → *Hide from the sidebar*, or a folder or a machine to hide
+  everything in it (its menu also has *Collapse* or *Expand*). Only the sidebar leaves it out; a
+  hidden session shows again when something new happens in it, or from the tray menu's *Hidden from
+  the sidebar*.
+- **Delete:** right-click a chat run in VS Code or a terminal → *Delete…*, and confirm. A Claude
+  Code session's transcript and its folder go: to the Recycle Bin on this PC; for good in WSL and
+  on an SSH host (one SSH command removes them). A Codex chat is archived by Codex itself (its
+  app-server's `thread/archive`), so you can bring it back from Codex's archived chats. Not while
+  the chat is working, or in the two minutes after it was last written, when it may still be open.
+- **Where:** tray menu → *Appearance* → *Sidebar position* picks the monitor (named by where it
+  sits, with its size, the main one marked) and its left or right edge. The sidebar stays there; if
+  that monitor is unplugged, it goes to the one the floating pet was on.
+- **Width and text size:** drag the sidebar's inner edge (the one facing the screen); double-click
+  it for the default width. **Ctrl+=** and **Ctrl+-** size the text, **Ctrl+0** resets it.
+- **Look:** Inter where it's installed, otherwise Segoe UI. The page, the text and the selected row
+  take the colors of the Claude app's sidebar. Tray menu → *Appearance* → *Theme* picks light, dark
+  or the Windows app mode for all of the pet's windows.
+- **Saved:** the order, folding, text size, hidden sessions and marks are in
+  `%APPDATA%\ttokttok-pet\settings.json`.
 
 ## How it knows what Claude is doing
 
@@ -191,16 +256,13 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   transcript has the question, the bubble says "Has a question for you" rather than the question
   itself.
 - **Server clock:** SSH transcripts carry the server's timestamps. The pet measures how far
-  that clock is off from the copies and corrects for it, so "Ready" still clears once you've
-  looked at a session.
-- **The session you have open:** the index notes when you switch to a session, not when you look
-  at the one already open. So when a turn ends in the session selected in the app (the log says
-  which), the pet checks whether the Claude window is in front. If it is, you've seen it and
-  there's no bubble; if not, "Ready" (or "Needs you") stays until the Claude window comes to the
-  front, or you switch away from that session in the app (it was on screen until then). A small
-  PowerShell helper reports the front window, event-driven, only while that's in question
-  ([src/foreground.js](src/foreground.js); Windows only). What it saw is saved, so a restart of
-  the pet doesn't bring those bubbles back.
+  that clock is off from the copies and corrects for it, so a turn's end and the moment you marked
+  it done compare on one clock.
+- **Ready until done:** a turn's Ready (and Error) stays until you mark it done (a bubble's × or the
+  sidebar's *Mark as done*) or start another turn. Opening the session, or
+  looking at it in the app, leaves it, and the pet follows a session's transcript for as long as
+  that holds. Turns that ended before you first ran a version with this rule cleared once you looked
+  at them; settings.json keeps when that was (`readyFrom`).
 - **Background tasks:** when Claude sends a command, an agent or a monitor to the background, its
   turn ends at once and the task's notice starts the next one when it finishes. To keep the bubble
   from going Ready, gone, Running again, the pet follows each task from the transcript entry that
@@ -211,9 +273,17 @@ The pet only reads files. It changes no Claude settings and needs no hooks.
   session isn't counted, since it never finishes. A task that never reports back (its session was
   closed) stops counting after 4 hours, and a dev server left running in the background keeps the
   bubble on "Background" for those 4 hours too.
-- **Terminal sessions:** `claude` sessions run in a terminal are picked up from recently written
-  transcripts. They're listed as "(terminal)" and can't be opened with a click. Sessions you
-  deleted in the app are skipped.
+- **VS Code and terminal sessions:** Claude Code run in VS Code, or `claude` in a terminal, on this
+  PC, in WSL or on an SSH host the pet reads, gets a bubble and a sidebar row like the app's,
+  marked "VS Code" or "Terminal". The sidebar lists every one Claude Code still keeps: the last
+  week's are followed as they're written, older ones are listed quiet. WSL is read only while the
+  distro runs, so the pet never starts it. Clicking a VS Code session brings the VS Code window
+  for its machine to the front (by the `[WSL: …]` or `[SSH: …]` in its title) and opens the
+  session there; VS Code asks once whether to let the extension open it. With no window for that
+  machine open, the session's folder opens there first, and a second click opens the session. A
+  terminal session has nothing to open. A turn's Ready stays until you mark it done, as the
+  app's does. Sessions you deleted in the app, the desktop app's own (a scheduled task's earlier
+  runs included) and programs' (Agent SDK) runs are skipped.
 - **Timing:** the pet reacts as soon as Windows reports that one of these files changed, and
   re-checks on a timer as a backup. What's left is Claude's own timing. It saves the session
   index 1–3 s after a change, and writes a turn's summary a few seconds after the turn ends.
@@ -229,7 +299,7 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 **Limitations:**
 - **SSH turns.** If the app has to start the session's CLI first, the bubble appears when the
   first reply arrives.
-- **Mark as read / unread isn't followed.** "Ready" goes by when you last opened the session. The
+- **Mark as read / unread isn't followed.** Ready goes by what you mark done in the pet. The
   sidebar's unread dots, including the ones you set by hand, live only in the localStorage of the
   app's window (item `epitaxy-unread-v1`, with `unreadIds` and `explicitUnreadIds`, in a LevelDB
   database under `%APPDATA%\Claude\Local Storage\leveldb`). The app's browser engine writes that
@@ -242,14 +312,16 @@ copies are combined is in [src/sessions.js](src/sessions.js), covered by
 ## Codex
 
 If Codex is installed, its threads get bubbles next to Claude's, marked "Codex" and the thread's
-project folder (e.g. "Codex · tokenizer · 2m"). Tray menu →
+project folder (e.g. "Codex · tokenizer · 2m"). Tray menu → *Sources* →
 *Show Codex threads* turns them off. Clicking one opens that thread in Codex
 (`codex://threads/<id>?hostId=<host>`), and tray menu → *Open Codex* opens the app. Codex works
 without Claude too: then clicking the pet opens Codex, and the menu has no Claude items.
 
-- **Ready:** a thread that finished while you weren't looking at it. This is Codex's own unread
-  list (`~/.codex/.codex-global-state.json`), so it covers threads on every host, and the
-  bubble goes away once you open the thread in Codex.
+- **Ready:** a thread that finished, until you mark it done or send it a message, read in Codex or
+  not. Once its history isn't followed any more (an hour on), the time Codex's thread list last
+  changed stands in for when it finished. For threads on hosts the pet doesn't watch, it goes by
+  Codex's own unread list (`~/.codex/.codex-global-state.json`) and goes away once you open the
+  thread in Codex.
 - **Running, Needs you, Error:** read from each thread's history (its rollout file), the way
   Codex writes it. For threads on this PC (Codex's local host and the Codex CLI) that's
   `~/.codex/sessions`.
@@ -260,12 +332,13 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
 - **SSH hosts:** a thread on an SSH host keeps its history on that host. For each host Codex
   works on, the pet keeps one SSH connection open, using your `~/.ssh/config`, and runs a
   small read-only Python watcher there. The watcher sends the new lines of rollouts written in
-  the last hour, plus the host's clock so the times line up, and once, when it starts, the
+  the last hour (a VS Code or terminal chat's, in the last week), the list of those chats with
+  their names, plus the host's clock so the times line up, and once, when it starts, the
   newest reply's rate limits (for the [weekly limits](#weekly-limits)). It checks every second,
   but only the rollouts it follows and the folders of the last two days; it looks through all of
   them every 30 s, so a resumed old thread can take that long to show. It exits as soon as the
-  pet quits, even if the pet crashes. Tray menu → *Follow Codex on SSH hosts* turns this off. The host
-  needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
+  pet quits, even if the pet crashes. Tray menu → *Sources* → *Follow Codex on SSH hosts* turns
+  this off. The host needs `python3` and a key that works without a prompt (`ssh <host>` must just work).
 - **dot:** the app's *dots* (the assistant you message, named dot) run in the cloud and leave no
   history file to follow, so there's no step to show. The pet goes by what the app keeps in its
   state file: a dot is *working* from a message the app stamps to the millisecond until the
@@ -278,7 +351,64 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   dot's host; `codex://dots` would only open the app's dots home).
 - **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
   and the names you gave your connections.
-- **Not shown:** ChatGPT chats, and Codex's own helper threads such as its auto-reviewer.
+- **VS Code and terminal chats:** chats in the Codex VS Code extension, or `codex` in a terminal,
+  on this PC, in WSL or on a host Codex works on, get a bubble and a sidebar row, marked
+  "Codex · VS Code" or "Codex · Terminal". The sidebar lists every one Codex hasn't archived: the
+  last week's are followed as they're written, older ones are listed quiet. WSL is read only while
+  the distro runs. Clicking a VS Code chat opens it in VS Code
+  (`vscode://openai.chatgpt/local/<id>`), in the window for its machine, as for Claude Code's; a
+  terminal chat has nothing to open. A turn's Ready
+  stays until you mark it done. Their names come from each machine's
+  `~/.codex/session_index.jsonl`.
+- **Not shown:** ChatGPT chats in the app (those on chatgpt.com can be, see
+  [Web chats](#web-chats-claudeai-chatgpt-gemini)), and Codex's own helper threads such as its auto-reviewer.
+
+## Web chats (claude.ai, ChatGPT, Gemini)
+
+Chats on claude.ai, chatgpt.com and gemini.google.com can get bubbles too, from a small browser
+extension in [browser-extension/](browser-extension/) for Chrome, Edge and other Chromium browsers.
+It's **off** until you turn it on: tray menu → *Sources* → *Web chats* → *Show claude.ai, ChatGPT
+and Gemini chats*. Their bubbles are marked "Claude Chat", "ChatGPT" or "Gemini Chat" (e.g. "ChatGPT · 2m").
+
+- **Setting up:** turning it on writes a native messaging host (a manifest and a small launcher) to
+  `%APPDATA%\ttokttok-pet\webchats` and registers it for Chrome and Edge under
+  `HKCU\Software\…\NativeMessagingHosts\com.hyukjunlim.ttokttok_pet`, which needs no admin rights;
+  other Chromium browsers, such as Aside, read Chrome's. Then load the extension once: open the
+  browser's extensions page (`chrome://extensions`, `edge://extensions`), turn on *Developer mode*,
+  choose *Load unpacked* and pick the folder that *Open the extension folder* shows. The key in the
+  extension's manifest fixes its ID, so the host answers only this extension, wherever its folder
+  is. Turning web chats off removes the registration.
+
+  Without the tray menu (say, an assistant setting the pet up for you): quit the pet, set
+  `"webChats": true` in `%APPDATA%\ttokttok-pet\settings.json`, and start it again; it registers the
+  host as it starts. The extension's folder is `browser-extension` in the source folder, or
+  `resources\app\browser-extension` next to `Ttokttok Pet.exe` in a downloaded copy. Loading it
+  (*Developer mode* → *Load unpacked*) is the one step you do yourself in the browser.
+- **Running** while a reply is being written, **Ready** once it's done. Ready stays until you close
+  it with × (or the sidebar's *Mark as done*) or send another message, looked at or not. A
+  conversation open in several tabs gets one bubble.
+- **Clicking** brings the chat's tab and its browser window to the front. If the tab is gone, the
+  chat's address opens in your default browser.
+- **What it sends:** for each chat tab, its title, its address without query or fragment, whether a
+  reply is being written and whether you're looking at it. Never the messages. The extension only
+  reads the page and makes no requests of its own; the host hands the tabs' reports to the pet over
+  a local named pipe (`\\.\pipe\ttokttok-pet-webchats-<user>`), not the network.
+- **How it knows a reply is being written:** by the site's stop control. On claude.ai the message
+  being written carries `data-is-streaming="true"`. ChatGPT serves two different pages: on one, the
+  send button carries `data-stop-generating` and the message `data-message-streaming`; on the other,
+  which signed-in accounts may get, the only sign is a stop button shown in the message box,
+  labelled in the page's language (a hidden twin of it is always there). On Gemini, the send button
+  turns into a stop button while it writes (`.send-button.stop`, labelled in the page's language).
+  All of this is in `WRITING` at the top of [browser-extension/content.js](browser-extension/content.js).
+- **When bubbles don't come:** tray menu → *Sources* → *Web chats* says *Extension connected* once
+  a browser has the extension running, and *Waiting for the extension* until then. If it's
+  connected and a site's replies still don't show, the site has changed its page, and `WRITING` is
+  what to fix.
+  After changing the extension, reload it on the extensions page; the chat tabs already open get
+  the new copy without a reload.
+- **Not shown:** chats in the Claude or ChatGPT desktop apps, chats on other devices, and replies
+  that finish after you closed their tab (ChatGPT's deep research keeps going on the server then,
+  out of the pet's sight).
 
 ## Weekly limits
 
@@ -291,9 +421,10 @@ shows how much of that plan's weekly limit you've used against how far into the 
 - **Reading it:** a fill that reaches past the line means you're using the limit faster than
   the week goes by.
 
-The tray menu lists the same figures, with how far into the week you are, the time until each
-reset, and how old the figures are once they're over an hour old. Tray menu → *Show weekly
-limits* turns the meter off. The pet reads the figures from files; it contacts no server itself
+Hovering the sidebar's meter (in folder mode), or the tray menu (as a floating pet), gives the same
+figures in words, with how far into the week you are, the time until each reset, and how old the
+figures are once they're over an hour old. Tray menu → *Appearance* → *Show weekly limits* turns
+the meter off. The pet reads the figures from files; it contacts no server itself
 (apart from the SSH hosts above, and below, and SNU eTL once you turn [that](#etl-snu) on).
 
 - **Claude:** the pet's mod for Claude Code saves the figures after each reply of every session,
@@ -309,16 +440,17 @@ limits* turns the meter off. The pet reads the figures from files; it contacts n
 
 The pet comes with a small mod for Claude Code ([claude-mod/](claude-mod)). After each reply, Claude
 Code knows how much of your plan's limits the account has used, and when they reset; the mod
-saves those figures to `~/.claude-pet/usage.json`, and does nothing else. The weekly-limit meter
+saves those figures to `~/.ttokttok-pet/usage.json`, and does nothing else. The weekly-limit meter
 then follows your usage as it happens, from any session, whether you're at the PC or not.
 
-**Setting it up.** The pet asks once, on its first start, or as soon as it finds Claude Code in WSL.
-Later, use tray menu → *Live Claude usage*, which has a checkbox per machine. The desktop app isn't
-needed: Claude Code reads the same settings whether you start it from a terminal or the app does.
+**Setting it up.** Getting started's *Claude usage* step sets it up on the machines you tick. If it
+found Claude Code nowhere, the pet asks once as soon as it finds it in WSL. Later, use tray menu →
+*Sources* → *Live Claude usage*, which has a checkbox per machine. The desktop app isn't needed:
+Claude Code reads the same settings whether you start it from a terminal or the app does.
 
-- **This PC:** the pet copies the mod to `~/.claude-pet/mod/pet-usage` and adds two entries to
+- **This PC:** the pet copies the mod to `~/.ttokttok-pet/mod/pet-usage` and adds two entries to
   the `env` of Claude Code's settings (`~/.claude/settings.json`, backed up first to
-  `settings.json.claude-pet.bak`):
+  `settings.json.ttokttok-pet.bak`):
   - `CLAUDE_CODE_PLUGIN_DIRS`: the mod's folder, after any folders you already list there.
   - `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`: `1`, which mods need. This turns function hooks on for
     every Claude Code session on the machine.
@@ -338,8 +470,8 @@ needed: Claude Code reads the same settings whether you start it from a terminal
   `Include`s), without wildcards and git hosting like github.com. Picking one sets the mod up there;
   unticking it removes the mod and forgets the host. To read the hosts' figures, the pet keeps one
   SSH connection per host with a small read-only Python watcher that sends the file when it
-  changes; tray menu → *Live Claude usage* → *Read usage on SSH hosts* turns that off. As for
-  Codex, the host needs `python3` and a key that works without a prompt.
+  changes; tray menu → *Sources* → *Live Claude usage* → *Read usage on SSH hosts* turns that off.
+  As for Codex, the host needs `python3` and a key that works without a prompt.
 
 Sessions you start after setting it up use it; sessions already open don't. When the pet updates,
 it brings the copies of the mod it set up up to date too. Unticking a machine removes the entries
@@ -350,8 +482,9 @@ seconds, and the watcher on each SSH host checks every 2 seconds and sends it wh
 the meter follows within a few seconds.
 
 Claude Code's mods are an early-access feature and can change between releases. If the mod stops
-working, the meter keeps its last figures, and the tray menu says how old they are. The figures
-are the account's, so the pet assumes every machine uses the same Claude account.
+working, the meter keeps its last figures, and says how old they are (on hover in folder mode, in
+the tray menu as a floating pet). The figures are the account's, so the pet assumes every machine
+uses the same Claude account.
 
 ## eTL (SNU)
 
@@ -359,8 +492,8 @@ For students at Seoul National University, the pet can also watch [eTL](https://
 (SNU's Canvas LMS) and answer questions about it in a chat folder. It's **off** until you turn it
 on, and while it's off the pet makes no request to eTL and creates no file for it.
 
-**Turning it on.** On first start, choose *eTL 연결* when offered, or use tray menu → *eTL* → *켜기*
-later. A small window asks for an eTL access token: on eTL, open *계정 → 설정*
+**Turning it on.** In Getting started's *SNU eTL* step, choose *Connect eTL…*, or use tray menu →
+*Sources* → *eTL* → *켜기* later. A small window asks for an eTL access token: on eTL, open *계정 → 설정*
 (https://myetl.snu.ac.kr/profile/settings) → *새 액세스 토큰*, and paste it there. The pet checks
 the token with eTL before saving it. *토큰 등록/변경…* replaces it.
 
@@ -368,20 +501,22 @@ the token with eTL before saving it. *토큰 등록/변경…* replaces it.
 and on *지금 확인*. The first check only notes what's there and says how many assignments are due.
 After that, a bubble appears for:
 
-- **마감 임박:** 24 hours, 3 hours and 1 hour before an assignment you haven't submitted is due
-  (online submissions only). It shows the time left, kept current, and stays until the deadline
-  or until you submit.
+- **마감 임박:** from 24 hours before an assignment is due until the due time, one bubble per
+  assignment, made from the last check's list, so a check that fails doesn't lose it. It shows the
+  time left, kept current: **마감 임박** in yellow while it isn't handed in (red in its last 3
+  hours), **제출함** in green once it is, **오프라인** in gray for work handed in on paper. Its ×
+  hides it for an hour.
 - **마감 변경**, **새 과제**, **성적** (a new or changed grade) and **새 공지** (announcements of the
   last 14 days; one that mentions a makeup or cancelled class says **보강 공지** or **휴강 공지**).
 - **Today's classes:** from 6:00, one bubble per class (start time, course, room and how soon it
   starts, kept current), each until that class ends. The class under way or next stands out; 보강
   and 휴강 get their own badge. Clicking one opens the course; × hides it until the pet restarts or
-  the day ends; tray menu → *eTL* → *오늘 수업 알림* turns them off.
+  the day ends; tray menu → *Sources* → *eTL* → *오늘 수업 알림* turns them off.
 - **토큰 만료:** once, when eTL stops accepting the token.
 
-Clicking a bubble opens that eTL page in your browser; × dismisses it for good. Other bubbles go
-away after 3 days, and at most 30 are kept. Changes made while the pet wasn't running show up at
-the next check.
+Clicking a bubble opens that eTL page in your browser; × dismisses the others for good. Other
+bubbles go away after 3 days, and at most 30 are kept. Changes made while the pet wasn't running
+show up at the next check.
 
 **Chat folder.** Turning eTL on also creates a chat folder, `Documents\etl-assistant` by default
 (*채팅 폴더 위치 변경…* moves it; your `todos.md` and `timetable.md` are copied and the old folder is left
@@ -393,7 +528,7 @@ an **eTL 비서** bubble at the end of the others: clicking it goes back to the 
 the folder, or starts one (without Codex, it opens the folder). The folder holds instructions for Claude and Codex
 (`AGENTS.md`, `CLAUDE.md`), a few skills (`/briefing`, `/deadlines`, `/todo`) and `etl.js`, a small
 command the AI runs to ask the pet. The AI never sees the token: `etl.js` sends the question to
-the running pet over a local named pipe (`~/.claude-pet/etl.sock` on macOS and Linux), the pet
+the running pet over a local named pipe (`~/.ttokttok-pet/etl.sock` on macOS and Linux), the pet
 asks eTL, and only the answer goes back. With the pet closed or eTL off, the AI says so. When
 the pet updates, the folder's files are updated too, except `todos.md`.
 
@@ -457,7 +592,7 @@ lets the chat look up that course, including its materials.
   in the download records or returned to the AI. Filenames are cleaned and saved paths are
   checked to stay inside the chat folder.
 
-eTL's API can change; if checks start failing, the tray menu's eTL submenu shows the error.
+eTL's API can change; if checks start failing, tray menu → *Sources* → *eTL* shows the error.
 
 ## Pets
 
@@ -484,8 +619,8 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
 - **Rows 0–8** are the animations, with these frame counts: `idle` 6, `running-right` 8,
   `running-left` 8, `waving` 4, `jumping` 5, `failed` 8, `waiting` 6, `running` 6, `review` 6.
 - **Rows 9–10** hold 16 clockwise look directions, the first looking straight up. ChatGPT's pet
-  uses them to follow the cursor; Claude Pet doesn't.
-- **Pixel art:** add `"pixelArt": true` to keep it crisp at every size (this is a Claude Pet
+  uses them to follow the cursor; Ttokttok Pet doesn't.
+- **Pixel art:** add `"pixelArt": true` to keep it crisp at every size (this is a Ttokttok Pet
   extension to the format).
 - **Tray icon (optional):** put a `tray.png` (16 px) next to the sprite sheet, optionally with
   `tray@1.5x.png` (24 px) and `tray@2x.png` (32 px). The tray icon then switches whenever that
@@ -494,11 +629,11 @@ A pet is a folder containing `pet.json` and a sprite sheet, the same format as C
 Pets are loaded from these folders:
 
 1. `pets/` in this project, for the built-in pet, Clay.
-2. `~/.claude-pet/pets/` for your own pets. Tray menu → Pet → *Open my pets folder* opens it.
+2. `~/.ttokttok-pet/pets/` for your own pets. Tray menu → *Appearance* → *Pet* → *Open my pets folder* opens it.
 3. `~/.codex/pets/`, where pets you hatch in ChatGPT/Codex with the `hatch-pet` skill show up
    automatically.
 
-Switch between them in the tray menu → Pet.
+Switch between them in tray menu → *Appearance* → *Pet*.
 
 **Clay** is drawn in code by [tools/make_clay.py](tools/make_clay.py) and needs only Python to
 rebuild (`npm run sprite:clay`). It has two-tone outlines, bounce-light shading, eyebrows, raised
@@ -512,12 +647,12 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 
 - **A separate overlay window.** It's frameless, transparent, always on top, off the taskbar,
   shadowless and never takes focus: `frame:false, transparent:true, alwaysOnTop,
-  skipTaskbar, focusable:false`, then `setAlwaysOnTop(true,'floating')`. On Windows Claude Pet
+  skipTaskbar, focusable:false`, then `setAlwaysOnTop(true,'floating')`. On Windows Ttokttok Pet
   uses `'pop-up-menu'` instead: there `'floating'` also puts the window just behind the taskbar,
   and when the taskbar isn't on top at that moment, the pet isn't either.
 - **Clicks pass through.** The window runs `setIgnoreMouseEvents(true,{forward:true})` so it
   still receives mouse movement. The page tests whether the cursor is over the pet and only then
-  asks for real clicks. Claude Pet doesn't do that, because it needs two programs to agree on
+  asks for real clicks. Ttokttok Pet doesn't do that, because it needs two programs to agree on
   whether the window is taking clicks, and they can stop agreeing: on Windows the forwarded mouse
   moves can stop coming, and watching the cursor from the main process instead left the pet deaf
   until the mouse moved, after a virtual-desktop switch. Instead the window is cut to what's
@@ -526,13 +661,13 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
   nothing to track, and a click anywhere else goes to the window behind. The cost is that the
   bubbles' shadows, and the weekly-limit bubble, take clicks too.
 - **Sprite animation.** The sheet is a CSS `background-image` stepped with timers. A state
-  plays three times, then settles into an idle loop running at one-sixth speed. Claude Pet
+  plays three times, then settles into an idle loop running at one-sixth speed. Ttokttok Pet
   instead plays it twice and rests on its first frame. Its reactions to you (the jump on hover,
   the wave on a click) play twice, each frame held 25% longer, so they're easy to see.
 - **Look directions.** While calm, the eyes follow the cursor: `atan2(dx, -dy)` is split into
-  sixteen 22.5° sectors, which select a cell in rows 9–10. Claude Pet leaves this out.
+  sixteen 22.5° sectors, which select a cell in rows 9–10. Ttokttok Pet leaves this out.
 - **Throw physics.** 16 ms ticks, friction 0.88 per tick, bounce 0.7, and a stop below 65 px/s
-  or after 900 ms. Claude Pet uses the same numbers.
+  or after 900 ms. Ttokttok Pet uses the same numbers.
 
 ## Project layout
 
@@ -540,10 +675,20 @@ Everything below comes from reading the installed ChatGPT/Codex desktop app (v26
 src/main.js         Electron main process: window, drag/throw, tray, deep links
 src/shape.js        The window's shape: which parts take the mouse (the pet and the bubbles)
 src/preload.js      Minimal API exposed to the page (context isolation, sandboxed)
-src/renderer/       Pet page: sprite engine, activity bubbles
+src/renderer/       Pet page (sprite engine, activity bubbles), the sidebar's page and Getting started's page
 src/sessions.js     Finds sessions, follows their transcripts and the app's log
-src/foreground.js   Whether the Claude window is in front (a small PowerShell helper, Windows)
-src/raise.js        Brings Codex's window to the front after a codex:// link (Windows)
+src/foreground.js   Which app's window is in front, for Ctrl+Tab (a small PowerShell helper, Windows)
+src/raise.js        Brings Codex's window, or a web chat's browser window, to the front (Windows)
+src/folder-mode.js  Folder mode's sidebar: its window, docked at a monitor's left or right edge
+src/folder-tree.js  Sessions and threads → machine › folder tree, for the sidebar
+src/folder-preload.js What the sidebar's page may ask of the main process
+src/appbar.js       Docks a window as a Windows app bar (a small PowerShell helper)
+src/maximize.js     Maximizes the Claude and Codex windows beside the sidebar (Windows)
+src/step-keys.js    Ctrl+Tab through the sidebar while Claude, Codex or the sidebar is in front
+src/marks.js        Folder mode's Mark as Ready: which marks your next message takes off
+src/migrate.js      Brings over what an older install kept under its previous name
+src/onboarding.js   Getting started: the window, the state its steps show, the practice items
+src/hidden.js       Sessions hidden from the sidebar: which ones show again
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
 src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
@@ -556,7 +701,9 @@ src/usage.js        Weekly limits: Claude's figures (the mod's, the app's), Code
 src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
 src/etl/            SNU eTL: API client, notices, timetable, token store, query bridge, chat folder
+src/webchats/       Web chats: the extension's native host, its registration, tab reports → bubbles
 tools/make_clay.py  Generates Clay, the built-in pet
 claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
 etl-workspace/      What the eTL chat folder is made from: instructions, skills, etl.js
+browser-extension/  The Chrome/Edge extension that reports claude.ai, ChatGPT and Gemini tabs to the pet
 ```

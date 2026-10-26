@@ -103,7 +103,7 @@ function assistantItem({ since, codexInstalled }) {
     id: ASSISTANT_ID,
     kind: 'etl',
     assistant: true,
-    status: 'background',             // last in line, nothing to dismiss, the pet stays idle
+    status: 'background',             // last in line, the pet stays idle; its × turns it off
     badge: 'eTL 비서',
     title: '과제·공지·강의자료 물어보기',
     project: codexInstalled ? '눌러서 Codex에서 대화 열기' : '눌러서 채팅 폴더 열기',

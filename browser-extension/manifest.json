@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Ttokttok Pet: web chats",
+  "version": "1.0.6",
+  "description": "Tells Ttokttok Pet when a claude.ai, ChatGPT or Gemini reply is being written and when it's done. Sends only each chat's title, address and state, never its messages.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjBZYLTQ8vIOiGfOEXPtAiUCsq4OfDyyktxz/YwwlandyuB0kMb4NaH7SwM+8z9ogZqIj06Vy04rnht7gr/wHz/BM0evy9LvbQs+2dnPJTmCKzxSGvJGkL6piIaoVBsxBm5i6LIAYu5BdpdEud+4Ar9UeicBnP7EnoVMPdzLeEczjvVrXDAUr3faHdaLSonPWkx1iLN4UYD9G9Dg33J/00WYlLK36lUkP1eVXEQuxpVkStDkjmhPQ9KyP17NImkwA+nVm04r9jlZyxutzh+YYpg4/cqCeb4SkI+ab+nuS7e77Fsac3MO9l+1fKU0tyxZOdP57eXQCuV7bycZkdSUPdQIDAQAB",
+  "permissions": ["nativeMessaging", "scripting"],
+  "host_permissions": ["https://claude.ai/*", "https://chatgpt.com/*", "https://gemini.google.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*", "https://chatgpt.com/*", "https://gemini.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

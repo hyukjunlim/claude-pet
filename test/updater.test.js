@@ -16,7 +16,7 @@ function sh(cwd, ...args) {
 
 // A bare "GitHub", a clone to push new commits from, and `copy`: a user's install, one commit in.
 function setup(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-update-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-update-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
   const origin = path.join(dir, 'origin.git');
   sh(dir, 'init', '--bare', '-b', 'main', origin);
@@ -115,7 +115,7 @@ test('edited files stop an update, but a rewritten lockfile and new files do not
 });
 
 test('a folder that is not a git checkout cannot update itself', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-nogit-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-nogit-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const result = await checkForUpdate(dir);
   assert.equal(result.status, 'blocked');
@@ -231,25 +231,25 @@ function github(status, body) {
 test('a newer release is offered with its notes and page', async () => {
   const { fetch, calls } = github(200, {
     tag_name: 'v0.2.0',
-    html_url: 'https://github.com/hyukjunlim/claude-pet/releases/tag/v0.2.0',
+    html_url: 'https://github.com/hyukjunlim/ttokttok-pet/releases/tag/v0.2.0',
     body: 'Notes\r\n\r\n- Faster bubbles\r\n* A new pet\r\nnot a bullet\r\n',
   });
   const found = await checkForRelease('0.1.0', { fetch });
   assert.deepEqual(found, {
     status: 'available',
     version: '0.2.0',
-    url: 'https://github.com/hyukjunlim/claude-pet/releases/tag/v0.2.0',
+    url: 'https://github.com/hyukjunlim/ttokttok-pet/releases/tag/v0.2.0',
     changes: ['Faster bubbles', 'A new pet'],
   });
-  assert.match(calls[0].url, /api\.github\.com\/repos\/hyukjunlim\/claude-pet\/releases\/latest$/);
-  assert.equal(calls[0].options.headers['User-Agent'], 'claude-pet');
+  assert.match(calls[0].url, /api\.github\.com\/repos\/hyukjunlim\/ttokttok-pet\/releases\/latest$/);
+  assert.equal(calls[0].options.headers['User-Agent'], 'ttokttok-pet');
 });
 
 test('the same or an older release is not an update', async () => {
   for (const tag of ['v0.1.0', '0.0.9', 'v0.1.0-rc1']) {
     const found = await checkForRelease('0.1.0', { fetch: github(200, { tag_name: tag, body: null }).fetch });
     assert.equal(found.status, 'current', tag);
-    assert.equal(found.url, 'https://github.com/hyukjunlim/claude-pet/releases/latest');
+    assert.equal(found.url, 'https://github.com/hyukjunlim/ttokttok-pet/releases/latest');
   }
   const newer = await checkForRelease('0.1.0', { fetch: github(200, { tag_name: '1.0.0' }).fetch });
   assert.equal(newer.status, 'available');

@@ -1,16 +1,16 @@
 'use strict';
 
-// Sets up Claude Pet's mod for Claude Code (claude-mod/, see its register.ts) on this PC, in WSL
+// Sets up Ttokttok Pet's mod for Claude Code (claude-mod/, see its register.ts) on this PC, in WSL
 // and on SSH hosts, and takes it away again. The mod saves the plan's usage after each reply to
-// ~/.claude-pet/usage.json, which keeps the weekly-limit meter current (see claude-usage.js).
+// ~/.ttokttok-pet/usage.json, which keeps the weekly-limit meter current (see claude-usage.js).
 //
 // Setting it up on a machine:
-//   - copies the mod to ~/.claude-pet/mod/pet-usage (WSL runs the Windows copy, through /mnt/c),
+//   - copies the mod to ~/.ttokttok-pet/mod/pet-usage (WSL runs the Windows copy, through /mnt/c),
 //   - and adds two entries to the `env` of Claude Code's ~/.claude/settings.json, which Claude Code
 //     reads as each session starts, the desktop app's sessions included:
 //       CLAUDE_CODE_PLUGIN_DIRS            the mod's folder, after any folders already listed
 //       CLAUDE_CODE_ENABLE_FUNCTION_HOOKS  "1", which mods need
-//     The settings file is copied to settings.json.claude-pet.bak first.
+//     The settings file is copied to settings.json.ttokttok-pet.bak first.
 // Taking it away removes those again (function hooks only if they were off before), with the
 // mod's folder and its usage file.
 //
@@ -18,18 +18,27 @@
 // from a terminal or the desktop app runs it (the app doesn't pass mods on: it leaves a plugin's
 // hooks/ out when it copies the plugin there), so each of those machines gets its own entries.
 // There a small Python script makes the same changes (INSTALLER).
+//
+// An older install kept all this in ~/.<previous name> (migrate.js). A mod there still counts as
+// the pet's, and each machine moves over once: this PC as the pet starts (LocalMod.adoptLegacy),
+// WSL and SSH hosts with their next 'update' (INSTALLER).
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { BOOTSTRAP, LOADER, asciiJson, sshArgs } = require('./ssh-watcher');
+const { previous } = require('./migrate');
 
 const MOD_NAME = 'pet-usage';
 const MOD_SOURCE = path.join(__dirname, '..', 'claude-mod');
 const MOD_FILES = ['.claude-plugin/plugin.json', 'hooks/hooks.json', 'hooks/register.ts'];
-const OURS_RE = /[\\/]\.claude-pet[\\/]mod[\\/]pet-usage[\\/]*$/;   // the mod's folder, on any machine
-const BACKUP_SUFFIX = '.claude-pet.bak';
+const LEGACY_HOME = previous.homeDir;
+// the mod's folder under one of these home folders, on any machine
+const modDirRe = (...homes) => new RegExp(`[\\\\/](?:${homes.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})[\\\\/]mod[\\\\/]pet-usage[\\\\/]*$`);
+const OURS_RE = modDirRe('.ttokttok-pet', LEGACY_HOME);
+const LEGACY_RE = modDirRe(LEGACY_HOME);
+const BACKUP_SUFFIX = '.ttokttok-pet.bak';
 const INSTALLER_TIMEOUT_MS = 60_000;
 const TOOL_DISTRO_RE = /^(docker-desktop|rancher-desktop|podman-machine)/i;   // WSL distros that aren't for people
 
@@ -54,6 +63,13 @@ function withMod(settings, dir, delimiter) {
   const hooksWereOff = env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS !== '1';
   env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS = '1';
   return { settings: { ...settings, env }, hooksWereOff };
+}
+
+// The settings loading the mod from `dir` in place of wherever they did; function hooks stay as they are.
+function withModMoved(settings, dir, delimiter) {
+  const env = { ...settings.env };
+  env.CLAUDE_CODE_PLUGIN_DIRS = [...pluginDirs(env, delimiter).filter((d) => !OURS_RE.test(d)), dir].join(delimiter);
+  return { ...settings, env };
 }
 
 // The settings with the mod's entries taken out, function hooks too when the pet turned them on.
@@ -81,7 +97,8 @@ function isObject(v) {
 // The mod on the machine the pet runs on.
 class LocalMod {
   constructor({ home = os.homedir(), claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), delimiter = path.delimiter } = {}) {
-    this.petDir = path.join(home, '.claude-pet');
+    this.petDir = path.join(home, '.ttokttok-pet');
+    this.legacyDir = path.join(home, LEGACY_HOME);
     this.dir = path.join(this.petDir, 'mod', MOD_NAME);
     this.usageFile = path.join(this.petDir, 'usage.json');
     this.stateFile = path.join(this.petDir, 'install.json');
@@ -136,7 +153,60 @@ class LocalMod {
     fs.rmSync(path.join(this.petDir, 'mod'), { recursive: true, force: true });
     fs.rmSync(this.stateFile, { force: true });
     fs.rmSync(this.usageFile, { force: true });
+    this.dropLegacy();
     return this.status();
+  }
+
+  // An older install's ~/.<previous name>: your pets, the install state and the usage file move here, and
+  // this PC's settings load the mod from here. Its copy of the mod stays for WSL distros still set
+  // up with it (dropLegacy takes it away). Sessions started before the move save their usage
+  // there until they're restarted, so a newer file there is taken each time. What it moved.
+  adoptLegacy() {
+    if (!fs.existsSync(this.legacyDir)) return [];
+    const moved = [];
+    fs.mkdirSync(this.petDir, { recursive: true });
+    for (const name of ['pets', 'install.json']) {
+      const from = path.join(this.legacyDir, name);
+      const to = path.join(this.petDir, name);
+      if (fs.existsSync(from) && !fs.existsSync(to)) {
+        fs.renameSync(from, to);
+        moved.push(name);
+      }
+    }
+    const usage = path.join(this.legacyDir, 'usage.json');
+    if (fs.existsSync(usage)) {
+      if (!fs.existsSync(this.usageFile) || fs.statSync(usage).mtimeMs > fs.statSync(this.usageFile).mtimeMs) {
+        fs.renameSync(usage, this.usageFile);
+        moved.push('usage.json');
+      } else {
+        fs.rmSync(usage);
+      }
+    }
+    if (fs.existsSync(path.join(this.legacyDir, 'mod')) && !fs.existsSync(this.dir)) {
+      this.copyFiles();
+      moved.push('mod');
+    }
+    const settings = this.readSettings();
+    if (pluginDirs(settings.env, this.delimiter).some((d) => LEGACY_RE.test(d))) {
+      this.writeSettings(withModMoved(settings, this.dir, this.delimiter));
+      moved.push('settings');
+    }
+    try {
+      fs.rmdirSync(this.legacyDir);
+    } catch {
+      // the mod's still there, or something else is
+    }
+    return moved;
+  }
+
+  // The older install's copy of the mod, and its folder once nothing else is left in it.
+  dropLegacy() {
+    fs.rmSync(path.join(this.legacyDir, 'mod'), { recursive: true, force: true });
+    try {
+      fs.rmdirSync(this.legacyDir);
+    } catch {
+      // not there, or something else is still in it
+    }
   }
 
   copyFiles() {
@@ -179,7 +249,7 @@ class LocalMod {
 
 function writeFileAtomic(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.claude-pet.tmp`;
+  const tmp = `${file}.ttokttok-pet.tmp`;
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, file);
 }
@@ -188,21 +258,43 @@ function writeFileAtomic(file, text) {
 //   { action: 'install' | 'update' | 'uninstall' | 'status', files?: { <path>: <text> }, windowsDir?: <path> }
 // and answers with one line, { ok: true, version, enabled, claude } or { ok: false, error }, where
 // `claude` says whether Claude Code is set up there at all (its ~/.claude). `files` are
-// the mod's, copied to ~/.claude-pet/mod/pet-usage; 'update' copies them and leaves the settings be. In WSL there are none: `windowsDir` names
+// the mod's, copied to ~/.ttokttok-pet/mod/pet-usage; 'update' copies them and leaves the settings be. In WSL there are none: `windowsDir` names
 // the copy on the Windows side, which WSL reaches through its path under /mnt (wslpath).
+// `legacy` in the answer says the settings still load an older install's copy, from LEGACY; any
+// action but 'status' moves its files over, and 'update' points the settings at the new copy.
 const INSTALLER = String.raw`
 import json, os, shutil, subprocess, sys
 
 req = json.loads(sys.stdin.readline())
 HOME = os.path.expanduser('~')
-PET = os.path.join(HOME, '.claude-pet')
+PET = os.path.join(HOME, '.ttokttok-pet')
+LEGACY = os.path.join(HOME, '${LEGACY_HOME}')
 MOD = os.path.join(PET, 'mod', 'pet-usage')
 STATE = os.path.join(PET, 'install.json')
 CLAUDE = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude')
 SETTINGS = os.path.join(CLAUDE, 'settings.json')
 
+def is_legacy(d):
+    return d.replace(chr(92), '/').rstrip('/').endswith('/${LEGACY_HOME}/mod/pet-usage')
+
 def is_ours(d):
-    return d.replace(chr(92), '/').rstrip('/').endswith('/.claude-pet/mod/pet-usage')
+    return d.replace(chr(92), '/').rstrip('/').endswith('/.ttokttok-pet/mod/pet-usage') or is_legacy(d)
+
+def adopt_legacy():
+    for name in ('install.json', 'usage.json'):
+        old, new = os.path.join(LEGACY, name), os.path.join(PET, name)
+        if os.path.exists(old) and not os.path.exists(new):
+            os.makedirs(PET, exist_ok=True)
+            os.replace(old, new)
+
+def drop_legacy():
+    shutil.rmtree(os.path.join(LEGACY, 'mod'), ignore_errors=True)
+    for name in ('install.json', 'usage.json'):
+        remove(os.path.join(LEGACY, name))
+    try:
+        os.rmdir(LEGACY)
+    except OSError:
+        pass
 
 def read_json(path, default):
     try:
@@ -213,7 +305,7 @@ def read_json(path, default):
 
 def write_text(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + '.claude-pet.tmp'
+    tmp = path + '.ttokttok-pet.tmp'
     with open(tmp, 'w', encoding='utf-8', newline='') as f:
         f.write(text)
     os.replace(tmp, path)
@@ -238,7 +330,8 @@ def answer(settings):
     except (OSError, ValueError, subprocess.CalledProcessError):
         manifest = {}
     enabled = any(is_ours(d) for d in dirs) and env.get('CLAUDE_CODE_ENABLE_FUNCTION_HOOKS') == '1'
-    return {'ok': True, 'version': manifest.get('version'), 'enabled': enabled, 'claude': os.path.isdir(CLAUDE)}
+    return {'ok': True, 'version': manifest.get('version'), 'enabled': enabled, 'claude': os.path.isdir(CLAUDE),
+            'legacy': any(is_legacy(d) for d in dirs)}
 
 def main():
     action = req.get('action')
@@ -254,17 +347,22 @@ def main():
         return {'ok': False, 'error': SETTINGS + " isn't a JSON object, so the pet left it alone."}
     if action == 'status':
         return answer(settings)
-    if action == 'update':
-        for rel, body in (req.get('files') or {}).items():
-            write_text(os.path.join(MOD, *rel.split('/')), body)
-        return answer(settings)
+    adopt_legacy()
     try:
         state = read_json(STATE, {})
     except ValueError:
         state = {}
     env = dict(settings.get('env') or {})
-    dirs = [d for d in str(env.get('CLAUDE_CODE_PLUGIN_DIRS') or '').split(os.pathsep) if d and not is_ours(d)]
-    if action == 'install':
+    listed = [d for d in str(env.get('CLAUDE_CODE_PLUGIN_DIRS') or '').split(os.pathsep) if d]
+    dirs = [d for d in listed if not is_ours(d)]
+    if action == 'update':
+        for rel, body in (req.get('files') or {}).items():
+            write_text(os.path.join(MOD, *rel.split('/')), body)
+        if not any(is_legacy(d) for d in listed):
+            drop_legacy()
+            return answer(settings)
+        env['CLAUDE_CODE_PLUGIN_DIRS'] = os.pathsep.join(dirs + [mod_dir()])
+    elif action == 'install':
         for rel, body in (req.get('files') or {}).items():
             write_text(os.path.join(MOD, *rel.split('/')), body)
         env['CLAUDE_CODE_PLUGIN_DIRS'] = os.pathsep.join(dirs + [mod_dir()])
@@ -288,8 +386,9 @@ def main():
     else:
         settings.pop('env', None)
     if os.path.exists(SETTINGS):
-        shutil.copyfile(SETTINGS, SETTINGS + '.claude-pet.bak')
+        shutil.copyfile(SETTINGS, SETTINGS + '.ttokttok-pet.bak')
     write_text(SETTINGS, json.dumps(settings, indent=2, ensure_ascii=False) + '\n')
+    drop_legacy()
     return answer(settings)
 
 try:

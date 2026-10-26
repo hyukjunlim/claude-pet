@@ -10,6 +10,7 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { ClaudeUsage, parseSshHosts } = require('../src/claude-usage');
 const { ClaudeRemote, WATCHER } = require('../src/claude-remote');
+const { previous } = require('../src/migrate');
 const { BOOTSTRAP, LOADER } = require('../src/ssh-watcher');
 
 const T0 = Date.parse('2026-03-14T09:00:00.000Z');
@@ -85,7 +86,7 @@ test("the SSH watcher reports the host's saved usage, and whether the mod is set
 });
 
 test("Claude's readings come from the mod's file here and on each SSH host", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-usage-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-usage-'));
   const usageFile = path.join(dir, 'usage.json');
   const sshConnections = path.join(dir, 'ssh_configs.json');
   const remotes = [];
@@ -139,7 +140,7 @@ test("Claude's readings come from the mod's file here and on each SSH host", asy
 });
 
 test('hosts picked from ~/.ssh/config are read next to the desktop app\'s', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-usage-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-usage-'));
   const sshConnections = path.join(dir, 'ssh_configs.json');
   const remotes = [];
   const usage = new ClaudeUsage({
@@ -182,32 +183,43 @@ test('hosts picked from ~/.ssh/config are read next to the desktop app\'s', asyn
 // The watcher is plain Python 3; run it here against a fake home if Python is installed.
 const python = ['python3', 'python'].find((cmd) => spawnSync(cmd, ['-c', 'import sys; sys.exit(sys.version_info[0] != 3)']).status === 0);
 
-test('the watcher script sends the usage file and the mod state, and again when they change', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
-  const env = { ...process.env, HOME: home, USERPROFILE: home };
-  delete env.CLAUDE_CONFIG_DIR;
-  const petDir = path.join(home, '.claude-pet');
-  const modDir = path.join(petDir, 'mod', 'pet-usage');
+// A home folder for the watcher, with the mod's folder `dir` (under it) in Claude Code's settings.
+function watcherHome(dir, env = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
+  const modDir = path.join(home, ...dir.split('/'));
   fs.mkdirSync(path.join(modDir, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(path.join(modDir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'pet-usage', version: '1.0.0' }));
   fs.mkdirSync(path.join(home, '.claude'));
-  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: modDir } }));
-  fs.writeFileSync(path.join(petDir, 'usage.json'), JSON.stringify(saved(T0, 40)));
+  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: modDir, ...env } }));
+  return { home, modDir };
+}
+
+// Runs WATCHER with `home` as the home folder; last(key) is the latest message with that key.
+function watch(home) {
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CLAUDE_CONFIG_DIR;
   const child = spawn(python, ['-u', '-c', LOADER], { env, windowsHide: true });
   const exited = new Promise((resolve) => child.on('exit', resolve));
+  const messages = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+      messages.push(JSON.parse(buffer.slice(0, nl)));
+      buffer = buffer.slice(nl + 1);
+    }
+  });
+  child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
+  return { child, exited, messages, last: (key) => messages.filter((m) => key in m).at(-1)?.[key] };
+}
+
+test('the watcher script sends the usage file and the mod state, and again when they change', { skip: !python && 'Python 3 is not installed' }, async () => {
+  const { home, modDir } = watcherHome('.ttokttok-pet/mod/pet-usage');
+  const petDir = path.join(home, '.ttokttok-pet');
+  fs.writeFileSync(path.join(petDir, 'usage.json'), JSON.stringify(saved(T0, 40)));
+  const { child, exited, messages, last } = watch(home);
   try {
-    const messages = [];
-    let buffer = '';
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      buffer += chunk;
-      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
-        messages.push(JSON.parse(buffer.slice(0, nl)));
-        buffer = buffer.slice(nl + 1);
-      }
-    });
-    child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
-    const last = (key) => messages.filter((m) => key in m).at(-1)?.[key];
     assert.ok(await waitFor(() => messages.some((m) => typeof m.now === 'number')), 'sends the host clock');
     assert.ok(await waitFor(() => last('usage') && last('mod')));
     assert.deepEqual(last('usage'), saved(T0, 40));
@@ -222,6 +234,75 @@ test('the watcher script sends the usage file and the mod state, and again when 
     child.stdin.end();
     const late = new Promise((resolve) => setTimeout(() => resolve('still running'), 4000));
     assert.notEqual(await Promise.race([exited, late]), 'still running');
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the watcher counts an older install's copy of the mod as the mod, so the pet moves it over", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const { home } = watcherHome(`${previous.homeDir}/mod/pet-usage`, { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1' });
+  const { child, last } = watch(home);
+  try {
+    assert.ok(await waitFor(() => last('mod')));
+    assert.deepEqual(last('mod'), { version: '1.0.0', enabled: true });
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the watcher follows the host's VS Code and terminal sessions, not the desktop app's", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const { home } = watcherHome('.ttokttok-pet/mod/pet-usage');
+  const projects = path.join(home, '.claude', 'projects', '-home-me-repo');
+  fs.mkdirSync(projects, { recursive: true });
+  const vscode = '11111111-1111-4111-8111-111111111111';
+  const desktop = '22222222-2222-4222-8222-222222222222';
+  const entry = (text, entrypoint) => `${JSON.stringify({ type: 'user', cwd: '/home/me/repo', message: { role: 'user', content: text }, entrypoint })}\n`;
+  fs.writeFileSync(path.join(projects, `${vscode}.jsonl`), entry('first', 'claude-vscode'));
+  // The desktop app's: its first entry so long that what started it (at the entry's end) is past
+  // the first 64 KB; the file's last bytes still say.
+  fs.writeFileSync(path.join(projects, `${desktop}.jsonl`), entry('x'.repeat(100_000), 'claude-desktop') + entry('more', 'claude-desktop-3p'));
+  const { child, messages } = watch(home);
+  try {
+    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats)), 15000));
+    const opened = messages.filter((m) => 'chat' in m);
+    assert.deepEqual(opened.map((m) => m.id), [vscode], "the desktop app's session isn't followed");
+    const n = opened[0].chat;
+    // The watcher lists what it follows first and sends their lines after, as a separate write.
+    assert.ok(await waitFor(() => messages.some((m) => m.cl === n), 8000), 'the lines so far come next');
+    assert.deepEqual(messages.filter((m) => m.cl === n).map((m) => JSON.parse(m.l).message.content), ['first']);
+
+    fs.appendFileSync(path.join(projects, `${vscode}.jsonl`), entry('second', 'claude-vscode'));
+    assert.ok(await waitFor(() => messages.some((m) => m.cl === n && m.l.includes('second')), 8000), 'a new line comes as it is written');
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the watcher sends a quick look at the host's older VS Code and terminal sessions", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const { home } = watcherHome('.ttokttok-pet/mod/pet-usage');
+  const projects = path.join(home, '.claude', 'projects', '-home-me-site');
+  fs.mkdirSync(projects, { recursive: true });
+  const vscode = '33333333-3333-4333-8333-333333333333';
+  const desktop = '44444444-4444-4444-8444-444444444444';
+  const old = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  const entry = (e) => `${JSON.stringify(e)}\n`;
+  fs.writeFileSync(path.join(projects, `${vscode}.jsonl`),
+    entry({ type: 'user', entrypoint: 'claude-vscode', cwd: '/home/me/site', timestamp: old.toISOString(), message: { role: 'user', content: 'hi' } })
+    + entry({ type: 'ai-title', aiTitle: 'Reagent website' }));
+  fs.writeFileSync(path.join(projects, `${desktop}.jsonl`),
+    entry({ type: 'user', entrypoint: 'claude-desktop', cwd: '/home/me/site', timestamp: old.toISOString(), message: { role: 'user', content: 'app' } }));
+  for (const id of [vscode, desktop]) fs.utimesSync(path.join(projects, `${id}.jsonl`), old, old);
+  const { child, messages } = watch(home);
+  try {
+    assert.ok(await waitFor(() => messages.some((m) => Array.isArray(m.chats)), 15000));
+    const peeks = messages.filter((m) => m.peek).map((m) => m.peek);
+    assert.deepEqual(peeks.map((p) => [p.id, p.entrypoint, p.cwd, p.ai_title, p.at]),
+      [[vscode, 'claude-vscode', '/home/me/site', 'Reagent website', old.toISOString()]]);
+    assert.equal(messages.some((m) => 'chat' in m), false, 'not followed: a quick look is all');
+    assert.deepEqual(messages.find((m) => Array.isArray(m.chats)).peeked, [vscode]);
   } finally {
     child.kill();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });

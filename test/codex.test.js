@@ -10,7 +10,7 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { CodexTracker, parseAeons, parseConnections, parseUnread, threadUrl } = require('../src/codex');
 const { BOOTSTRAP, CodexRemote, LOADER, WATCHER } = require('../src/codex-remote');
-const { applyRolloutEntry, createRolloutState, rateLimitsOf, rolloutStatus } = require('../src/rollout');
+const { applyRolloutEntry, clientOf, createRolloutState, rateLimitsOf, rolloutStatus } = require('../src/rollout');
 
 const T0 = Date.parse('2026-09-25T04:00:00.000Z');
 const at = (s) => new Date(T0 + s * 1000).toISOString();
@@ -47,6 +47,16 @@ function rollout(entries) {
 test('a Codex turn in progress is running, with the command it runs', () => {
   const s = rollout([meta(), started(1), shell(3, ['bash', '-lc', 'npm test'])]);
   assert.deepEqual(rolloutStatus(s, { now: T0 + 5000 }), { status: 'running', detail: 'npm test', since: T0 + 1000 });
+});
+
+test('from readyFrom on, a desktop thread is Ready until dismissed, read in the app or not', () => {
+  const s = rollout([meta(), started(1), complete(9)]);
+  const readyFrom = T0;
+  assert.equal(rolloutStatus(s, { now: T0 + 20_000, unread: false, readyFrom }).status, 'review');
+  assert.equal(rolloutStatus(s, { now: T0 + 13 * 3600_000, unread: false, readyFrom }).status, 'review');
+  assert.equal(rolloutStatus(s, { now: T0 + 20_000, unread: false, readyFrom, dismissedAt: T0 + 15_000 }).status, 'idle');
+  // Before readyFrom, reading it in the app settled it.
+  assert.equal(rolloutStatus(s, { now: T0 + 20_000, unread: false, readyFrom: T0 + 10_000 }).status, 'idle');
 });
 
 test("a desktop thread is ready while Codex lists it as unread, and quiet once you've read it", () => {
@@ -117,6 +127,12 @@ test('questions asked mid-turn wait for you until you answer them, while the tur
   assert.equal(rolloutStatus(ended, { now: T0 + 21_000 }).status, 'running');
 });
 
+test("the last message you sent a thread is noted, for folder mode's flags", () => {
+  const sent = (s, text) => ({ timestamp: at(s), type: 'event_msg', payload: { type: 'item_completed', turn_id: 't1', item: { type: 'UserMessage', id: `u${s}`, content: [{ type: 'text', text }] } } });
+  assert.equal(rollout([meta(), started(1), complete(9)]).lastPromptAt, 0);
+  assert.equal(rollout([meta(), started(1), sent(1, 'parse the logs'), complete(9), started(20), sent(20, 'and the tests')]).lastPromptAt, T0 + 20_000);
+});
+
 test('a turn is running even when the rollout is read from after its start', () => {
   const work = (s, turn, type = 'item_completed') => (type === 'token_usage_record'
     ? { timestamp: at(s), type, payload: { turn_id: turn } }
@@ -168,12 +184,13 @@ test('links open the thread on its host', () => {
 });
 
 test('the tracker combines running threads here with unread threads on other hosts', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   try {
     const hash = 'b'.repeat(64);
     const remoteThread = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6c';
+    const subagent = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a7d';   // spawned by remoteThread; the app doesn't list it
     fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
-      'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`remote-ssh-discovered:lab-server:${hash}`]: [remoteThread] } } },
+      'electron-thread-read-state-v1': { version: 1, unreadByIdentity: { me: { [`remote-ssh-discovered:lab-server:${hash}`]: [remoteThread, subagent] } } },
       'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab-server' }],
     }));
     fs.mkdirSync(path.join(home, 'sqlite'));
@@ -215,7 +232,7 @@ test('the tracker combines running threads here with unread threads on other hos
 });
 
 test("unread threads with nothing to date them, and Codex's helper threads, aren't Ready", async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   try {
     const stale = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6d';    // unread for weeks, no catalog row or rollout
     const helper = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a6e';   // a subagent, which nobody opens
@@ -242,6 +259,51 @@ test("unread threads with nothing to date them, and Codex's helper threads, aren
     unread([stale, helper]);
     await tracker.tick();
     assert.deepEqual(tracker.sessions, []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('the full list has the threads the app lists, quiet ones included, but not helpers or chats', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
+  try {
+    fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
+      'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab', alias: 'lab-server' }],
+    }));
+    fs.mkdirSync(path.join(home, 'sqlite'));
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(path.join(home, 'sqlite', 'codex-dev.db'));
+    db.exec('create table local_thread_catalog (host_id text, thread_id text, display_title text, source_updated_at real, cwd text, thread_source text, missing_candidate integer)');
+    const add = db.prepare('insert into local_thread_catalog values (?, ?, ?, ?, ?, ?, ?)');
+    const t = Date.now() / 1000 - 3 * 24 * 3600;
+    add.run('remote-ssh-discovered:lab-server', 'th-remote', 'Compare descriptors', t + 10, '/data/proj', 'user', 0);
+    add.run('local', 'th-local', 'Reframe chemistry', t, '/home/me/proj', 'user', 0);
+    add.run('remote-ssh-discovered:lab-server', 'th-review', 'Guardian review', t + 20, '/data/proj', 'guardian_review', 0);
+    add.run('local', 'th-missing', 'Gone', t + 30, '/home/me/proj', 'user', 1);
+    add.run('chatgpt:org:user', 'chat-thread', 'A chat', t + 40, null, null, 0);
+    db.close();
+
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false });
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);
+    assert.deepEqual(tracker.all.map((s) => [s.id, s.hostId, s.status]), [
+      ['codex:th-remote', 'remote-ssh-discovered:lab-server', 'idle'],
+      ['codex:th-local', 'local', 'idle'],
+    ]);
+    const [remote] = tracker.all;
+    assert.equal(remote.title, 'Compare descriptors');
+    assert.equal(remote.remote, 'lab');
+    assert.equal(remote.url, 'codex://threads/th-remote?hostId=remote-ssh-discovered%3Alab-server');
+    assert.equal(remote.lastActivityAt, Math.round((t + 10) * 1000));
+
+    // From readyFrom on, a thread past its rollout's hour stays Ready until you mark it done.
+    const readyFrom = Math.round((t + 5) * 1000);
+    const later = new CodexTracker({ ...pathsIn(home), watchHosts: false, readyFrom });
+    await later.tick();
+    assert.deepEqual(later.sessions.map((s) => [s.id, s.status]), [['codex:th-remote', 'review']]);
+    const done = new CodexTracker({ ...pathsIn(home), watchHosts: false, readyFrom, dismissed: { 'codex:th-remote': Date.now() } });
+    await done.tick();
+    assert.deepEqual(done.sessions, []);
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   }
@@ -290,7 +352,7 @@ test("a dot's name, last activity and subtasks come from the app's persisted sta
 // clock, rewrites the app's state file with `state` (or what `state(clock)` returns) and gives
 // back the sessions the pet would show.
 function dotTracker(first) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   const file = path.join(home, '.codex-global-state.json');
   let clock = T0;
   let version = 0;
@@ -384,7 +446,7 @@ test('an unread dot is Ready only when a turn came before the flag', async () =>
 });
 
 test('a dot that is mid-turn when the pet starts is working, and one that stopped is not', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   try {
     const file = path.join(home, '.codex-global-state.json');
     const statusAt = async (activity, unread = []) => {
@@ -509,7 +571,7 @@ test('the SSH watcher keeps the newest rate limits it has seen on the host', asy
 });
 
 test('the tracker shows threads running on an SSH host', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   const fake = new EventEmitter();
   Object.assign(fake, { files: new Map(), skew: SKEW, target: 'lab-server', port: null, identity: null, start() {}, stop() {} });
   const tracker = new CodexTracker({ ...pathsIn(home), remoteFactory: () => fake });
@@ -536,7 +598,7 @@ test('the tracker shows threads running on an SSH host', async () => {
 });
 
 test('the rate limits are the newest ones, from an old rollout here or from an SSH host', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-codex-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
   const fake = new EventEmitter();
   Object.assign(fake, { files: new Map(), skew: SKEW, limits: null, target: 'lab-server', port: null, identity: null, start() {}, stop() {} });
   const tracker = new CodexTracker({ ...pathsIn(home), remoteFactory: () => fake });
@@ -573,7 +635,7 @@ test('the rate limits are the newest ones, from an old rollout here or from an S
 const python = ['python3', 'python'].find((cmd) => spawnSync(cmd, ['-c', 'import sys; sys.exit(sys.version_info[0] != 3)']).status === 0);
 
 test('the watcher script streams a rollout and the lines added to it', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   const day = path.join(home, 'sessions', '2026', '09', '25');
   fs.mkdirSync(day, { recursive: true });
   const file = path.join(day, `rollout-2026-09-25T13-00-00-${THREAD}.jsonl`);
@@ -617,7 +679,7 @@ test('the watcher script streams a rollout and the lines added to it', { skip: !
 });
 
 test('the watcher script finds a new thread in the folder of the day at once, without walking the rest', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
   const child = spawn(python, ['-u', '-c', LOADER], { env: { ...process.env, CODEX_HOME: home }, windowsHide: true });
   try {
@@ -655,7 +717,7 @@ test('the watcher script finds a new thread in the folder of the day at once, wi
 });
 
 test('the watcher script sends the newest rate limits, even from a rollout too old to follow', { skip: !python && 'Python 3 is not installed' }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-watch-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   const day = path.join(home, 'sessions', '2026', '09', '24');
   fs.mkdirSync(day, { recursive: true });
   const old = path.join(day, `rollout-2026-09-24T10-00-00-${THREAD}.jsonl`);
@@ -681,6 +743,189 @@ test('the watcher script sends the newest rate limits, even from a rollout too o
     assert.ok(i > 0 && typeof messages[0].now === 'number', 'the host clock comes first');
     assert.equal(rateLimitsOf(JSON.parse(messages[i].limits)).weekly.percent, 41);
     assert.ok(!messages.some((m) => m.open != null), 'the old rollout itself is not followed');
+  } finally {
+    child.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+// ------------------------------------------------------------------ VS Code and terminal chats
+
+const CHAT = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4b01';
+const vscodeMeta = (id = CHAT, extra = {}) => meta({ id, originator: 'codex_vscode', cwd: '/home/me/urban-map', ...extra });
+const iso = (t) => new Date(t).toISOString();
+// A turn that started at `from` and ended at `to` (ms), as a rollout writes it.
+const turn = (from, to) => [
+  { timestamp: iso(from), type: 'event_msg', payload: { type: 'task_started', turn_id: `t${from}`, started_at: from / 1000 } },
+  { timestamp: iso(to), type: 'event_msg', payload: { type: 'task_complete', turn_id: `t${from}`, last_agent_message: 'Done.', completed_at: to / 1000 } },
+];
+
+function writeRollout(root, id, entries, mtime) {
+  const day = path.join(root, '2026', '10', '20');
+  fs.mkdirSync(day, { recursive: true });
+  const file = path.join(day, `rollout-2026-10-20T10-00-00-${id}.jsonl`);
+  fs.writeFileSync(file, entries.map((e) => `${JSON.stringify(e)}\n`).join(''));
+  fs.utimesSync(file, new Date(mtime), new Date(mtime));
+  return file;
+}
+
+test("a thread's first line says whether it's a VS Code or terminal chat", () => {
+  assert.equal(clientOf(rollout([meta({ originator: 'codex_vscode' })])), 'vscode');
+  assert.equal(clientOf(rollout([meta({ originator: 'codex-tui', source: 'cli' })])), 'terminal');
+  assert.equal(clientOf(rollout([meta()])), null, "the app's");
+  assert.equal(clientOf(rollout([meta({ originator: 'codex_exec', source: 'exec' })])), null, 'a codex exec run');
+  assert.equal(clientOf(rollout([meta({ originator: 'codex_vscode', source: { subagent: { other: 'guardian' } } })])), null, 'a helper');
+});
+
+test('from cliReadyFrom on, a VS Code chat is Ready until dismissed', () => {
+  const s = rollout([meta({ originator: 'codex_vscode' }), started(1), complete(9)]);
+  assert.equal(rolloutStatus(s, { now: T0 + 3 * 3600_000, cliReadyFrom: T0 }).status, 'review');
+  assert.equal(rolloutStatus(s, { now: T0 + 3 * 3600_000, cliReadyFrom: T0, dismissedAt: T0 + 20_000 }).status, 'idle');
+  // A turn that ended before it is Ready for a few minutes, as before.
+  assert.equal(rolloutStatus(s, { now: T0 + 60_000, cliReadyFrom: T0 + 10_000 }).status, 'review');
+  assert.equal(rolloutStatus(s, { now: T0 + 20 * 60_000, cliReadyFrom: T0 + 10_000 }).status, 'idle');
+});
+
+test('the VS Code and terminal chats here are listed, quiet ones too; a VS Code one opens in VS Code', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
+  try {
+    const now = Date.now();
+    const root = path.join(home, 'sessions');
+    const [done, term, old, app, helper] = ['b02', 'b03', 'b04', 'b05', 'b06'].map((n) => `0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4${n}`);
+    writeRollout(root, done, [{ ...vscodeMeta(done), timestamp: iso(now - 3 * 3600_000) }, ...turn(now - 3 * 3600_000, now - 2 * 3600_000)], now - 2 * 3600_000);
+    writeRollout(root, term, [meta({ id: term, originator: 'codex-tui', source: 'cli', cwd: '/home/me/notes' })], now - 10 * 86_400_000);
+    writeRollout(root, old, [vscodeMeta(old), started(1), complete(9)], now - 20 * 86_400_000);
+    writeRollout(root, app, [meta({ id: app })], now - 5 * 86_400_000);   // the app's, which it lists itself
+    writeRollout(root, helper, [vscodeMeta(helper, { source: { subagent: { other: 'guardian' } } })], now - 5 * 86_400_000);
+    fs.writeFileSync(path.join(home, 'session_index.jsonl'), `${JSON.stringify({ id: done, thread_name: 'Reframe the benchmark' })}\n`);
+
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, cliReadyFrom: now - 86_400_000 });
+    await tracker.tick();
+    assert.deepEqual(tracker.all.map((s) => [s.id, s.client, s.status]), [
+      [`codex:${done}`, 'vscode', 'review'],   // its turn ended after cliReadyFrom: Ready until marked done
+      [`codex:${term}`, 'terminal', 'idle'],
+      [`codex:${old}`, 'vscode', 'idle'],
+    ]);
+    const [ready, notes, quiet] = tracker.all;
+    assert.equal(ready.title, 'Reframe the benchmark');
+    assert.equal(ready.url, `vscode://openai.chatgpt/local/${done}`);
+    assert.ok(Math.abs(ready.lastActivityAt - (now - 2 * 3600_000)) < 2000);
+    assert.equal(notes.title, 'notes');
+    assert.equal(notes.url, null, 'a terminal chat has nothing to open');
+    assert.equal(quiet.title, 'urban-map');
+    assert.equal(quiet.lastActivityAt, now - 20 * 86_400_000);
+    assert.deepEqual(tracker.sessions.map((s) => [s.id, s.status, s.client]), [[`codex:${done}`, 'review', 'vscode']]);
+
+    tracker.dismiss(`codex:${done}`);
+    assert.deepEqual(tracker.sessions, []);
+    assert.equal(tracker.all[0].status, 'idle');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("WSL's chats are read while the distro runs, and stay as they were while it doesn't", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
+  const wsl = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-wsl-'));   // stands for \\wsl.localhost\Ubuntu\home\me\.codex
+  try {
+    const now = Date.now();
+    const root = path.join(wsl, 'sessions');
+    const file = writeRollout(root, CHAT, [vscodeMeta(), started(1), complete(9)], now - 2 * 86_400_000);
+    fs.writeFileSync(path.join(wsl, 'session_index.jsonl'), `${JSON.stringify({ id: CHAT, thread_name: 'Port the tokenizer' })}\n`);
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false });
+    const distro = { root, machineKey: 'wsl:Ubuntu', machine: 'Ubuntu' };
+    tracker.setChatRoots([{ ...distro, active: true }]);
+    await tracker.tick();
+    const [s] = tracker.all;
+    assert.deepEqual([s.id, s.client, s.hostId, s.machineKey, s.machine, s.title, s.remote], [`codex:${CHAT}`, 'vscode', 'local', 'wsl:Ubuntu', 'Ubuntu', 'Port the tokenizer', null]);
+    assert.ok(tracker.followers.has(file), 'written this week: followed');
+
+    // Stopped: nothing in it is read (here it's gone altogether), and the chat stays as last seen.
+    tracker.setChatRoots([{ ...distro, active: false }]);
+    fs.rmSync(wsl, { recursive: true, force: true, maxRetries: 5 });
+    await tracker.tick();
+    assert.deepEqual(tracker.all.map((x) => [x.id, x.title]), [[`codex:${CHAT}`, 'Port the tokenizer']]);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    fs.rmSync(wsl, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the SSH watcher reports the host's VS Code and terminal chats and their names", async () => {
+  const { spawnFn, children } = fakeSsh();
+  const remote = new CodexRemote({ hostId: 'remote-ssh-discovered:lab-server', target: 'lab-server', spawnFn });
+  remote.on('error', () => {});
+  remote.start();
+  const [child] = children;
+  const say = (m) => child.stdout.write(`${JSON.stringify(m)}\n`);
+  say({ chats: [[CHAT, 'vscode', '/data/proj', 1_790_000_000.5], ['broken'], ['x', 'desktop', null, 1]] });
+  say({ names: { [CHAT]: 'Port the tokenizer', y: 5 } });
+  await flush();
+  assert.deepEqual([...remote.chats], [[CHAT, { client: 'vscode', cwd: '/data/proj', mtimeMs: 1_790_000_000_500 }]]);
+  assert.deepEqual([...remote.names], [[CHAT, 'Port the tokenizer']]);
+  remote.stop();
+});
+
+test("an SSH host's chats are listed under the host, on our clock", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
+  const fake = new EventEmitter();
+  const now = Date.now();
+  Object.assign(fake, {
+    files: new Map(),
+    chats: new Map([[CHAT, { client: 'vscode', cwd: '/data/proj', mtimeMs: now + SKEW - 3600_000 }]]),
+    names: new Map([[CHAT, 'Port the tokenizer']]),
+    skew: SKEW,
+    target: 'lab-server',
+    port: null,
+    identity: null,
+    start() {},
+    stop() {},
+  });
+  const tracker = new CodexTracker({ ...pathsIn(home), remoteFactory: () => fake });
+  try {
+    fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({
+      'codex-managed-remote-connections': [{ hostId: 'remote-ssh-discovered:lab-server', displayName: 'lab-server', alias: 'lab-server' }],
+    }));
+    const listed = new Promise((resolve) => tracker.on('list', (all) => all.length && resolve(all)));
+    tracker.start();
+    const [s] = await listed;
+    assert.deepEqual([s.id, s.client, s.hostId, s.remote, s.title, s.url], [
+      `codex:${CHAT}`, 'vscode', 'remote-ssh-discovered:lab-server', 'lab-server', 'Port the tokenizer', `vscode://openai.chatgpt/local/${CHAT}`,
+    ]);
+    assert.ok(Math.abs(s.lastActivityAt - (now - 3600_000)) < 1000, 'on our clock');
+  } finally {
+    tracker.stop();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the watcher script lists the VS Code and terminal chats and follows the last week's", { skip: !python && 'Python 3 is not installed' }, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
+  const root = path.join(home, 'sessions');
+  const now = Date.now();
+  const [old, app] = ['c01', 'c02'].map((n) => `0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4${n}`);
+  const recent = writeRollout(root, CHAT, [vscodeMeta(), started(1), complete(9)], now - 2 * 86_400_000);
+  writeRollout(root, old, [meta({ id: old, originator: 'codex-tui', source: 'cli' })], now - 20 * 86_400_000);
+  writeRollout(root, app, [meta({ id: app })], now - 2 * 86_400_000);
+  fs.writeFileSync(path.join(home, 'session_index.jsonl'), `${JSON.stringify({ id: CHAT, thread_name: 'Port the tokenizer' })}\n${JSON.stringify({ id: app, thread_name: 'Not a chat' })}\n`);
+  const child = spawn(python, ['-u', '-c', LOADER], { env: { ...process.env, CODEX_HOME: home }, windowsHide: true });
+  try {
+    const messages = [];
+    let buffer = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+        messages.push(JSON.parse(buffer.slice(0, nl)));
+        buffer = buffer.slice(nl + 1);
+      }
+    });
+    child.stdin.write(`${JSON.stringify(WATCHER)}\n`);
+    for (let i = 0; i < 100 && !messages.some((m) => m.open != null); i++) await new Promise((r) => setTimeout(r, 50));
+    const chats = messages.find((m) => m.chats)?.chats ?? [];
+    assert.deepEqual(chats.map(([id, client, cwd]) => [id, client, cwd]).sort(), [[CHAT, 'vscode', '/home/me/urban-map'], [old, 'terminal', '/mnt/c/Users/me/proj']].sort());
+    assert.deepEqual(messages.find((m) => m.names)?.names, { [CHAT]: 'Port the tokenizer' });
+    assert.deepEqual(messages.filter((m) => m.open != null).map((m) => path.resolve(m.path)), [path.resolve(recent)], "only this week's chat is followed");
   } finally {
     child.kill();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });

@@ -33,7 +33,7 @@ const { ASSISTANT_ID, assistantItem, assistantLinks } = require('./assistant');
 const { TimetableNotifier, createTimetable, kstParts } = require('./timetable');
 const { formatKst } = require('./model');
 
-const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 eTL에서 토큰을 등록해 주세요.';
+const NO_TOKEN = 'eTL 토큰이 등록되지 않았습니다. 펫 트레이 메뉴의 Sources → eTL에서 토큰을 등록해 주세요.';
 const CODEX_PROMPT = '오늘 브리핑해 줘';
 // Bridge commands by who answers them: files.js, board.js, timetable.js (timetable) and
 // queries.js (the rest).
@@ -98,7 +98,9 @@ class EtlFeature extends EventEmitter {
     this.emit('change', []);
   }
 
-  async setEnabled(on) {
+  // `openChat`: straight into the eTL chat in Codex, when it's there (not from Getting started,
+  // which has more steps to go).
+  async setEnabled(on, { openChat = true } = {}) {
     if (!on) {
       this.settings.set({ etlEnabled: false });
       this.stop();
@@ -107,7 +109,7 @@ class EtlFeature extends EventEmitter {
     if (!this.token.has() && !(await this.registerToken())) return;   // no token, stays off
     this.settings.set({ etlEnabled: true });
     this.#run();
-    if (this.codexInstalled()) await this.openInCodex();   // straight into the eTL chat
+    if (openChat && this.codexInstalled()) await this.openInCodex();
   }
 
   // Opens the token window; true once a token that eTL accepted is saved. The first time, it
@@ -156,7 +158,7 @@ class EtlFeature extends EventEmitter {
   }
 
   dismiss(id) {
-    if (id === ASSISTANT_ID) return;    // it has no ×; the menu turns it off
+    if (id === ASSISTANT_ID) return this.setAssistantBubble(false);   // its ×, like the menu item
     if (String(id).startsWith('etl:timetable:')) {
       this.log('etl timetable: closed', id);
       this.notifier?.dismiss(id);                                            // until tomorrow
@@ -191,7 +193,7 @@ class EtlFeature extends EventEmitter {
     if (isInside(to, this.appRoot)) {
       const { response } = await dialog.showMessageBox({
         type: 'warning',
-        title: 'Claude Pet',
+        title: 'Ttokttok Pet',
         message: '펫 폴더 안을 채팅 폴더로 고르셨습니다.',
         detail: '채팅 AI가 펫의 코드와 설정까지 보게 되고, 펫을 다시 설치하면 할 일 목록(todos.md)도 함께 지워질 수 있습니다. 그래도 이 위치를 쓸까요?',
         buttons: ['이 위치 사용', '취소'],
@@ -207,7 +209,7 @@ class EtlFeature extends EventEmitter {
       this.electron.shell.openPath(to);
     } catch (err) {
       this.log('etl workspace move:', err.message);
-      dialog.showErrorBox('Claude Pet', `채팅 폴더를 만들지 못했습니다.\n${err.message}`);
+      dialog.showErrorBox('Ttokttok Pet', `채팅 폴더를 만들지 못했습니다.\n${err.message}`);
     }
   }
 
@@ -225,7 +227,7 @@ class EtlFeature extends EventEmitter {
     }
   }
 
-  // The tray menu's "eTL" submenu.
+  // The tray menu's Sources → "eTL" submenu.
   menu() {
     const on = this.enabled;
     const items = [
@@ -308,9 +310,9 @@ class EtlFeature extends EventEmitter {
     const where = this.codexInstalled() ? 'Codex의 eTL 비서 대화' : 'eTL 채팅 폴더';
     const { response } = await this.electron.dialog.showMessageBox({
       type: 'question',
-      title: 'Claude Pet',
+      title: 'Ttokttok Pet',
       message: 'eTL 비서 말풍선을 켤까요?',
-      detail: `펫 위에 "eTL 비서" 말풍선을 늘 띄워 두고, 누르면 ${where}로 바로 갑니다. 나중에 트레이 메뉴의 eTL에서 바꿀 수 있습니다.`,
+      detail: `펫 위에 "eTL 비서" 말풍선을 늘 띄워 두고, 누르면 ${where}로 바로 갑니다. 나중에 트레이 메뉴의 Sources → eTL에서 바꿀 수 있습니다.`,
       buttons: ['켜기', '나중에'],
       defaultId: 0,
       cancelId: 1,

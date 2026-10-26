@@ -23,6 +23,8 @@ function createRolloutState() {
     cwd: null,
     subagent: false,       // Codex's own helper threads (e.g. the auto-reviewer)
     fromDesktop: false,
+    originator: null,      // what started the thread: "Codex Desktop", "codex_vscode", "codex-tui"…
+    source: null,          // how: "vscode" (the app and the VS Code extension), "cli", "exec"…
     turnActive: false,
     turnStartedAt: 0,
     turnEndedAt: 0,
@@ -35,6 +37,7 @@ function createRolloutState() {
     asks: new Map(),         // this turn's unanswered request_user_input_async questions: id -> { detail, at }
     endedTurns: new Set(),   // ids of recent turns that finished
     limits: null,            // the account's rate limits as of the newest reply (see rateLimitsOf)
+    lastPromptAt: 0,         // when you last sent the thread a message
   };
 }
 
@@ -61,6 +64,8 @@ function applyRolloutEntry(state, entry) {
     if (typeof p.cwd === 'string') state.cwd = p.cwd;
     state.subagent = Boolean(p.source && typeof p.source === 'object' && p.source.subagent);
     state.fromDesktop = DESKTOP_ORIGINATOR_RE.test(String(p.originator || ''));
+    state.originator = typeof p.originator === 'string' ? p.originator : null;
+    state.source = typeof p.source === 'string' ? p.source : null;
     return;
   }
   // Reading a long rollout from its tail can start after a turn's task_started. Work from a
@@ -180,6 +185,7 @@ function noteItem(state, item, at) {
       state.asks.set(JSON.stringify([ASYNC_ASK_TOOL, item.id, i]), { detail: describeQuestion({ questions: [q] }), at });
     });
   } else if (item?.type === 'UserMessage') {
+    state.lastPromptAt = Math.max(state.lastPromptAt, at);
     for (const id of answeredQuestions(item.content)) state.asks.delete(id);
   }
 }
@@ -208,10 +214,22 @@ function pendingQuestion(state) {
   return newest;
 }
 
-// Threads from the desktop app are "Ready" while the app lists them as unread. CLI threads,
-// which it doesn't track, are "Ready" for a few minutes after they finish. `skew` is how far
-// the clock of the machine that wrote the rollout is ahead of ours.
-function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 0, skew = 0 } = {}) {
+// The chats you'd look for outside the Codex app: the VS Code extension's ("vscode") and the Codex
+// CLI's in a terminal ("terminal"). The app's threads, `codex exec` runs and other programs' get null.
+function clientOf(state) {
+  if (!state || state.subagent) return null;
+  if (state.originator === 'codex_vscode') return 'vscode';
+  return state.source === 'cli' ? 'terminal' : null;
+}
+
+// Threads from the desktop app are "Ready" until you dismiss them; turns that ended before
+// `readyFrom`, only while the app listed them as unread. Other threads, which it doesn't track, are
+// "Ready" for a few minutes after they finish; a VS Code or terminal chat's turns that ended from
+// `cliReadyFrom` on, until you dismiss them. `skew` is how far the clock of the machine that wrote
+// the rollout is ahead of ours.
+function rolloutStatus(state, {
+  now = Date.now(), unread = false, dismissedAt = 0, skew = 0, readyFrom = null, cliReadyFrom = null,
+} = {}) {
   const clock = now + skew;
   const seen = dismissedAt ? dismissedAt + skew : 0;
   const local = (d) => (d.since ? { ...d, since: d.since - skew } : d);
@@ -225,10 +243,12 @@ function rolloutStatus(state, { now = Date.now(), unread = false, dismissedAt = 
   }
   const ended = state.turnEndedAt;
   const idle = local({ status: 'idle', detail: '', since: ended });
-  if (!ended || state.aborted || ended <= seen || clock - ended > UNREAD_WINDOW_MS) return idle;
-  if (state.fromDesktop ? !unread : clock - ended > CLI_REVIEW_MS) return idle;
+  const from = state.fromDesktop ? readyFrom : cliReadyFrom;
+  const old = from == null || ended - skew < from;
+  if (!ended || state.aborted || ended <= seen || (old && clock - ended > UNREAD_WINDOW_MS)) return idle;
+  if (old && (state.fromDesktop ? !unread : clock - ended > CLI_REVIEW_MS)) return idle;
   if (state.error) return local({ status: 'failed', detail: state.error.message, since: ended });
   return local({ status: 'review', detail: oneLine(state.lastMessage, 120) || 'Finished', since: ended });
 }
 
-module.exports = { applyRolloutEntry, createRolloutState, describeCall, describeCommand, rateLimitsOf, rolloutStatus };
+module.exports = { applyRolloutEntry, clientOf, createRolloutState, describeCall, describeCommand, rateLimitsOf, rolloutStatus };

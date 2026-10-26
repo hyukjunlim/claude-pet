@@ -137,9 +137,7 @@ test('the app log lines the pet understands', () => {
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD CycleHealth] unhealthy cycle for ${id} (3s, hadFirstResponse=true, reason=api_error)`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [Stop hook] Query completed for session ${id}`).kind, 'end');
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] Session ${id} query iterator completed`).kind, 'end');
-  assert.deepEqual(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${id}`),
-    { kind: 'focus', sessionId: id, at: local(40) });
-  assert.equal(parseLogLine('2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=null').sessionId, null);
+  assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${id}`), null);   // which one is selected doesn't matter
   assert.equal(parseLogLine(`2026-09-24 23:47:40 [info] [CCD] LocalSessions.replaceEnabledMcpTools: sessionId=${id}, toolCount=3`), null);
   const req = '0f1e2d3c-4b5a-4968-8776-655443322110';
   assert.deepEqual(parseLogLine(`2026-09-24 23:47:41 [info] Emitted tool permission request ${req} for AskUserQuestion in session ${id}`),
@@ -187,81 +185,6 @@ test('the log keeps each question until you answer it, a new prompt withdraws it
   log.settleLaunches(local(58));
   assert.equal(log.turnOf('local_other'), null);
   assert.deepEqual(log.turnOf(id).asking, { tool: 'AskUserQuestion', at: local(53) });
-});
-
-test('the log says which session is selected in the app', () => {
-  const log = new AppLogFollower('main.log');
-  const line = (text) => log.handleLine(`2026-09-24 23:47:00 [info] [CCD] LocalSessions.setFocusedSession: sessionId=${text}`);
-  line('local_a');
-  assert.equal(log.selected, 'local_a');
-  line('null');
-  line('local_b');
-  assert.equal(log.selected, 'local_b');
-  // Switching away means it was on screen until then.
-  assert.equal(log.leftAt('local_a'), new Date(2026, 8, 24, 23, 47, 0).getTime());
-  assert.equal(log.leftAt('local_b'), 0);
-  // A second copy of the app, from a claude:// link, changes nothing.
-  log.handleLine('2026-09-24 23:48:00 [info] Starting app {');
-  log.handleLine('2026-09-24 23:48:01 [info] Not main instance, returning early from app ready');
-  log.settleLaunches(new Date(2026, 8, 24, 23, 49, 0).getTime());
-  assert.equal(log.selected, 'local_b');
-  log.handleLine('2026-09-24 23:50:00 [info] Starting app {');
-  log.handleLine('2026-09-24 23:50:30 [info] Session local_c query iterator completed');
-  assert.equal(log.selected, null);
-  assert.equal(log.leftAt('local_b'), 0);   // the app closing isn't you looking
-});
-
-test('a turn that ends in the selected session is Ready only until the app comes to the front', () => {
-  const copy = copyOf([prompt(T0), reply(T0 + 5000, 'a1')]);   // ended at T0 + 5 s
-  const r = parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo', lastFocusedAt: T0 - 60_000 });   // selected before
-  assert.equal(desktopStatus(r, copy, { now: T0 + 20_000 }).status, 'review');
-  // The app was (or came) to the front with it selected after the turn ended: seen.
-  assert.equal(desktopStatus(r, copy, { now: T0 + 20_000, seenAt: T0 + 6000 }).status, 'idle');
-  assert.equal(desktopStatus(r, copy, { now: T0 + 20_000, seenAt: T0 + 1000 }).status, 'review');
-  // While the pet finds out, the bubble waits a moment rather than flash "Ready".
-  assert.deepEqual(desktopStatus(r, copy, { now: T0 + 7000, frontPending: true }), { status: 'running', detail: 'Wrapping up', since: T0 });
-});
-
-test('the front-window helper runs only while a turn in the selected session may be unseen', async () => {
-  const { EventEmitter } = require('node:events');
-  const helpers = [];
-  const foreground = () => {
-    const w = new EventEmitter();
-    w.start = () => { w.running = true; };
-    w.stop = () => { w.running = false; };
-    helpers.push(w);
-    return w;
-  };
-  const tracker = new SessionTracker({ foreground });
-  tracker.running = true;
-  tracker.watchFront(true);
-  assert.equal(helpers.length, 1);
-  assert.equal(helpers[0].running, true);
-  tracker.watchFront(true);
-  assert.equal(helpers.length, 1);   // one at a time
-  helpers[0].emit('front', true);
-  assert.equal(tracker.appInFront, true);
-  tracker.watchFront(false);
-  assert.equal(helpers[0].running, false);
-  assert.equal(tracker.appInFront, null);
-  // What it saw is kept (and saved: 'seen' tells main.js), for the next start.
-  let saved = 0;
-  tracker.on('seen', () => { saved += 1; });
-  tracker.appLog = { selected: 'local_x', turnOf: () => null };
-  tracker.appInFront = true;
-  tracker.recompute();
-  tracker.recompute();
-  assert.equal(saved, 1);
-  assert.ok(tracker.seenSnapshot().local_x > 0);
-  assert.equal(new SessionTracker({ seen: tracker.seenSnapshot() }).frontSeen.get('local_x'), tracker.frontSeen.get('local_x'));
-  tracker.appInFront = null;
-  tracker.appLog = null;
-  // A helper that dies (PowerShell blocked, say) isn't restarted right away.
-  tracker.watchFront(true);
-  helpers[1].emit('exit');
-  tracker.watchFront(true);
-  assert.equal(helpers.length, 2);
-  tracker.running = false;
 });
 
 test('a question in the log shows "Needs you" before the SSH copy has it', () => {
@@ -351,7 +274,7 @@ test("clock skew is estimated from the last day's copies", () => {
 });
 
 test('terminal sessions skip SSH copies, deleted sessions and earlier IDs of desktop sessions', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   try {
     const projects = path.join(root, 'projects');
     const index = path.join(root, 'sessions', 'acct', 'org');
@@ -391,7 +314,7 @@ test('terminal sessions skip SSH copies, deleted sessions and earlier IDs of des
 });
 
 test('a running SSH session is named after its saved connection', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   try {
     const index = path.join(root, 'sessions', 'acct', 'org');
     fs.mkdirSync(index, { recursive: true });
@@ -416,8 +339,42 @@ test('a running SSH session is named after its saved connection', async () => {
   }
 });
 
+test('the full list has every session in the index, quiet ones included, with where it runs', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
+  try {
+    const index = path.join(root, 'sessions', 'acct', 'org');
+    fs.mkdirSync(index, { recursive: true });
+    const old = Date.now() - 30 * 24 * 60 * 60 * 1000;   // no transcript to follow: nothing to show as a bubble
+    const write = (id, extra) => fs.writeFileSync(path.join(index, `${id}.json`), JSON.stringify({ sessionId: id, lastActivityAt: old, ...extra }));
+    write('local_ssh3', { title: 'Paper figures', cwd: '/data/proj/BB', sshConfig: { sshHost: 'alice@10.0.0.5', sshPort: 22 }, lastActivityAt: old + 1000, latestUserFrameAt: old + 500 });
+    write('local_wsl1', { title: 'Tokenizer', cwd: '/home/me/tok', wslConfig: { distro: 'Ubuntu' } });
+    write('local_pc1', { title: 'Pet', cwd: 'C:\\Users\\me\\pet' });
+    write('local_gone', { title: 'Archived', cwd: 'C:\\x', isArchived: true });
+    const sshConnections = path.join(root, 'ssh_configs.json');
+    fs.writeFileSync(sshConnections, JSON.stringify({ configs: [{ name: 'lab', sshHost: 'alice@10.0.0.5', sshPort: 22 }] }));
+
+    const tracker = new SessionTracker({ sessionsRoot: path.join(root, 'sessions'), projectsRoot: path.join(root, 'projects'), sshConnections });
+    const lists = [];
+    tracker.on('list', (list) => lists.push(list));
+    await tracker.tick();
+    assert.deepEqual(tracker.sessions, []);                  // the pet has nothing to say
+    assert.equal(lists.length, 1);
+    const [ssh, ...rest] = tracker.all;                      // newest first
+    assert.deepEqual(ssh, {
+      id: 'local_ssh3', kind: 'desktop', hostSessionId: 'local_ssh3', title: 'Paper figures', remote: 'lab', project: 'BB',
+      cwd: '/data/proj/BB', machineKey: 'ssh:alice@10.0.0.5:22', machine: 'lab', lastActivityAt: old + 1000, lastPromptAt: old + 500,
+      status: 'idle', detail: '', since: old + 1000,
+    });
+    assert.deepEqual(rest.map((s) => [s.id, s.machineKey]).sort(), [['local_pc1', null], ['local_wsl1', 'wsl:Ubuntu']]);
+    tracker.recompute();
+    assert.equal(lists.length, 1);                           // nothing changed, nothing sent
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('file changes reach the pet right away, without waiting for the timer', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pet-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   const index = path.join(root, 'sessions', 'acct', 'org');
   const project = path.join(root, 'projects', 'C--repo');
   fs.mkdirSync(index, { recursive: true });
@@ -477,3 +434,23 @@ function logLine(t, message) {
   const p2 = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())} [info] ${message}\n`;
 }
+
+test('a session whose last turn may still be Ready is followed past the week', () => {
+  const tracker = new SessionTracker({ readyFrom: T0, dismissed: { local_done: T0 + 50_000 } });
+  const r = (id, lastActivityAt) => ({ hostSessionId: id, lastActivityAt });
+  assert.equal(tracker.mayBePending(r('local_new', T0 + 10_000)), true);
+  assert.equal(tracker.mayBePending(r('local_old', T0 - 10_000)), false);    // ended before readyFrom
+  assert.equal(tracker.mayBePending(r('local_done', T0 + 10_000)), false);   // marked done since
+  assert.equal(new SessionTracker({}).mayBePending(r('local_new', T0 + 10_000)), false);   // no readyFrom: the week only
+});
+
+test('undismiss undoes a dismissal, so the session shows what it had again', () => {
+  const tracker = new SessionTracker({ dismissed: { local_a: T0 } });
+  let lists = 0;
+  tracker.on('list', () => { lists += 1; });
+  tracker.undismiss('local_a');
+  assert.equal(tracker.dismissed.has('local_a'), false);
+  assert.equal(lists, 1);   // the lists go out again right away
+  tracker.undismiss('local_b');   // nothing to undo: nothing happens
+  assert.equal(lists, 1);
+});

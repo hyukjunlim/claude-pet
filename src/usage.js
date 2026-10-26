@@ -2,8 +2,8 @@
 
 // How much of this week's usage your Claude and Codex plans have used.
 //
-//   - Claude: Claude Pet's mod (claude-mod/, see claude-mod.js) saves the account's limits after
-//     each reply of a Claude Code session, as Claude Code heard them, to ~/.claude-pet/usage.json on
+//   - Claude: Ttokttok Pet's mod (claude-mod/, see claude-mod.js) saves the account's limits after
+//     each reply of a Claude Code session, as Claude Code heard them, to ~/.ttokttok-pet/usage.json on
 //     the machine the session runs on: { version: 1, at, limits: [{ kind, percent, resetsAt }] },
 //     with kind five_hour or seven_day.
 //   - Codex: each reply's token_count event in a rollout carries the account's rate limits,
@@ -16,7 +16,7 @@ const WEEK_MS = WEEK_MINUTES * 60_000;
 const FIVE_HOURS_MS = 5 * 60 * 60_000;
 const STALE_MS = 60 * 60_000;
 
-// What Claude Pet's mod saved: { weekly, fiveHour, at }, each window { percent, resetsAt, windowMs }
+// What Ttokttok Pet's mod saved: { weekly, fiveHour, at }, each window { percent, resetsAt, windowMs }
 // or null.
 function parseModUsage(j) {
   if (j?.version !== 1 || !Number.isFinite(j.at) || !Array.isArray(j.limits)) return null;

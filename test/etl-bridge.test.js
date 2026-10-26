@@ -13,12 +13,12 @@ const {
 } = require('../src/etl/bridge');
 
 const CLI = path.join(__dirname, '..', 'etl-workspace', 'etl.js');
-const NOT_RUNNING_LINE = '{"error":"Claude Pet이 실행 중이 아니거나 eTL 기능이 꺼져 있습니다. 펫을 켜고 eTL을 켜 주세요."}';
+const NOT_RUNNING_LINE = '{"error":"Ttokttok Pet이 실행 중이 아니거나 eTL 기능이 꺼져 있습니다. 펫을 켜고 eTL을 켜 주세요."}';
 
 function tempPipe() {
   const tag = `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   return process.platform === 'win32'
-    ? `\\\\.\\pipe\\claude-pet-etl-test-${tag}`
+    ? `\\\\.\\pipe\\ttokttok-pet-etl-test-${tag}`
     : path.join(os.tmpdir(), `cpe-${tag}.sock`);
 }
 
@@ -95,10 +95,10 @@ function runCli(args, env = {}) {
 
 // ---- validation ---------------------------------------------------------------------------
 
-test('the default channel is a per-user named pipe on Windows and a socket under ~/.claude-pet elsewhere', () => {
+test('the default channel is a per-user named pipe on Windows and a socket under ~/.ttokttok-pet elsewhere', () => {
   const p = defaultPipePath();
-  if (process.platform === 'win32') assert.match(p, /^\\\\\.\\pipe\\claude-pet-etl-.+$/);
-  else assert.equal(p, path.join(os.homedir(), '.claude-pet', 'etl.sock'));
+  if (process.platform === 'win32') assert.match(p, /^\\\\\.\\pipe\\ttokttok-pet-etl-.+$/);
+  else assert.equal(p, path.join(os.homedir(), '.ttokttok-pet', 'etl.sock'));
 });
 
 test('the whitelist holds exactly the read-only commands from the plan', () => {
@@ -375,7 +375,7 @@ test('a second bridge on the same channel fails to start, and the channel is fre
   const a = createBridge({ handlers, path: pipe });
   await a.start();
   const b = createBridge({ handlers, path: pipe });
-  await assert.rejects(b.start(), (err) => err.code === 'EADDRINUSE' && /다른 Claude Pet/.test(err.message));
+  await assert.rejects(b.start(), (err) => err.code === 'EADDRINUSE' && /다른 Ttokttok Pet/.test(err.message));
   assert.ok((await request(pipe, { cmd: 'courses' })).data, 'the first bridge still answers');
   await a.stop();
   await b.start();
@@ -388,7 +388,7 @@ test('a second bridge on the same channel fails to start, and the channel is fre
 test('the CLI turns flags into a request and prints the answer, Korean intact', async () => {
   const { calls, handlers } = fakeHandlers();
   await withBridge({ handlers }, async (bridge) => {
-    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    const env = { TTOKTTOK_PET_ETL_PIPE: bridge.path };
     const r = await runCli(['assignments', '--status', 'upcoming', '--days', '7'], env);
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), { notice: NOTICE, data: [{ course: '회로이론', name: '과제 1' }] });
@@ -415,7 +415,7 @@ test('the CLI sends board lookups, keeping a numeric search word as text', async
     boards: record('boards'), posts: record('posts'), post: record('post'), download: record('download'),
   });
   await withBridge({ handlers }, async (bridge) => {
-    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    const env = { TTOKTTOK_PET_ETL_PIPE: bridge.path };
     assert.equal((await runCli(['boards', '--course', '7'], env)).code, 0);
     assert.equal((await runCli(['posts', '--course', '7', '--board', '3', '--page', '2', '--keyword', '2026'], env)).code, 0);
     assert.equal((await runCli(['post', '--course', '7', '--board', '3', '--id', '9'], env)).code, 0);
@@ -432,7 +432,7 @@ test('the CLI sends board lookups, keeping a numeric search word as text', async
 test('the CLI sends api paths as given, undoing Git Bash path conversion, with --all', async () => {
   const { calls, handlers } = fakeHandlers({ api: async (args) => { calls.push({ cmd: 'api', args }); return { path: args.path, data: [] }; } });
   await withBridge({ handlers }, async (bridge) => {
-    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    const env = { TTOKTTOK_PET_ETL_PIPE: bridge.path };
     assert.equal((await runCli(['api', '/api/v1/courses/1/modules?include[]=items'], env)).code, 0);
     assert.equal((await runCli(['api', 'C:/Program Files/Git/api/v1/users/self', '--all'], env)).code, 0);
     assert.equal((await runCli(['api', 'api/v1/planner/items?start_date=2026-10-14'], env)).code, 0);
@@ -448,7 +448,7 @@ test('the CLI sends api paths as given, undoing Git Bash path conversion, with -
 test('the CLI asks for a day timetable, a dated one, and the week', async () => {
   const { calls, handlers } = fakeHandlers({ timetable: async (args) => { calls.push({ cmd: 'timetable', args }); return { classes: [] }; } });
   await withBridge({ handlers }, async (bridge) => {
-    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    const env = { TTOKTTOK_PET_ETL_PIPE: bridge.path };
     assert.equal((await runCli(['timetable'], env)).code, 0);
     assert.equal((await runCli(['timetable', '--date', '2026-10-16', '--week'], env)).code, 0);
     assert.equal((await runCli(['timetable', '--date', 'tomorrow'], env)).code, 1);
@@ -459,7 +459,7 @@ test('the CLI asks for a day timetable, a dated one, and the week', async () => 
 test('the CLI exits non-zero when the pet answers with an error', async () => {
   const { calls, handlers } = fakeHandlers();
   await withBridge({ handlers }, async (bridge) => {
-    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    const env = { TTOKTTOK_PET_ETL_PIPE: bridge.path };
     const r = await runCli(['announcements', '--days', '90'], env);
     assert.equal(r.code, 1);
     assert.match(JSON.parse(r.stdout).error, /1~60/);
@@ -473,7 +473,7 @@ test('the CLI exits non-zero when the pet answers with an error', async () => {
 test('the CLI lists course files and downloads one selected ID through the bridge', async () => {
   const { calls, handlers } = fakeHandlers();
   await withBridge({ handlers }, async (bridge) => {
-    const env = { CLAUDE_PET_ETL_PIPE: bridge.path };
+    const env = { TTOKTTOK_PET_ETL_PIPE: bridge.path };
     const listed = await runCli(['files', '--course', '1'], env);
     assert.equal(listed.code, 0, listed.stderr);
     assert.equal(JSON.parse(listed.stdout).data.files[0].downloaded, false);
@@ -506,7 +506,7 @@ test('downloads get the longer request timeout while ordinary lookups keep their
 test('the CLI can print escaped ASCII for terminals that garble Korean', async () => {
   const { handlers } = fakeHandlers();
   await withBridge({ handlers }, async (bridge) => {
-    const r = await runCli(['courses', '--ascii'], { CLAUDE_PET_ETL_PIPE: bridge.path });
+    const r = await runCli(['courses', '--ascii'], { TTOKTTOK_PET_ETL_PIPE: bridge.path });
     assert.equal(r.code, 0);
     assert.match(r.stdout, /^[\x00-\x7f]*$/);
     assert.equal(JSON.parse(r.stdout).data[0].name, '회로이론');
@@ -514,7 +514,7 @@ test('the CLI can print escaped ASCII for terminals that garble Korean', async (
 });
 
 test('the CLI says the pet is not running when nothing listens, and exits non-zero', async () => {
-  const r = await runCli(['briefing'], { CLAUDE_PET_ETL_PIPE: tempPipe() });
+  const r = await runCli(['briefing'], { TTOKTTOK_PET_ETL_PIPE: tempPipe() });
   assert.equal(r.code, 1);
   assert.equal(r.stdout.trim().split('\n').length, 1);
   assert.equal(JSON.parse(r.stdout).error, JSON.parse(NOT_RUNNING_LINE).error);
@@ -523,10 +523,10 @@ test('the CLI says the pet is not running when nothing listens, and exits non-ze
 test('on Windows, output going to another program is escaped ASCII, unless Claude Code runs it', { skip: process.platform !== 'win32' }, async () => {
   const { handlers } = fakeHandlers();
   await withBridge({ handlers }, async (bridge) => {
-    const plain = await runCli(['courses'], { CLAUDE_PET_ETL_PIPE: bridge.path });
+    const plain = await runCli(['courses'], { TTOKTTOK_PET_ETL_PIPE: bridge.path });
     assert.match(plain.stdout, /^[\x00-\x7f]*$/);
     assert.equal(JSON.parse(plain.stdout).data[0].name, '회로이론');
-    const claude = await runCli(['courses'], { CLAUDE_PET_ETL_PIPE: bridge.path, CLAUDECODE: '1' });
+    const claude = await runCli(['courses'], { TTOKTTOK_PET_ETL_PIPE: bridge.path, CLAUDECODE: '1' });
     assert.match(claude.stdout, /회로이론/);
   });
 });
@@ -601,7 +601,7 @@ test("the CLI goes through files when it can't open the pipe", async () => {
   const fb = createFileBridge({ handlers, dir, pollMs: 20 });
   fb.start();
   try {
-    const r = await runCli(['check'], { CLAUDE_PET_ETL_PIPE: tempPipe(), CLAUDE_PET_ETL_DIR: dir });
+    const r = await runCli(['check'], { TTOKTTOK_PET_ETL_PIPE: tempPipe(), TTOKTTOK_PET_ETL_DIR: dir });
     assert.equal(r.code, 0, r.stdout);
     assert.deepEqual(JSON.parse(r.stdout), { data: { ok: true, user: '홍길동', now: '2026-10-14(수) 10:00' } });
     assert.deepEqual(fs.readdirSync(path.join(dir, 'responses')), [], 'the answer is collected');
@@ -613,14 +613,14 @@ test("the CLI goes through files when it can't open the pipe", async () => {
 test('the CLI says the pet is not running when nobody takes its request file', async () => {
   const dir = tempDir();
   fs.mkdirSync(path.join(dir, 'requests'), { recursive: true });
-  const r = await runCli(['briefing'], { CLAUDE_PET_ETL_PIPE: tempPipe(), CLAUDE_PET_ETL_DIR: dir });
+  const r = await runCli(['briefing'], { TTOKTTOK_PET_ETL_PIPE: tempPipe(), TTOKTTOK_PET_ETL_DIR: dir });
   assert.equal(r.code, 1);
   assert.equal(JSON.parse(r.stdout).error, JSON.parse(NOT_RUNNING_LINE).error);
   assert.deepEqual(fs.readdirSync(path.join(dir, 'requests')), [], 'the request is cleaned up');
 });
 
 test('the CLI handles help and bad usage without contacting the pet', async () => {
-  const env = { CLAUDE_PET_ETL_PIPE: tempPipe() };
+  const env = { TTOKTTOK_PET_ETL_PIPE: tempPipe() };
   const help = await runCli(['--help'], env);
   assert.equal(help.code, 0);
   assert.match(help.stdout, /사용법: node etl\.js/);
