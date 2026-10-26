@@ -210,6 +210,13 @@ maximized beside it, so the conversation you open fills the rest of the screen.
   The button beside the search box folds every folder but those on the way to the session you
   opened last, or opens them all. **Ctrl+Tab** and **Ctrl+Shift+Tab** step through the list while
   Claude, Codex or the sidebar is in front.
+- **New chat:** a folder's **+** (or right-click it) → *New Claude Code session here* or *New Codex
+  chat here*. The app opens its new-chat page in that folder (`claude://code/new?folder=…`, or
+  `ssh_host`/`ssh_port`/`ssh_folder` on an SSH host; `codex://threads/new?path=…`, or
+  `?projectId=…` for a WSL folder that is one of Codex's projects), and the chat shows in the
+  sidebar once you send its first message. Claude can on this PC and on an SSH host it has
+  connected to before; Codex can on this PC, adding the folder to its projects, and in WSL folders
+  that are already Codex projects. Codex's link can't name an SSH host, and Claude's can't name WSL.
 - **Mark as done, Mark as Ready:** opening a session leaves its *Ready*, *Error* or *Needs you*.
   Right-click it → *Mark as done* settles it, as a bubble's × does. *Mark as Ready* undoes that, so a
   question still in the next-step box is *Needs you* again; on a quiet session it puts it in Ready to

@@ -304,6 +304,23 @@ header {
 .pip.attention { --c: var(--waiting); }
 .pip.busy { --c: var(--running); }
 
+/* A folder's +: a new chat there in Claude or Codex, as in the Claude app's sidebar. */
+.add {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: -2px -2px -2px 0;
+  border-radius: 5px;
+  color: var(--faint);
+  font-size: 16px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.row:hover .add { color: var(--text); }
+.add:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.reordering .add { visibility: hidden; }
+
 .children[hidden] { display: none; }
 
 .empty {

@@ -21,6 +21,9 @@ Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
   `vscode://openai.chatgpt/local/<id>`, sent once the VS Code window for that session's machine
   is in front. With no such window, VS Code's own `vscode://vscode-remote/<wsl+distro or
   ssh-remote+host><folder>` (or `vscode://file/<folder>` on this PC) opens the folder there first.
+  New chats likewise: `claude://code/new?folder=<folder>` (or `ssh_host`/`ssh_port`/`ssh_folder`
+  for an SSH host) and `codex://threads/new?path=<folder>` (or `?projectId=<id>&prompt=` for a
+  WSL folder that is one of Codex's projects).
 
 ## Network
 - No server contact of its own, except SSH hosts from `~/.ssh/config` with key auth and SNU eTL
@@ -39,8 +42,10 @@ Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
   The pet and the weekly limits sit at its bottom.
 - Clicking a session opens it in the official app, which fills the rest of the screen:
   one conversation at a time.
-- Out of scope: chatting in the sidebar, creating sessions, grouping by topic, sharing context
-  between the two apps, mobile, embedding into the Claude app.
+- A folder's menu can start a new chat there only by handing the app its own new-chat link;
+  the app creates the session. The sidebar itself never chats.
+- Out of scope: chatting in the sidebar, grouping by topic, sharing context between the two
+  apps, mobile, embedding into the Claude app.
 
 ## Release
 - A `v<version>` tag matches the version in `package.json`.

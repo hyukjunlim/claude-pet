@@ -29,6 +29,7 @@ const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
 const { FolderWindow, displayChoices } = require('./folder-mode');
 const { buildTree } = require('./folder-tree');
+const { markNewChats, newChatLinks, placeOf, sshTargets } = require('./new-chat');
 const { settleMarks } = require('./marks');
 const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
@@ -112,6 +113,7 @@ let codexAll = [];
 let webAll = [];
 const deleted = new Map();      // id -> when: chats deleted in the sidebar, left out until the trackers see them go
 let treeKey = '';
+let treeHosts = [];             // the tree last built for the sidebar, for its folders' menus
 let quitting = false;
 const usage = { claude: [], codex: null };   // Claude's readings from each place, Codex's newest (see usage.js)
 let claudeUsage = null;         // where Claude's readings come from (see claude-usage.js)
@@ -528,15 +530,17 @@ function sendTree() {
   const hidden = currentHidden();
   if (!folder?.open) return;
   const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id) && !isDeleted(s.id));
-  const hosts = buildTree({
+  const sshHosts = sshConfigHosts();
+  const hosts = markNewChats(buildTree({
     claude: shown(claudeAll),
     codex: shown(codexAll),
     chats: shown(webAll),
-    sshHosts: sshConfigHosts(),
+    sshHosts,
     codexConnections: codex?.connections ?? [],
     defaultWsl: wslDistros()[0] ?? null,
     marked,
-  });
+  }), newChatOptions(sshHosts));
+  treeHosts = [...hosts];   // without the practice sessions, which have no real folders
   const practice = gettingStarted?.folderHost();   // Getting started's practice sessions, on top
   if (practice) hosts.unshift(practice);
   const key = JSON.stringify(hosts);
@@ -600,7 +604,8 @@ function setHidden(ids, on) {
 }
 
 // A sidebar row's own menu: a session's (mark it done or Ready, hide it, delete a VS Code or
-// terminal chat), or a machine's or a folder's (fold it, hide what's in it). Null for anywhere
+// terminal chat), or a machine's or a folder's (fold it, hide what's in it, and in a folder start
+// a new chat). Null for anywhere
 // else, which gets the tray menu.
 function rowMenu(target) {
   const known = (id) => typeof id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === id));
@@ -620,13 +625,47 @@ function rowMenu(target) {
     const { key } = target;
     const open = target.open === true;
     const ids = target.ids.filter(known);
+    const chats = newChatItems(key);
     return Menu.buildFromTemplate([
+      ...chats,
+      ...(chats.length ? [{ type: 'separator' }] : []),
       { label: open ? 'Collapse' : 'Expand', click: () => folder?.send('folder:fold', { key, open: !open }) },
       { type: 'separator' },
       { label: 'Hide from the sidebar', enabled: ids.length > 0, click: () => setHidden(ids, true) },
     ]);
   }
   return null;
+}
+
+// A folder's menu (its + or a right-click) starts a new chat there in Claude or Codex, by the
+// app's own link (new-chat.js).
+function newChatItems(key) {
+  const links = newChatLinks(placeOf(treeHosts, key), newChatOptions());
+  return [
+    ...(links.claude ? [{ label: 'New Claude Code session here', click: () => startChat(links.claude, 'claude') }] : []),
+    ...(links.codex ? [{ label: 'New Codex chat here', click: () => startChat(links.codex, 'codex') }] : []),
+  ];
+}
+
+// Which apps can start chats, and the SSH hosts by the name Claude knows them by: a saved
+// connection's, or its sessions'.
+function newChatOptions(sshHosts = sshConfigHosts()) {
+  const machineKeys = [...(tracker?.connectionNames?.keys() ?? []), ...claudeAll.filter((s) => s.kind === 'desktop').map((s) => s.machineKey)];
+  return {
+    claude: claudeInstalled(),
+    codex: settings.get('showCodex') && codexInstalled(),
+    claudeSsh: sshTargets(machineKeys),
+    codexProjects: codex?.projects ?? [],
+    sshHosts,
+  };
+}
+
+// The app opens its new-chat page and fills the rest of the screen, as a session opened from the
+// sidebar does; the chat shows in the tree once you've sent its first message.
+function startChat(url, which) {
+  log(`new ${which} chat: ${url}`);
+  openApp(url);
+  maximizeApps('open', which);
 }
 
 // A session as the full lists have it (with its machine), whether or not it has a bubble.
@@ -1568,6 +1607,14 @@ function registerIpc() {
       return;
     }
     if (!openSession(id, { handoff: via === 'key', fill: true })) log('folder: nothing to open for', id);
+  });
+  // A folder's +: the apps that can start a chat there, as a menu where it was clicked.
+  ipcMain.on('folder:new-chat', (e, p) => {
+    if (!fromFolder(e) || typeof p?.key !== 'string') return;
+    const items = newChatItems(p.key);
+    if (!items.length) return;
+    const position = isPoint(p) ? { x: Math.round(p.screenX), y: Math.round(p.screenY) } : undefined;
+    tray?.popUpContextMenu(Menu.buildFromTemplate(items), position);
   });
   ipcMain.on('folder:pet-click', (e) => {
     if (!fromFolder(e)) return;

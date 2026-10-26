@@ -182,6 +182,18 @@ function parseConnections(j) {
   return out;
 }
 
+// local-projects: { <id>: { id, name, rootPaths } }, the app's projects on this PC and in WSL
+// (\\wsl$\<distro>\…), for the sidebar's new chats (new-chat.js).
+function parseProjects(j) {
+  const projects = j?.['local-projects'];
+  const out = [];
+  for (const p of projects && typeof projects === 'object' ? Object.values(projects) : []) {
+    if (typeof p?.id !== 'string' || !p.id || !Array.isArray(p.rootPaths)) continue;
+    out.push({ id: p.id, rootPaths: p.rootPaths.filter((r) => typeof r === 'string' && r) });
+  }
+  return out;
+}
+
 // The "dots" in the app (a messaging assistant, named dot) are threads on the cloud host with no
 // rollout to follow. The app's persisted state has, per dot thread:
 //   aeon-introduction-v1:<id>   its name
@@ -311,6 +323,7 @@ class CodexTracker extends EventEmitter {
     this.subtasks = new Map();        // a dot's subtask threadId -> the dot's threadId
     this.dreams = new Set();          // threadIds of a dot's upkeep threads
     this.connections = [];            // the SSH hosts the app works on
+    this.projects = [];               // the app's projects on this PC and in WSL: { id, rootPaths }
     this.hostNames = new Map();       // hostId -> the name you gave the host
     this.remotes = new Map();         // hostId -> CodexRemote
     this.catalog = new Map();         // threadId -> { hostId, title, updatedAt, cwd }
@@ -548,6 +561,7 @@ class CodexTracker extends EventEmitter {
     this.unread = unread;
     this.followAeons(parseAeons(j), { unread, prevUnread, now, firstRead });
     this.connections = parseConnections(j);
+    this.projects = parseProjects(j);
     this.hostNames = new Map(this.connections.map((c) => [c.hostId, c.name]));
     this.syncRemotes();
   }
@@ -906,4 +920,4 @@ async function rolloutsIn(root) {
   return out;
 }
 
-module.exports = { CodexTracker, chatUrl, codexPaths, parseAeons, parseConnections, parseUnread, readCatalog, threadUrl };
+module.exports = { CodexTracker, chatUrl, codexPaths, parseAeons, parseConnections, parseProjects, parseUnread, readCatalog, threadUrl };

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('folder', {
   savePrefs: (p) => ipcRenderer.send('folder:save-prefs', p),
   open: (id, via) => ipcRenderer.send('folder:open', String(id), via === 'key' ? 'key' : 'click'),
   activatePet: () => ipcRenderer.send('folder:pet-click'),
+  newChat: (key, screenX, screenY) => ipcRenderer.send('folder:new-chat', { key: String(key), screenX, screenY }),   // a folder's +
   resize: (phase) => ipcRenderer.send('folder:resize', String(phase)),   // 'move', 'end' or 'reset'
   // `target`: the row clicked, if any: { kind: 'session', id } or { kind: 'folder', key, open, ids }.
   contextMenu: (screenX, screenY, target) => ipcRenderer.send('folder:context-menu', { screenX, screenY, target: target ?? null }),

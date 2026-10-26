@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { CodexTracker, parseAeons, parseConnections, parseUnread, threadUrl } = require('../src/codex');
+const { CodexTracker, parseAeons, parseConnections, parseProjects, parseUnread, threadUrl } = require('../src/codex');
 const { BOOTSTRAP, CodexRemote, LOADER, WATCHER } = require('../src/codex-remote');
 const { applyRolloutEntry, clientOf, createRolloutState, rateLimitsOf, rolloutStatus } = require('../src/rollout');
 
@@ -464,6 +464,22 @@ test('the SSH hosts come from the connections the Codex app manages', () => {
     { hostId: 'remote-ssh-discovered:lab-server', name: 'lab-server', target: 'lab-server', port: null, identity: null },
     { hostId: 'remote-ssh:box', name: 'box.example.org', target: 'box.example.org', port: 2222, identity: '~/.ssh/box' },
   ]);
+});
+
+test('Codex\'s projects on this PC and in WSL come from its state file, by id with their roots', () => {
+  const projects = parseProjects({
+    'local-projects': {
+      a: { id: 'a', name: 'tool', rootPaths: ['\\\\wsl$\\Ubuntu\\home\\me\\tool'] },
+      b: { id: 'b', name: 'notes', rootPaths: ['C:\\Users\\Me\\notes', 7, ''] },
+      c: { name: 'no id', rootPaths: ['C:\\x'] },
+      d: { id: 'd', rootPaths: 'C:\\not-a-list' },
+    },
+  });
+  assert.deepEqual(projects, [
+    { id: 'a', rootPaths: ['\\\\wsl$\\Ubuntu\\home\\me\\tool'] },
+    { id: 'b', rootPaths: ['C:\\Users\\Me\\notes'] },
+  ]);
+  assert.deepEqual(parseProjects(null), []);
 });
 
 function fakeSsh() {

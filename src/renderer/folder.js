@@ -250,6 +250,7 @@
     if (n.path) row.title = n.path;
     row.append(el('span', 'chevron', '▶'), withMatches(el('span', 'name'), n.label));
     if (!open) row.append(...pips(n));
+    if (n.newChat) row.append(addButton(n.key));
     row.addEventListener('click', () => {
       if (!dragged) setOpen(n.key, !open);
     });
@@ -288,6 +289,21 @@
       render();
     });
     return row;
+  }
+
+  // The + on a folder where Claude or Codex can start a chat (main.js marks it): the apps, as a
+  // menu, as in the folder's own menu. Pressing it neither folds the folder nor drags it.
+  function addButton(key) {
+    const add = el('span', 'add', '+');
+    add.setAttribute('role', 'button');
+    add.setAttribute('aria-label', 'New chat here');
+    add.title = 'New chat here';
+    add.addEventListener('pointerdown', (e) => e.stopPropagation());
+    add.addEventListener('click', (e) => {
+      e.stopPropagation();
+      api.newChat(key, e.screenX, e.screenY);
+    });
+    return add;
   }
 
   // A folded folder's news: something needs you, or is working.
