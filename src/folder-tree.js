@@ -226,6 +226,12 @@ function counts(sessions) {
   };
 }
 
+// The sessions in `hosts` (buildTree's) that show Needs you, Error or Ready: what Mark all as done
+// settles.
+function attentionIds(hosts) {
+  return hosts.flatMap((h) => [...h.folders.flatMap(allSessions), ...h.loose]).filter((s) => ATTENTION.has(s.status)).map((s) => s.id);
+}
+
 function latestOf(sessions) {
   return sessions.reduce((m, s) => Math.max(m, s.lastActivityAt || 0, s.status !== 'idle' ? s.since || 0 : 0), 0);
 }
@@ -238,4 +244,4 @@ function byActivity(a, b) {
   return b.lastActivityAt - a.lastActivityAt;
 }
 
-module.exports = { buildTree, splitPath, sshMachine };
+module.exports = { buildTree, splitPath, sshMachine, attentionIds };

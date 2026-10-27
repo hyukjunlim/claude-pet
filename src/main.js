@@ -28,7 +28,7 @@ const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
 const { FolderWindow, displayChoices } = require('./folder-mode');
-const { buildTree } = require('./folder-tree');
+const { buildTree, attentionIds } = require('./folder-tree');
 const { markNewChats, newChatLinks, placeOf, sshTargets } = require('./new-chat');
 const { settleMarks } = require('./marks');
 const { settleHidden } = require('./hidden');
@@ -603,10 +603,17 @@ function setHidden(ids, on) {
   sendTree();
 }
 
+// Mark all as done: what shows Needs you, Error or Ready in the whole sidebar, or (`ids`) in one
+// machine or folder, is settled at once.
+function markAllItem(ids = null) {
+  const pending = attentionIds(treeHosts);
+  const todo = ids ? pending.filter((id) => ids.includes(id)) : pending;
+  return { label: 'Mark all as done', enabled: todo.length > 0, click: () => markDone(todo) };
+}
+
 // A sidebar row's own menu: a session's (mark it done or Ready, hide it, delete a VS Code or
-// terminal chat), or a machine's or a folder's (fold it, hide what's in it, and in a folder start
-// a new chat). Null for anywhere
-// else, which gets the tray menu.
+// terminal chat), or a machine's or a folder's (fold it, mark or hide what's in it, and in a folder
+// start a new chat). Null for anywhere else, which gets the tray menu with Mark all as done.
 function rowMenu(target) {
   const known = (id) => typeof id === 'string' && [claudeAll, codexAll, webAll].some((list) => list.some((s) => s.id === id));
   if (target?.kind === 'session' && known(target.id)) {
@@ -631,6 +638,7 @@ function rowMenu(target) {
       ...(chats.length ? [{ type: 'separator' }] : []),
       { label: open ? 'Collapse' : 'Expand', click: () => folder?.send('folder:fold', { key, open: !open }) },
       { type: 'separator' },
+      markAllItem(ids),
       { label: 'Hide from the sidebar', enabled: ids.length > 0, click: () => setHidden(ids, true) },
     ]);
   }
@@ -1642,7 +1650,7 @@ function registerIpc() {
     }
     const menu = rowMenu(target);
     if (!menu) gettingStarted?.tried('menu');
-    tray?.popUpContextMenu(menu ?? buildMenu(), position);
+    tray?.popUpContextMenu(menu ?? buildMenu({ markAll: true }), position);
   });
 }
 
@@ -1697,7 +1705,8 @@ function applyModeFlag(argv) {
   return true;
 }
 
-function buildMenu() {
+// `markAll`: for a right-click on the sidebar's empty space, which has Mark all as done.
+function buildMenu({ markAll = false } = {}) {
   const items = [];
   const folderMode = settings.get('mode') === 'folder';
   // The sessions themselves are in the bubbles and the sidebar. The weekly limits in words are
@@ -1720,6 +1729,7 @@ function buildMenu() {
   });
   // The sessions you hid from the sidebar, to bring back (one whose session is gone isn't listed).
   if (folderMode) {
+    if (markAll) items.push(markAllItem());
     const hidden = Object.keys(currentHidden())
       .map((id) => [claudeAll, codexAll, webAll].reduce((found, list) => found ?? list.find((s) => s.id === id), null))
       .filter(Boolean);

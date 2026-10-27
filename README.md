@@ -220,7 +220,9 @@ maximized beside it, so the conversation you open fills the rest of the screen.
 - **Mark as done, Mark as Ready:** opening a session leaves its *Ready*, *Error* or *Needs you*.
   Right-click it → *Mark as done* settles it, as a bubble's × does. *Mark as Ready* undoes that, so a
   question still in the next-step box is *Needs you* again; on a quiet session it puts it in Ready to
-  come back to, until you mark it done or send it a message.
+  come back to, until you mark it done or send it a message. *Mark all as done* settles every one at
+  once: right-click a folder or a machine for what's in it, or anywhere else in the sidebar for all
+  of them.
 - **Hide:** right-click a session → *Hide from the sidebar*, or a folder or a machine to hide
   everything in it (its menu also has *Collapse* or *Expand*). Only the sidebar leaves it out; a
   hidden session shows again when something new happens in it, or from the tray menu's *Hidden from

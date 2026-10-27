@@ -537,7 +537,7 @@
   });
 
   // A session's row, a folder's row or a machine's heading has a menu of its own (main.js); the
-  // rest of the page has the tray menu.
+  // rest of the page has the tray menu, with Mark all as done.
   document.addEventListener('contextmenu', (e) => {
     if (e.target === searchEl) return;   // the field's own menu (cut, copy, paste)
     e.preventDefault();

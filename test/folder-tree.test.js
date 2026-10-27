@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildTree, splitPath } = require('../src/folder-tree');
+const { buildTree, splitPath, attentionIds } = require('../src/folder-tree');
 
 const NOW = Date.parse('2026-10-25T00:00:00Z');
 const ago = (days) => NOW - days * 24 * 60 * 60 * 1000;
@@ -125,6 +125,18 @@ test('a folder counts what needs you and what is working below it, so a folded o
   const [p] = lab.folders;
   assert.deepEqual([p.attention, p.busy], [2, 1]);
   assert.deepEqual([lab.attention, lab.busy], [2, 1]);
+});
+
+test('Mark all as done takes what shows Needs you, Error or Ready, on every machine and in No folder', () => {
+  const hosts = buildTree({
+    claude: [
+      claude('asks', '/data/p/a', { ...onLab, status: 'waiting' }), claude('runs', '/data/p/b', { ...onLab, status: 'running' }),
+      claude('broke', null, { status: 'failed' }), claude('marked', 'C:\\x'), claude('quiet', 'C:\\y'),
+    ],
+    codex: [codex('done', '/data/p', 'remote-ssh-discovered:lab', { status: 'review' })],
+    sshHosts: SSH_HOSTS, codexConnections: CONNECTIONS, marked: { marked: NOW - 1000 }, now: NOW,
+  });
+  assert.deepEqual(attentionIds(hosts).sort(), ['asks', 'broke', 'codex:done', 'marked']);
 });
 
 test('paths are read the way each app writes them', () => {
