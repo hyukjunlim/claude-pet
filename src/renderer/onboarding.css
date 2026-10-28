@@ -188,7 +188,15 @@ code {
 .status .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--waiting); animation: blink 1.4s infinite; }
 .status.ok { background: color-mix(in srgb, var(--review) 12%, transparent); }
 .status.ok .dot { background: var(--review); animation: none; }
+.status.error { margin-bottom: 10px; background: color-mix(in srgb, var(--failed) 12%, transparent); }
+.status.error .dot { background: var(--failed); animation: none; }
 @keyframes blink { 50% { opacity: 0.3; } }
+
+/* The phone step: a part that's done, the pairing code to type in, what Tailscale said. */
+.ticked { color: var(--review); font-weight: 600; }
+.code { margin: 4px 0; font-size: 26px; font-weight: 700; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.said { margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--failed) 35%, var(--border)); border-radius: 8px; }
+.said p { margin: 0 0 6px; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .status .dot { animation: none; } }
 
 .switch { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; cursor: pointer; }

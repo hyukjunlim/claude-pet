@@ -12,6 +12,7 @@ const { pushEvents } = require('../src/phone/notify');
 const { phoneView, openTarget } = require('../src/phone/view');
 const { PhoneFeature } = require('../src/phone/feature');
 const { allowedHost } = require('../src/phone/server');
+const { TAILSCALE_LINK } = require('../src/onboarding');
 
 // ---------------------------------------------------------------- what buzzes
 
@@ -286,6 +287,103 @@ test('a sample eTL notice shows on the phone for a while and comes as a notifica
   await new Promise((r) => setTimeout(r, 400));
   const later = JSON.parse((await call(f.listening, { path: '/api/state', cookie })).text).notices;
   assert.deepEqual(later.map((n) => n.id), ['etl:ann:1'], 'gone after ten minutes');
+});
+
+// ---------------------------------------------------------------- Getting started's Phone step
+
+// A stand-in for the tailscale CLI: `installed` false makes every call fail, as with none on PATH.
+function fakeTailscale({ installed = true, running = true, serveError = null } = {}) {
+  const calls = [];
+  let served = false;
+  const execFileFn = (exe, args, opts, cb) => {
+    calls.push(args.join(' '));
+    if (!installed) return cb(Object.assign(new Error('spawn tailscale ENOENT'), { code: 'ENOENT' }), '', '');
+    if (args[0] === 'version') return cb(null, '1.90.0\n', '');
+    if (args[0] === 'status') return cb(null, JSON.stringify({ BackendState: running ? 'Running' : 'NeedsLogin', Self: { DNSName: running ? 'desktop-pc.tail1234.ts.net.' : '' } }), '');
+    if (args[0] === 'serve' && args[1] === 'status') return cb(null, served ? '{"Web":{"desktop-pc.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:47823"}}}}}' : '{}', '');
+    if (args[0] === 'serve' && args[1] === '--bg') {
+      if (serveError) return cb(new Error('exit 1'), '', serveError);
+      served = true;
+      return cb(null, 'Available within your tailnet\n', '');
+    }
+    return cb(new Error(`unexpected: ${args.join(' ')}`), '', '');
+  };
+  return { execFileFn, calls };
+}
+
+// `port` 47823 is only named to Tailscale here, never listened on; 0 listens on any free one.
+function setupFeature(t, tailscale, { port = 47823, on = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'phone-'));
+  const data = { phone: on };
+  const f = new PhoneFeature({
+    electron: {},   // no dialogs: the step must never open one
+    settings: { get: (k) => data[k], set: (p) => Object.assign(data, p) },
+    userData: dir,
+    port,
+    env: {},
+    execFileFn: tailscale.execFileFn,
+  });
+  let events = 0;
+  f.on('setup', () => events++);
+  t.after(() => f.stop());
+  return { f, events: () => events };
+}
+
+test('the Phone step: no Tailscale says so, and nothing opens a dialog', async (t) => {
+  const { f } = setupFeature(t, fakeTailscale({ installed: false }), { port: 0, on: false });
+  await f.setEnabled(true, { quiet: true });
+  await f.checkSetup();
+  const s = f.setupState();
+  assert.equal(s.on, true);
+  assert.equal(s.serving, true);
+  assert.deepEqual(s.tailscale, { installed: false, running: false, name: null, served: false });
+  assert.equal(s.address, null);
+  assert.equal(s.busy, null);
+});
+
+test('the Phone step: signed in, Serve set up, a code, then a paired phone', async (t) => {
+  const tailscale = fakeTailscale();
+  const { f, events } = setupFeature(t, tailscale);
+  await f.checkSetup();
+  let s = f.setupState();
+  assert.deepEqual(s.tailscale, { installed: true, running: true, name: 'desktop-pc.tail1234.ts.net', served: false });
+  assert.equal(s.address, 'https://desktop-pc.tail1234.ts.net/');
+
+  await f.serveForSetup();
+  assert.ok(tailscale.calls.includes('serve --bg http://127.0.0.1:47823'));
+  s = f.setupState();
+  assert.equal(s.tailscale.served, true);
+  assert.equal(s.error, null);
+
+  const code = f.codeForSetup();
+  assert.equal(f.setupState().code, code);
+  assert.equal(f.api().pair({ code, name: 'Galaxy' }) != null, true);
+  s = f.setupState();
+  assert.equal(s.code, null, 'a code works once');
+  assert.equal(s.paired, 1);
+  assert.equal(s.notifying, 0);
+  assert.ok(events() >= 5, 'the page draws again as each part changes');
+});
+
+test('the Phone step: when Serve won\'t start, what Tailscale said is kept for the page', async (t) => {
+  const said = 'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=n123\n';
+  const { f } = setupFeature(t, fakeTailscale({ serveError: said }));
+  await f.serveForSetup();
+  const s = f.setupState();
+  assert.match(s.error, /Serve is not enabled/);
+  assert.match(s.error, /https:\/\/login\.tailscale\.com\/f\/serve\?node=n123/);
+  assert.equal(s.tailscale.served, false);
+  assert.equal(s.busy, null);
+});
+
+test('the Phone step opens Tailscale\'s pages and nothing else', () => {
+  assert.ok(TAILSCALE_LINK.test('https://tailscale.com/download'));
+  assert.ok(TAILSCALE_LINK.test('https://login.tailscale.com/admin/dns'));
+  assert.ok(TAILSCALE_LINK.test('https://login.tailscale.com/f/serve?node=n123'));
+  assert.ok(!TAILSCALE_LINK.test('https://login.tailscale.com.evil.example/x'));
+  assert.ok(!TAILSCALE_LINK.test('http://tailscale.com/download'));
+  assert.ok(!TAILSCALE_LINK.test('https://evil.example/?https://tailscale.com/'));
+  assert.ok(!TAILSCALE_LINK.test('https://tailscale.com/download extra'));
 });
 
 test('off: nothing listens and nothing is written', async () => {

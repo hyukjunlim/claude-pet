@@ -803,6 +803,11 @@ function startGettingStarted() {
       etl: () => etl?.setEnabled(true, { openChat: false }),
       web: (on) => webchats?.setEnabled(on, { quiet: true }),
       extensionFolder: () => webchats?.openExtensionFolder(),
+      phone: (on) => phone?.setEnabled(on, { quiet: true }).then(() => on && phone.checkSetup()),
+      phoneCheck: () => phone?.checkSetup(),
+      phoneServe: () => phone?.serveForSetup(),
+      phoneCode: () => phone?.codeForSetup(),
+      phoneOpen: (url) => shell.openExternal(url),   // a Tailscale page (onboarding.js checks)
       doc: (name) => name === 'usage' && shell.openExternal(LIVE_USAGE_DOC),
     },
   });
@@ -820,6 +825,7 @@ function gettingStartedState() {
       connected: webchats?.chats.connected() ?? 0,
       folder: webchats?.extensionDir() ?? '',
     },
+    phone: phone ? { available: true, ...phone.setupState() } : { available: false },
   };
 }
 
@@ -970,6 +976,7 @@ function startPhone() {
     sampleNotice: sampleEtlNotice,
     icon: appIcon,
   });
+  phone.on('setup', () => gettingStarted?.send());   // Getting started's Phone step draws again
   phone.start()
     .then(() => {
       phone.changed();

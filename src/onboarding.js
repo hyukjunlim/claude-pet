@@ -1,7 +1,7 @@
 'use strict';
 
 // Getting started: a window that walks a new user through the setup, a step at a time (the mode,
-// Claude's live usage, SNU eTL, the web chats extension), then has them try the pet itself on
+// Claude's live usage, SNU eTL, the web chats extension, the phone), then has them try the pet itself on
 // practice items: a bubble next to the floating pet, or two sessions at the top of the sidebar.
 // It opens on the first start, and from the tray menu. The steps act through main.js (`actions`);
 // the page (renderer/onboarding.*) gets what it shows from `state()`.
@@ -16,12 +16,19 @@ const TRIES = {
   pet: ['click', 'dismiss', 'hide', 'menu'],
   folder: ['click', 'step', 'rowMenu', 'hide', 'menu'],
 };
-const ACTIONS = new Set(['mode', 'usage', 'etl', 'web', 'extensionFolder', 'copy', 'doc', 'practice', 'refresh', 'close']);
+const ACTIONS = new Set([
+  'mode', 'usage', 'etl', 'web', 'extensionFolder', 'phone', 'phoneCheck', 'phoneServe', 'phoneCode', 'phoneOpen',
+  'copy', 'doc', 'practice', 'refresh', 'close',
+]);
 const MAX_COPY = 500;
+// The only pages the phone step opens: Tailscale's download page and its admin console (where
+// HTTPS certificates are turned on), or a link of Tailscale's own from what it said.
+const TAILSCALE_LINK = /^https:\/\/(login\.)?tailscale\.com\/[^\s]*$/;
 
 class GettingStarted {
   // state(): what the page shows (see main.js). actions: { mode(m), usage(keys), etl(), web(on),
-  // extensionFolder(), doc(name) }, each may return a promise; changed(): the practice items came
+  // extensionFolder(), phone(on), phoneCheck(), phoneServe(), phoneCode(), phoneOpen(url), doc(name) },
+  // each may return a promise; changed(): the practice items came
   // or went, so the pet and the sidebar draw again; closed(): the window was closed.
   constructor({ state, actions, changed, closed = () => {}, log = () => {} }) {
     Object.assign(this, { stateOf: state, actions, changed, closed, log });
@@ -186,6 +193,21 @@ class GettingStarted {
       case 'extensionFolder':
         run(this.actions.extensionFolder());
         return;
+      case 'phone':
+        run(this.actions.phone(arg === true));
+        return;
+      case 'phoneCheck':
+        run(this.actions.phoneCheck());
+        return;
+      case 'phoneServe':
+        run(this.actions.phoneServe());
+        return;
+      case 'phoneCode':
+        run(this.actions.phoneCode());
+        return;
+      case 'phoneOpen':
+        if (typeof arg === 'string' && TAILSCALE_LINK.test(arg)) run(this.actions.phoneOpen(arg));
+        return;
       case 'copy':
         if (typeof arg === 'string' && arg.length <= MAX_COPY) clipboard.writeText(arg);
         return;
@@ -206,4 +228,4 @@ class GettingStarted {
   }
 }
 
-module.exports = { GettingStarted, PRACTICE_PET, PRACTICE_ROWS, TRIES };
+module.exports = { GettingStarted, PRACTICE_PET, PRACTICE_ROWS, TAILSCALE_LINK, TRIES };

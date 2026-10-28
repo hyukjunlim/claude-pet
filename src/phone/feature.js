@@ -46,6 +46,7 @@ class PhoneFeature extends EventEmitter {
     Object.assign(this, { electron, settings, log, snapshot, icon, sampleNotice, execFileFn, env, now, request, fixedPort: port });
     this.samples = [];           // sample eTL notices on the phone, each until its `until`
     this.sampleTimer = null;
+    this.setup = { tailscale: null, busy: null, error: null };   // Getting started's Phone step (setupState)
     this.file = path.join(userData, 'phone.json');
     this.server = null;
     this.listening = null;       // the port it listens on, once it does
@@ -107,14 +108,76 @@ class PhoneFeature extends EventEmitter {
     server?.closeAllConnections?.();
   }
 
-  async setEnabled(on) {
+  // `quiet`: without the pairing dialogs (Getting started shows those steps itself).
+  async setEnabled(on, { quiet = false } = {}) {
     this.settings.set({ phone: on });
     if (!on) {
       this.stop();
+      this.emit('setup');
       return;
     }
     await this.#listen();
-    await this.showPairing();
+    this.emit('setup');
+    if (!quiet) await this.showPairing();
+  }
+
+  // ---------------------------------------------------------------- Getting started's Phone step
+
+  // Where the setup stands, for the step's page (onboarding.js): whether it's on and serving,
+  // Tailscale as last checked ({ installed, running, name, served }), what's under way ('check' or
+  // 'serve'), what Tailscale said when Serve didn't start, the pairing code while it's good, and
+  // how many phones are paired and take notifications.
+  setupState() {
+    const ts = this.setup.tailscale;
+    const code = this.code && this.now() < this.code.until ? this.code.code : null;
+    return {
+      on: this.enabled,
+      serving: this.listening != null,
+      port: this.port,
+      tailscale: ts,
+      address: ts?.name ? `https://${ts.name}/` : null,
+      busy: this.setup.busy,
+      error: this.setup.error,
+      code,
+      paired: this.devices.length,
+      notifying: this.devices.filter((d) => d.subscription).length,
+    };
+  }
+
+  async checkSetup() {
+    if (this.setup.busy) return;
+    this.setup.busy = 'check';
+    this.emit('setup');
+    try {
+      this.setup.tailscale = await this.tailscale().catch(() => ({ installed: false, running: false, name: null, served: false }));
+    } finally {
+      this.setup.busy = null;
+      this.emit('setup');
+    }
+  }
+
+  // Serve for the step: what Tailscale says when it doesn't start (say, to turn HTTPS on for the
+  // tailnet first) is kept for the page to show.
+  async serveForSetup() {
+    if (this.setup.busy) return;
+    this.setup.busy = 'serve';
+    this.setup.error = null;
+    this.emit('setup');
+    try {
+      await this.serve();
+    } catch (err) {
+      this.setup.error = clip(err.message, 600);
+    } finally {
+      this.setup.busy = null;
+    }
+    await this.checkSetup();
+  }
+
+  // A fresh pairing code for the step, in place of any earlier one.
+  codeForSetup() {
+    const code = this.newCode();
+    this.emit('setup');
+    return code;
   }
 
   // The tree, the notices or the weekly limits changed: the page gets them on its next look.
@@ -147,11 +210,13 @@ class PhoneFeature extends EventEmitter {
         if (!validSubscription(sub)) return false;
         device.subscription = { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } };
         this.#save();
+        this.emit('setup');
         return true;
       },
       unsubscribe: (device) => {
         device.subscription = null;
         this.#save();
+        this.emit('setup');
       },
       testPush: (device) => this.#push(device, { title: 'Ttokttok Pet', body: 'Notifications work on this phone.', tag: 'test', id: null }),
       unpair: (device) => this.forget(device.id),
@@ -182,6 +247,7 @@ class PhoneFeature extends EventEmitter {
   forget(id = null) {
     this.store.devices = id ? this.devices.filter((d) => d.id !== id) : [];
     this.#save();
+    this.emit('setup');
   }
 
   // ---------------------------------------------------------------- pairing and Tailscale
@@ -207,6 +273,7 @@ class PhoneFeature extends EventEmitter {
     this.store.devices = [...this.devices, device].slice(-MAX_DEVICES);
     this.#save();
     this.emit('paired', device);
+    this.emit('setup');
     return token;
   }
 

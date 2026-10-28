@@ -42,9 +42,9 @@ npm start
 
 On its first start, the pet opens **Getting started**, which sets it up a step at a time: the mode
 (a floating pet or a sidebar), the small mod for Claude Code that Claude's weekly limit comes from
-([Live Claude usage](#live-claude-usage)), SNU eTL, and the browser extension for chats on
-claude.ai, ChatGPT and Gemini ([Web chats](#web-chats-claudeai-chatgpt-gemini)). Each step can be
-skipped. Then you try the pet out on practice items (a bubble next to the floating pet, or two
+([Live Claude usage](#live-claude-usage)), SNU eTL, the browser extension for chats on
+claude.ai, ChatGPT and Gemini ([Web chats](#web-chats-claudeai-chatgpt-gemini)), and the phone
+([Phone](#phone)). Each step can be skipped. Then you try the pet out on practice items (a bubble next to the floating pet, or two
 sessions at the top of the sidebar): click, mark done, hide and show with `Ctrl+Alt+P`, step
 through with `Ctrl+Tab`, right-click. Tray menu → *Getting started…* (or `--getting-started`)
 opens it again.
@@ -471,7 +471,8 @@ watching and the phone only shows what the pet sends it, so the PC has to be on 
   and enter the code. Add the page to the Home Screen (an iPhone needs that for notifications:
   Share → *Add to Home Screen*, then open it from there) and tap *Turn on notifications*. Tray
   menu → *Phone* → *Send a test notification* checks that they arrive. *Send a sample eTL notice*
-  puts a 테스트 notice on the phone for 10 minutes, to try the way into LearningX.
+  puts a 테스트 notice on the phone for 10 minutes, to try the way into LearningX. Getting
+  started's *Phone* step does the same a part at a time, and says which part is missing.
 - **What it shows:** the sidebar's machine › folder tree with each session's status, eTL's notices
   and the weekly limits. Machines and folders fold as they do in the sidebar. While the page is
   open it asks the PC every 4 seconds; when the PC is asleep or the phone is off the tailnet, it

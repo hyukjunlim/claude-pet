@@ -20,6 +20,7 @@
     { key: 'usage', name: 'Claude usage', skippable: true },
     { key: 'etl', name: 'SNU eTL', skippable: true, when: (s) => s.etl.available },
     { key: 'web', name: 'Web chats', skippable: true, when: (s) => s.web.available },
+    { key: 'phone', name: 'Phone', skippable: true, when: (s) => s.phone?.available },
     { key: 'try', name: 'Try it', skippable: true },
     { key: 'end', name: 'Done' },
   ];
@@ -79,6 +80,7 @@
     if (key === 'usage' && state.usage.places.some((p) => p.set)) return 'done';
     if (key === 'etl' && state.etl.enabled) return 'done';
     if (key === 'web' && state.web.on && state.web.connected > 0) return 'done';
+    if (key === 'phone' && state.phone.on && state.phone.paired > 0) return 'done';
     if (key === 'try' && practiced.has(state.mode)) return 'done';
     return skipped.has(key) ? 'skipped' : 'todo';
   }
@@ -196,6 +198,73 @@
       ];
     },
 
+    // Each part of the setup in order: Tailscale here, Serve, the phone's side, the code, the Home
+    // Screen. A part says what's missing until it's done, and the later ones wait for it.
+    phone() {
+      const p = state.phone;
+      const ts = p.tailscale;
+      const signedIn = Boolean(ts?.installed && ts.running && ts.name);
+      const button = (label, onclick, { primary = false, disabled = false } = {}) => h(`button.btn.small${primary ? '.primary' : ''}`, { type: 'button', disabled, onclick }, label);
+      const check = () => button(p.busy === 'check' ? 'Checking…' : 'Check again', () => api.act('phoneCheck'), { disabled: Boolean(p.busy) });
+      const ok = (text) => h('span.ticked', { text: ` ${text} ✓` });
+      // Tailscale's own link from what it said, else its admin console, where HTTPS is turned on.
+      const tailscalePage = (p.error || '').match(/https:\/\/login\.tailscale\.com\/[^\s"'<>)]+/)?.[0] || 'https://login.tailscale.com/admin/dns';
+
+      const here = !ts
+        ? h('span.note', { text: 'Checking…' })
+        : !ts.installed
+          ? ['Install it and sign in.', h('div.actions', null, button('Open tailscale.com/download', () => api.act('phoneOpen', 'https://tailscale.com/download')), check())]
+          : !signedIn
+            ? ['Sign in to it on this PC.', h('div.actions', null, check())]
+            : ok(ts.name);
+      const serve = !signedIn
+        ? h('span.note', { text: 'After step 1.' })
+        : ts.served
+          ? ['Your devices reach it at ', h('code', { text: p.address }), ok('')]
+          : [
+            'This runs ', h('code', { text: `tailscale serve --bg http://127.0.0.1:${p.port}` }), ': only devices signed in to your tailnet can open it.',
+            h('div.actions', null, button(p.busy === 'serve' ? 'Setting up…' : 'Set up Tailscale Serve', () => api.act('phoneServe'), { primary: true, disabled: Boolean(p.busy) })),
+            p.error && h('div.said', null,
+              h('p', null, 'Tailscale said: ', h('code', { text: p.error })),
+              h('p.note', { text: 'The first time, Tailscale may ask you to turn on HTTPS certificates for your tailnet. Turn them on, then set up Serve again.' }),
+              button('Open the Tailscale page', () => api.act('phoneOpen', tailscalePage))),
+          ];
+      const address = ts?.served && p.address
+        ? h('div.actions', null, h('span.pair', null, h('code', { text: p.address }),
+          h('button.btn.small', { type: 'button', onclick: (e) => { api.act('copy', p.address); e.currentTarget.textContent = 'Copied'; } }, 'Copy')))
+        : h('span.note', { text: ' the address from step 2.' });
+      const code = p.code
+        ? [h('div.code', { text: `${p.code.slice(0, 3)} ${p.code.slice(3)}`, 'aria-label': `Pairing code ${p.code.split('').join(' ')}` }),
+          h('span.note', { text: 'Works once, for 10 minutes. ' }), button('New code', () => api.act('phoneCode'))]
+        : p.paired > 0
+          ? [ok(`${p.paired} phone${p.paired > 1 ? 's' : ''} paired`), ' ', button('Pair another phone', () => api.act('phoneCode'))]
+          : button('Show the pairing code', () => api.act('phoneCode'), { disabled: !ts?.served });
+
+      return [
+        h('h1', { id: 'step-title' }, 'Your phone ', h('span.note', { text: '(optional)' })),
+        h('p.lead', { text: 'See what the pet shows on your phone, and get a notification when a chat finishes or eTL has news. The phone reaches this PC through Tailscale, from your own devices only; the PC has to stay on.' }),
+        h('label.switch', null,
+          h('input', { type: 'checkbox', checked: p.on, onchange: (e) => api.act('phone', e.target.checked) }),
+          'Show the sidebar on my phone, with notifications'),
+        p.on
+          ? [
+            !p.serving && h('div.status.error', { role: 'alert' }, h('span.dot'), `Port ${p.port} is taken by another program, so the pet can't serve the page.`),
+            h('ol.steps', null,
+              h('li', null, h('div', null, h('strong', { text: 'Tailscale on this PC. ' }), here)),
+              h('li', null, h('div', null, h('strong', { text: 'Let your phone reach the pet. ' }), serve)),
+              h('li', null, h('div', null, h('strong', { text: 'On your phone, ' }),
+                'install Tailscale, sign in with the same account, turn it on, and open', address)),
+              h('li', null, h('div', null, h('strong', { text: 'Enter the pairing code there. ' }), code)),
+              h('li', null, h('div', null, h('strong', { text: 'Add the page to the Home Screen' }),
+                ' (an iPhone needs that for notifications: Share → Add to Home Screen, then open it from there) and tap ',
+                h('em', { text: 'Turn on notifications' }), '.', p.notifying > 0 && ok('Notifications on')))),
+          ]
+          : h('p.note', null, 'Off. Later: tray menu → ', h('em', { text: 'Phone' }), '.'),
+        h('p.note.gap', null, 'Tray menu → ', h('em', { text: 'Phone' }), ' → ', h('em', { text: 'Send a test notification' }),
+          ' checks that notifications arrive. Taps open the Claude and ChatGPT apps, so have those on the phone too.'),
+      ];
+    },
+
     try() {
       const mode = state.mode;
       const tried = new Set(state.practice?.mode === mode ? state.practice.tried : []);
@@ -243,7 +312,8 @@
           line(true, state.mode === 'pet' ? 'Floating pet' : 'Folder sidebar'),
           line(s('usage'), s('usage') ? 'Claude’s weekly limits' : 'Claude’s weekly limits: skipped'),
           state.etl.available && line(s('etl'), s('etl') ? 'SNU eTL' : 'SNU eTL: skipped'),
-          state.web.available && line(s('web'), s('web') ? 'Web chats' : 'Web chats: skipped')),
+          state.web.available && line(s('web'), s('web') ? 'Web chats' : 'Web chats: skipped'),
+          state.phone?.available && line(s('phone'), s('phone') ? 'Phone' : 'Phone: skipped')),
         h('p.note', null, 'Bring this back any time: tray menu → ', h('em', { text: 'Getting started…' })),
       ];
     },
@@ -284,6 +354,7 @@
     if (before !== after) {
       if (after === 'try') api.act('practice', state.mode);
       else if (before === 'try') api.act('practice', null);
+      if (after === 'phone' && state.phone.on) api.act('phoneCheck');   // Tailscale may have changed since
     }
     render();
     $('content').focus({ preventScroll: true });
