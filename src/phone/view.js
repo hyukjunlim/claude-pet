@@ -3,13 +3,18 @@
 // What the phone shows: the sidebar's machine › folder tree (folder-tree.js), eTL's notices and the
 // weekly limits, cut down to what the page draws. Each session and notice says which app a tap
 // opens and at which page (`open`); the page turns that into a link for the phone it runs on
-// (src/phone/www/app.js). A tap opens the app, not a session in it (CONSTRAINTS.md): the apps
-// offer no link to one Claude Code session or Codex thread on a phone. A web chat lives in the
-// account, so it opens at its own conversation.
+// (src/phone/www/app.js). A Claude Code session with Remote Control on opens at itself in the
+// Claude app (https://claude.ai/code/<its Remote Control session>), one without at the Code tab.
+// Codex has no link to one thread on a phone, so a Codex thread opens the ChatGPT app's Codex
+// screen. A web chat lives in the account, so it opens at its own conversation.
 
 const ETL_HOME = 'https://myetl.snu.ac.kr/';
 const ETL_LINK = /^https:\/\/myetl\.snu\.ac\.kr\//;
-const CHAT_LINK = {
+const CLAUDE_SESSION = /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]{8,64}$/;
+const OWN_LINK = {
+  claude: CLAUDE_SESSION,
+  vscode: CLAUDE_SESSION,
+  terminal: CLAUDE_SESSION,
   'claude-web': /^https:\/\/claude\.ai\//,
   chatgpt: /^https:\/\/chatgpt\.com\//,
   gemini: /^https:\/\/gemini\.google\.com\//,
@@ -28,13 +33,14 @@ const OPEN = {
   gemini: ['gemini', 'https://gemini.google.com/app'],
 };
 
-function openTarget(app, chatUrl = null) {
+// `link`: the session's own address, if it has one (a web chat's, a Claude session's Remote Control).
+function openTarget(app, link = null) {
   const [phoneApp, url] = OPEN[app] || OPEN.claude;
-  const own = CHAT_LINK[app]?.test(chatUrl || '') ? chatUrl : null;
+  const own = OWN_LINK[app]?.test(link || '') ? link : null;
   return { app: phoneApp, url: own || url };
 }
 
-function sessionOf(s, chatUrl) {
+function sessionOf(s, linkOf) {
   return {
     id: s.id,
     app: s.app,
@@ -44,11 +50,11 @@ function sessionOf(s, chatUrl) {
     since: s.since || 0,
     lastActivityAt: s.lastActivityAt || 0,
     ...(s.siteName && { siteName: s.siteName }),
-    open: openTarget(s.app, chatUrl(s.id)),
+    open: openTarget(s.app, linkOf(s.id)),
   };
 }
 
-function folderOf(n, chatUrl) {
+function folderOf(n, linkOf) {
   return {
     key: n.key,
     label: n.label,
@@ -56,14 +62,15 @@ function folderOf(n, chatUrl) {
     open: n.open,
     attention: n.attention,
     busy: n.busy,
-    sessions: n.sessions.map((s) => sessionOf(s, chatUrl)),
-    children: n.children.map((c) => folderOf(c, chatUrl)),
+    sessions: n.sessions.map((s) => sessionOf(s, linkOf)),
+    children: n.children.map((c) => folderOf(c, linkOf)),
   };
 }
 
 // `hosts`: buildTree's. `notices`: the eTL items (etl/feature.js). `usage`: usageView's.
-// `chatUrl(id)`: a web chat's address, if a tab shows it.
-function phoneView({ hosts = [], notices = [], usage = [], chatUrl = () => null } = {}) {
+// `linkOf(id)`: a session's own address: a web chat's, if a tab shows it, or a Claude session's
+// Remote Control session.
+function phoneView({ hosts = [], notices = [], usage = [], linkOf = () => null } = {}) {
   return {
     hosts: hosts.map((h) => ({
       key: h.key,
@@ -71,8 +78,8 @@ function phoneView({ hosts = [], notices = [], usage = [], chatUrl = () => null 
       label: h.label,
       attention: h.attention,
       busy: h.busy,
-      folders: h.folders.map((n) => folderOf(n, chatUrl)),
-      loose: h.loose.map((s) => sessionOf(s, chatUrl)),
+      folders: h.folders.map((n) => folderOf(n, linkOf)),
+      loose: h.loose.map((s) => sessionOf(s, linkOf)),
     })),
     // The eTL assistant opens a Codex chat on the PC; there's nothing for it on the phone.
     notices: notices.filter((s) => !s.assistant).map((s) => ({

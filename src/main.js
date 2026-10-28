@@ -12,7 +12,7 @@ const {
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
 const { discoverPets, petRoots } = require('./pets');
-const { SessionTracker, defaultPaths } = require('./sessions');
+const { SessionTracker, defaultPaths, liveBridges } = require('./sessions');
 const { CodexTracker, codexPaths } = require('./codex');
 const { compareSessions } = require('./transcript');
 const { combineClaudeUsage, usageView } = require('./usage');
@@ -978,15 +978,29 @@ function startPhone() {
     .catch((err) => log('phone:', err.message));
 }
 
-// What the phone page shows: the sidebar's tree, eTL's notices and the weekly limits.
+// What the phone page shows: the sidebar's tree, eTL's notices and the weekly limits. A Claude
+// session opens at its Remote Control session: the one its running process is connected to, else
+// the one the desktop app connected it to last (an SSH session's process runs on the host).
 function phoneSnapshot() {
-  const urls = new Map(webAll.map((c) => [c.id, c.url]));
+  const links = new Map(webAll.map((c) => [c.id, c.url]));
+  const live = currentBridges();
+  for (const s of claudeAll) {
+    const bridge = live.get(s.kind === 'cli' ? s.sessionId : s.hostSessionId) ?? s.bridgeSessionId;
+    if (bridge) links.set(s.id, `https://claude.ai/code/${bridge}`);
+  }
   return {
     hosts: currentTree(),
     notices: etlSessions,
     usage: settings.get('showUsage') ? currentUsage() : [],
-    chatUrl: (id) => urls.get(id) ?? null,
+    linkOf: (id) => links.get(id) ?? null,
   };
+}
+
+// liveBridges (sessions.js), read again at most every few seconds.
+let bridges = { at: 0, map: new Map() };
+function currentBridges() {
+  if (Date.now() - bridges.at > 5000) bridges = { at: Date.now(), map: liveBridges() };
+  return bridges.map;
 }
 
 // What the phone's sample eTL notice links to: the next assignment due that isn't handed in (any

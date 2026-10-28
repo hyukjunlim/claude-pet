@@ -78,8 +78,11 @@ test('eTL: new notices, assignments, grades, deadline changes and 마감 임박 
 
 // ---------------------------------------------------------------- what the phone shows
 
-test('a tap opens the app: Claude Code in Claude, Codex in ChatGPT, a web chat at its conversation', () => {
+test('a tap opens the app: Claude Code at its Remote Control session, Codex in ChatGPT, a web chat at its conversation', () => {
   assert.deepEqual(openTarget('claude'), { app: 'claude', url: 'https://claude.ai/code' });
+  assert.deepEqual(openTarget('claude', 'https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQrStUv'), { app: 'claude', url: 'https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQrStUv' });
+  assert.deepEqual(openTarget('vscode', 'https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQrStUv').url, 'https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQrStUv');
+  assert.deepEqual(openTarget('claude', 'https://claude.ai/code/../settings'), { app: 'claude', url: 'https://claude.ai/code' }, 'only a session\'s address');
   assert.deepEqual(openTarget('terminal'), { app: 'claude', url: 'https://claude.ai/code' });
   assert.deepEqual(openTarget('codex-vscode'), { app: 'chatgpt', url: 'https://chatgpt.com/codex' });
   assert.deepEqual(openTarget('chatgpt', 'https://chatgpt.com/c/abc'), { app: 'chatgpt', url: 'https://chatgpt.com/c/abc' });
@@ -104,10 +107,10 @@ test('the view keeps the tree, drops the eTL assistant, and sends eTL notices to
       { id: 'etl:assistant', kind: 'etl', assistant: true, status: 'background', title: '물어보기' },
     ],
     usage: [{ app: 'claude', name: 'Claude', percent: 42, elapsed: 55, resetsIn: '3d', age: null, extra: 'dropped' }],
-    chatUrl: (id) => (id === 'web:1' ? 'https://chatgpt.com/c/1' : null),
+    linkOf: (id) => ({ 'web:1': 'https://chatgpt.com/c/1', local_1: 'https://claude.ai/code/session_01AbCdEfGhIjKlMn' })[id] ?? null,
   });
   assert.equal(view.hosts[0].loose[0].open.url, 'https://chatgpt.com/c/1');
-  assert.equal(view.hosts[1].folders[0].sessions[0].open.url, 'https://claude.ai/code');
+  assert.equal(view.hosts[1].folders[0].sessions[0].open.url, 'https://claude.ai/code/session_01AbCdEfGhIjKlMn');
   assert.deepEqual(view.notices.map((n) => n.id), ['etl:ann:1', 'etl:token', 'etl:x']);
   assert.deepEqual(view.notices[0].open, { app: 'learningx', url: 'https://myetl.snu.ac.kr/courses/1/discussion_topics/2' });
   assert.equal(view.notices[2].open.url, 'https://myetl.snu.ac.kr/', 'a link outside eTL goes to eTL\'s front page');

@@ -460,15 +460,18 @@ watching and the phone only shows what the pet sends it, so the PC has to be on 
   pairing code that works once, for 10 minutes. On the phone, with Tailscale on, open that address
   and enter the code. Add the page to the Home Screen (an iPhone needs that for notifications:
   Share → *Add to Home Screen*, then open it from there) and tap *Turn on notifications*. Tray
-  menu → *Phone* → *Send a test notification* checks that they arrive.
+  menu → *Phone* → *Send a test notification* checks that they arrive. *Send a sample eTL notice*
+  puts a 테스트 notice on the phone for 10 minutes, to try the way into LearningX.
 - **What it shows:** the sidebar's machine › folder tree with each session's status, eTL's notices
   and the weekly limits. Machines and folders fold as they do in the sidebar. While the page is
   open it asks the PC every 4 seconds; when the PC is asleep or the phone is off the tailnet, it
   keeps the last list and says *PC out of reach*.
-- **Tapping** opens the app, not the session in it, since neither app has a link to one Claude
-  Code session or Codex thread on a phone: a Claude Code session opens the Claude app
-  (`https://claude.ai/code`), a Codex thread the ChatGPT app (`https://chatgpt.com/codex`). A web
-  chat opens at its own conversation. An eTL notice opens in LearningX Student 2.0 on Android; on
+- **Tapping** opens the app. A Claude Code session with Remote Control on opens at itself in the
+  Claude app, ready for a reply (the desktop app's *Connect new sessions to Remote Control* setting
+  does that for new sessions; in VS Code or a terminal, `/remote-control` does it); one without
+  opens the Code tab (`https://claude.ai/code`). A Codex thread opens the ChatGPT app's Codex
+  screen (`https://chatgpt.com/codex`), where you pick the PC and the thread, as Codex has no link
+  to one thread on a phone. A web chat opens at its own conversation. An eTL notice opens in LearningX Student 2.0 on Android; on
   an iPhone it opens on the web, as eTL's site has no links into the app. Where the app isn't
   installed, the page opens on the web. (On Android the link names the app's package, and Android
   itself falls back to the web page.)

@@ -25,6 +25,7 @@ const {
 } = require('./transcript');
 
 const HOST_ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
+const BRIDGE_ID_RE = /^session_[A-Za-z0-9]{8,64}$/;   // a Remote Control session: https://claude.ai/code/<id>
 const TRANSCRIPT_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const INITIAL_TAIL_BYTES = 768 * 1024;
 const MAX_READ_BYTES = 4 * 1024 * 1024;
@@ -641,6 +642,7 @@ class SessionTracker extends EventEmitter {
         id: r.hostSessionId,
         kind: 'desktop',
         hostSessionId: r.hostSessionId,
+        bridgeSessionId: r.bridgeSessionId,
         title: r.title || follower?.state.title || folderName(r.cwd) || 'Claude Code session',
         remote: r.remote && (name || r.remote),
         project: projectName(r.cwd),
@@ -915,6 +917,8 @@ function parseDesktopSession(j) {
     // Whether each turn gets a summary. The app drops the last one when a turn starts.
     summarized: j.classifierSummaryEnabled === true || Boolean(summary),
     cwd: str(j.cwd),
+    // The Remote Control session it was last connected to: each new connection is added at the end.
+    bridgeSessionId: Array.isArray(j.bridgeSessionIds) ? j.bridgeSessionIds.findLast((id) => BRIDGE_ID_RE.test(id)) ?? null : null,
     remote: ssh ? ssh.sshHost : null,
     // SSH and WSL sessions run elsewhere; their transcript here is a copy.
     mirrored: Boolean(ssh || wsl),
@@ -936,6 +940,43 @@ function parseSshConnections(j) {
     if (name && typeof c.sshHost === 'string') names.set(sshKey(c.sshHost, c.sshPort), name);
   }
   return names;
+}
+
+// The Remote Control sessions that Claude Code processes running on this PC are connected to, from
+// the file each keeps while it runs (<claudeHome>/sessions/<pid>.json): its session id (the CLI's,
+// and the desktop app's local_ one for a desktop session) -> the Remote Control session's id. A file
+// whose process is gone is left out, so these are live connections.
+function liveBridges(claudeHome = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), alive = processAlive) {
+  const out = new Map();
+  const dir = path.join(claudeHome, 'sessions');
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => /^\d+\.json$/.test(n));
+  } catch {
+    return out;
+  }
+  for (const name of names) {
+    let j;
+    try {
+      j = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!BRIDGE_ID_RE.test(j?.bridgeSessionId || '') || !alive(Number(j.pid))) continue;
+    if (typeof j.sessionId === 'string') out.set(j.sessionId, j.bridgeSessionId);
+    if (HOST_ID_RE.test(j.hostSessionId || '')) out.set(j.hostSessionId, j.bridgeSessionId);
+  }
+  return out;
+}
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';   // there, but not ours to signal
+  }
 }
 
 function folderName(p) {
@@ -962,6 +1003,7 @@ module.exports = {
   clientOf,
   defaultPaths,
   folderName,
+  liveBridges,
   readdirSafe,
   statSafe,
   desktopStatus,

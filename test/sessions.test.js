@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { applyEntry, createTurnState } = require('../src/transcript');
 const {
-  AppLogFollower, SessionTracker, desktopStatus, estimateSkew, parseDesktopSession, parseLogLine, parseSshConnections, projectName,
+  AppLogFollower, SessionTracker, desktopStatus, estimateSkew, liveBridges, parseDesktopSession, parseLogLine, parseSshConnections, projectName,
 } = require('../src/sessions');
 
 const T0 = Date.parse('2026-09-24T14:00:00.000Z');
@@ -49,6 +49,31 @@ test('the index describes SSH and WSL sessions as copied from another machine', 
   assert.equal(w.mirrored, true);
   assert.equal(w.machineKey, 'wsl:Ubuntu');
   assert.equal(parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo' }).mirrored, false);
+});
+
+test('the index gives the Remote Control session a desktop session was connected to last', () => {
+  const r = parseDesktopSession({ sessionId: 'local_x', bridgeSessionIds: ['session_01OldOldOldOld', 'session_01NewNewNewNew', 'bogus id'] });
+  assert.equal(r.bridgeSessionId, 'session_01NewNewNewNew');
+  assert.equal(parseDesktopSession({ sessionId: 'local_y' }).bridgeSessionId, null);
+});
+
+test('running Claude Code processes give their live Remote Control sessions', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-home-'));
+  const dir = path.join(home, 'sessions');
+  fs.mkdirSync(dir);
+  const write = (pid, j) => fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, ...j }));
+  write(100, { sessionId: 'cli-a', hostSessionId: 'local_a', bridgeSessionId: 'session_01AaaaAaaaAaaa' });
+  write(200, { sessionId: 'cli-b', bridgeSessionId: 'session_01BbbbBbbbBbbb' });
+  write(300, { sessionId: 'cli-gone', bridgeSessionId: 'session_01GoneGoneGone' });
+  write(400, { sessionId: 'cli-none' });
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'x');
+  const map = liveBridges(home, (pid) => pid !== 300);
+  assert.equal(map.get('cli-a'), 'session_01AaaaAaaaAaaa');
+  assert.equal(map.get('local_a'), 'session_01AaaaAaaaAaaa', 'a desktop session by its local_ id too');
+  assert.equal(map.get('cli-b'), 'session_01BbbbBbbbBbbb');
+  assert.ok(!map.has('cli-gone'), 'not when its process is gone');
+  assert.ok(!map.has('cli-none'));
+  assert.equal(liveBridges(path.join(home, 'nowhere')).size, 0);
 });
 
 test('saved SSH connections give each server its name', () => {
@@ -361,7 +386,7 @@ test('the full list has every session in the index, quiet ones included, with wh
     assert.equal(lists.length, 1);
     const [ssh, ...rest] = tracker.all;                      // newest first
     assert.deepEqual(ssh, {
-      id: 'local_ssh3', kind: 'desktop', hostSessionId: 'local_ssh3', title: 'Paper figures', remote: 'lab', project: 'BB',
+      id: 'local_ssh3', kind: 'desktop', hostSessionId: 'local_ssh3', bridgeSessionId: null, title: 'Paper figures', remote: 'lab', project: 'BB',
       cwd: '/data/proj/BB', machineKey: 'ssh:alice@10.0.0.5:22', machine: 'lab', lastActivityAt: old + 1000, lastPromptAt: old + 500,
       status: 'idle', detail: '', since: old + 1000,
     });

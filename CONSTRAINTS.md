@@ -10,7 +10,8 @@ Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
 - `npm test` (`node --test`) passes on plain Node 22, where the release workflow runs it.
 
 ## Claude and Codex
-- Read their files only (session index, transcripts, logs, Codex state and thread catalog).
+- Read their files only (session index, transcripts, logs, the session files that running Claude
+  Code processes keep (`~/.claude/sessions/<pid>.json`), Codex state and thread catalog).
   Never write to them or change their settings. Two exceptions: the opt-in Claude Code mod for
   live usage, installed only when the user turns it on, and the sidebar's Delete for a chat run
   in VS Code or a terminal, only after the user confirms it. A Claude Code session's transcript
@@ -25,9 +26,11 @@ Hard constraints for Ttokttok Pet. Change them only with the owner's approval.
   New chats likewise: `claude://code/new?folder=<folder>` (or `ssh_host`/`ssh_port`/`ssh_folder`
   for an SSH host) and `codex://threads/new?path=<folder>` (or `?projectId=<id>&prompt=` for a
   WSL folder that is one of Codex's projects).
-- On the phone, a tap opens the official app, not a session in it: Claude's app at
-  `https://claude.ai/code`, ChatGPT's at `https://chatgpt.com/codex`; a web chat opens at its own
-  conversation. With the app missing, the same page opens on the web.
+- On the phone, a tap opens the official app: a Claude Code session with Remote Control on at
+  itself (`https://claude.ai/code/<Remote Control session id>`), one without at
+  `https://claude.ai/code`; a Codex thread at ChatGPT's `https://chatgpt.com/codex`, as Codex has
+  no link to one thread on a phone; a web chat at its own conversation. With the app missing, the
+  same page opens on the web.
 
 ## Network
 - No server contact of its own, except SSH hosts from `~/.ssh/config` with key auth and SNU eTL
