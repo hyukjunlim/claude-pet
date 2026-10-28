@@ -4,7 +4,8 @@ A small animated companion that floats above your windows and keeps track of wha
 you: your Claude desktop **Code** sessions, **Codex** threads, chats on claude.ai, ChatGPT and
 Gemini, and SNU eTL deadlines. It works like the Pets feature in the ChatGPT/Codex desktop app and
 uses the same pet format, so ChatGPT/Codex pets work here too. It can also sit as a sidebar that
-lists every session by machine and folder ([Folder mode](#folder-mode)).
+lists every session by machine and folder ([Folder mode](#folder-mode)). From your phone, it can
+show the same list and notify you when a chat finishes ([Phone](#phone)).
 
 ![Clay, the default pet](tools/clay-preview.png)
 
@@ -453,6 +454,15 @@ The phone companion puts what the sidebar shows on your phone (Android, or an iP
 tray menu → *Phone* → *Show the sidebar on my phone, with notifications*. The PC does all the
 watching and the phone only shows what the pet sends it, so the PC has to be on and awake.
 
+- **Before you start:**
+  - a pet with the phone companion: a copy run from the source gets it with *Check for
+    updates…*; a downloaded copy gets it from the first release after 0.9.0;
+  - Tailscale on the PC and on the phone, signed in with the same account. The first time the pet
+    sets up Tailscale Serve, Tailscale may ask you to turn on HTTPS certificates for your tailnet
+    in its admin console; turn them on, then choose *Pair a phone…* again;
+  - for taps to land: the Claude app signed in to the same Claude account, on a plan that includes
+    Remote Control; the ChatGPT app, with this PC paired in the ChatGPT desktop app (Settings →
+    Connections → *Control this Mac or PC*); and LearningX Student 2.0 for eTL on Android.
 - **Setting up:** install [Tailscale](https://tailscale.com/download) on the PC and on the phone,
   and sign in to both with the same account. Turning the companion on (or tray menu → *Phone* →
   *Pair a phone…*) offers to run `tailscale serve --bg http://127.0.0.1:47823` once, which puts the
@@ -471,15 +481,19 @@ watching and the phone only shows what the pet sends it, so the PC has to be on 
   does that for new sessions; in VS Code or a terminal, `/remote-control` does it); one without
   opens the Code tab (`https://claude.ai/code`). A Codex thread opens the ChatGPT app's Codex
   screen (`https://chatgpt.com/codex`), where you pick the PC and the thread, as Codex has no link
-  to one thread on a phone. A web chat opens at its own conversation. An eTL notice opens in LearningX Student 2.0 on Android; on
-  an iPhone it opens on the web, as eTL's site has no links into the app. Where the app isn't
-  installed, the page opens on the web. (On Android the link names the app's package, and Android
-  itself falls back to the web page.)
+  to one thread on a phone. A web chat opens at its own conversation. An eTL notice opens in
+  LearningX Student 2.0 on Android; on an iPhone it opens on the web, as eTL's site has no links
+  into the app. Where the app isn't installed, the page opens on the web. (On Android the link
+  names the app's package, and Android itself falls back to the web page.)
 - **Notifications:** when a session turns *Ready*, *Needs you* or *Error*, and when a new eTL
   bubble comes: 마감 임박, 마감 변경, 새 과제, 성적, 새 공지 (보강 공지, 휴강 공지) and 토큰 만료.
   *Running* and today's classes don't notify, and neither does what's already showing when the
   companion starts. Tapping one opens the page at that session or notice. The Claude and ChatGPT
   apps may send notifications of their own for the same chat; turn those off to get one of each.
+- **When it doesn't work:** if the page doesn't load, Tailscale is off on the phone, or another VPN
+  (WARP, an ad blocker) is using the phone's one VPN slot. *PC out of reach* means the PC is asleep
+  or off. No notifications on an iPhone: open the page from its Home Screen icon, not in Safari. If
+  port 47823 is taken, tray menu → *Phone* says so.
 - **Privacy:** the pet's server listens on 127.0.0.1 only, so nothing on the LAN or the internet
   reaches it, and Tailscale Serve passes it only devices on your tailnet. The page's data needs the
   cookie a paired phone got; the pet keeps only its hash. Notifications go by Web Push through the
