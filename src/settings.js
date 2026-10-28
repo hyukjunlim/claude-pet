@@ -42,7 +42,7 @@ const DEFAULTS = {
   readyFrom: null,         // when opening a session stopped counting as done with it (main.js)
   cliReadyFrom: null,      // ... and when VS Code and terminal sessions' Ready started lasting until done
   marked: {},              // sessions marked as Ready in the sidebar: session id -> when (marks.js)
-  hidden: {},              // sessions hidden from the sidebar: session id -> when (hidden.js)
+  hidden: {},              // sessions hidden from the sidebar: session id -> when; hidden until brought back
 };
 
 class Settings {

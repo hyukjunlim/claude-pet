@@ -32,7 +32,6 @@ const { FolderWindow, displayChoices } = require('./folder-mode');
 const { buildTree, attentionIds } = require('./folder-tree');
 const { markNewChats, newChatLinks, placeOf, sshTargets } = require('./new-chat');
 const { settleMarks } = require('./marks');
-const { settleHidden } = require('./hidden');
 const { maximizeApps } = require('./maximize');
 const { StepKeys } = require('./step-keys');
 const { moveFolder, previous } = require('./migrate');
@@ -593,12 +592,10 @@ function markDone(ids) {
   sendTree();
 }
 
-// The sessions you hid from the sidebar (hidden.js), less the ones with something new in them.
+// The sessions you hid from the sidebar: session id -> when. One stays hidden whatever happens in
+// it, until the tray menu's Hidden from the sidebar brings it back (setHidden).
 function currentHidden() {
-  const saved = settings.get('hidden') || {};
-  const left = settleHidden(saved, [...claudeAll, ...codexAll, ...webAll]);
-  if (left !== saved) settings.set({ hidden: left });
-  return left;
+  return settings.get('hidden') || {};
 }
 
 // `ids` null: every hidden session shows again.

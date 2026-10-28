@@ -225,8 +225,8 @@ maximized beside it, so the conversation you open fills the rest of the screen.
   once: right-click a folder or a machine for what's in it, or anywhere else in the sidebar for all
   of them.
 - **Hide:** right-click a session → *Hide from the sidebar*, or a folder or a machine to hide
-  everything in it (its menu also has *Collapse* or *Expand*). Only the sidebar leaves it out; a
-  hidden session shows again when something new happens in it, or from the tray menu's *Hidden from
+  everything in it (its menu also has *Collapse* or *Expand*). Only the sidebar leaves it out, and
+  it stays out whatever happens in it, until you bring it back from the tray menu's *Hidden from
   the sidebar*.
 - **Delete:** right-click a chat run in VS Code or a terminal → *Delete…*, and confirm. A Claude
   Code session's transcript and its folder go: to the Recycle Bin on this PC; for good in WSL and
@@ -743,7 +743,6 @@ src/step-keys.js    Ctrl+Tab through the sidebar while Claude, Codex or the side
 src/marks.js        Folder mode's Mark as Ready: which marks your next message takes off
 src/migrate.js      Brings over what an older install kept under its previous name
 src/onboarding.js   Getting started: the window, the state its steps show, the practice items
-src/hidden.js       Sessions hidden from the sidebar: which ones show again
 src/codex.js        Codex threads: the unread list, the thread list, local histories, dots
 src/codex-remote.js Follows Codex histories on SSH hosts (a small Python watcher)
 src/ssh-watcher.js  Keeps a watcher running on an SSH host: the connection, retries, its clock
