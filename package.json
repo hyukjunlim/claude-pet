@@ -1,6 +1,6 @@
 {
   "name": "ttokttok-pet",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "A floating desktop pet that keeps track of your Claude Code sessions, Codex threads, web chats and SNU eTL deadlines.",
   "author": "hyukjunlim",
   "repository": "github:hyukjunlim/ttokttok-pet",
