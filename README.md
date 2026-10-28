@@ -488,9 +488,12 @@ watching and the phone only shows what the pet sends it, so the PC has to be on 
   names the app's package, and Android itself falls back to the web page.)
 - **Notifications:** when a session turns *Ready*, *Needs you* or *Error*, and when a new eTL
   bubble comes: 마감 임박, 마감 변경, 새 과제, 성적, 새 공지 (보강 공지, 휴강 공지) and 토큰 만료.
-  *Running* and today's classes don't notify, and neither does what's already showing when the
-  companion starts. Tapping one opens the page at that session or notice. The Claude and ChatGPT
-  apps may send notifications of their own for the same chat; turn those off to get one of each.
+  *Running*, today's classes and sessions hidden from the sidebar don't notify, and neither does
+  what's already showing when the companion starts. Tapping one opens a small page about it with
+  one button into its app: the session in Claude or ChatGPT, the notice in LearningX. (A phone
+  opens an app only from a tap in a page, never straight from a notification.) The phone makes
+  that page itself, so it opens with Tailscale off. The Claude and ChatGPT apps may send
+  notifications of their own for the same chat; turn those off to get one of each.
 - **When it doesn't work:** if the page doesn't load, Tailscale is off on the phone, or another VPN
   (WARP, an ad blocker) is using the phone's one VPN slot. *PC out of reach* means the PC is asleep
   or off. No notifications on an iPhone: open the page from its Home Screen icon, not in Safari. If

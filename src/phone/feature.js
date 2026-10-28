@@ -18,7 +18,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { execFile } = require('node:child_process');
 const { createPhoneServer } = require('./server');
-const { phoneView } = require('./view');
+const { phoneView, opensOf, openOfKind } = require('./view');
 const { pushEvents } = require('./notify');
 const { Pusher, generateVapidKeys, validSubscription } = require('./webpush');
 
@@ -28,6 +28,7 @@ const CODE_TRIES = 5;
 const MAX_DEVICES = 8;
 const REBUILD_MS = 250;
 const SAMPLE_MS = 10 * 60_000;    // how long a sample eTL notice stays on the phone
+const MAX_LINK = 1000;            // a longer address stays out of a notification, which has 4 KB
 const SUBJECT = 'https://github.com/hyukjunlim/ttokttok-pet';
 const TAILSCALE_DOWNLOAD = 'https://tailscale.com/download';
 const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1)}…` : String(s || ''));
@@ -52,6 +53,7 @@ class PhoneFeature extends EventEmitter {
     this.listening = null;       // the port it listens on, once it does
     this.code = null;            // { code, until, tries } while a phone may pair
     this.view = { etag: '"0"', body: '{"hosts":[],"notices":[],"usage":[]}' };
+    this.opens = new Map();      // what a tap on each of the view's rows opens (view.js's opensOf)
     this.rebuildTimer = null;
     this.memory = null;          // notify.js's, from the last list of sessions
     this.saved = null;           // phone.json, once read
@@ -103,6 +105,7 @@ class PhoneFeature extends EventEmitter {
     this.server = null;
     this.listening = null;
     this.memory = null;
+    this.opens = new Map();
     this.code = null;
     server?.close();
     server?.closeAllConnections?.();
@@ -190,12 +193,17 @@ class PhoneFeature extends EventEmitter {
   }
 
   // main.js's merged list of sessions: notifications for what turned Ready, Needs you or Error,
-  // and for new eTL bubbles.
-  observe(sessions) {
+  // and for new eTL bubbles. `hidden`: the sessions hidden from the sidebar (id -> when), which
+  // don't buzz. A tap on a notification opens what a tap on its row opens.
+  observe(sessions, hidden = {}) {
     if (!this.server) return;
-    const { memory, events } = pushEvents(this.memory, sessions, this.now());
+    const { memory, events } = pushEvents(this.memory, sessions, this.now(), (id) => Object.hasOwn(hidden, id));
     this.memory = memory;
-    for (const e of events) this.#notify({ title: clip(e.title, 120), body: clip(e.body, 160), tag: e.tag, id: e.id });
+    if (!events.length) return;
+    this.#rebuild();   // the rows as they are now, for what each notification opens
+    for (const e of events) {
+      this.#notify({ title: clip(e.title, 120), body: clip(e.body, 160), tag: e.tag, id: e.id, open: this.#openOf(e.id, e.kind) });
+    }
   }
 
   // ---------------------------------------------------------------- what server.js asks
@@ -240,7 +248,7 @@ class PhoneFeature extends EventEmitter {
       this.#rebuild();
     }, SAMPLE_MS + 1000);
     this.sampleTimer.unref?.();
-    this.#notify({ title: clip(`테스트 · ${s.title || 'eTL'}`, 120), body: 'Tap the highlighted row to open it in LearningX.', tag: id, id });
+    this.#notify({ title: clip(`테스트 · ${s.title || 'eTL'}`, 120), body: 'Tap to open it in LearningX.', tag: id, id, open: this.#openOf(id, 'etl') });
     return id;
   }
 
@@ -410,6 +418,13 @@ class PhoneFeature extends EventEmitter {
     }
     const body = JSON.stringify(view);
     this.view = { etag: `"${crypto.createHash('sha1').update(body).digest('base64url')}"`, body };
+    this.opens = opensOf(view);
+  }
+
+  // What a notification for `id` opens: its row's app and page, else its kind's app.
+  #openOf(id, kind) {
+    const open = this.opens.get(id) ?? openOfKind(kind);
+    return open && open.url.length <= MAX_LINK ? open : null;
   }
 
   #notify(message) {

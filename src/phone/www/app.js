@@ -2,26 +2,15 @@
 
 // The phone page: what the pet's sidebar shows (src/renderer/folder.js), from the pet on the PC
 // (src/phone/server.js). Machines and folders fold as they do there; a tap on a session opens its
-// app, Claude or ChatGPT (or Gemini for a Gemini chat), and an eTL notice opens in LearningX. On
-// Android the link names the app, and Android falls back to the web page when it isn't installed;
-// elsewhere it's the web address, which the app takes if it's installed.
+// app, Claude or ChatGPT (or Gemini for a Gemini chat), and an eTL notice opens in LearningX, by the
+// link links.js makes.
 
 (() => {
   const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready', running: 'Running', background: 'Background' };
   const APP_NAME = {
     claude: 'Claude', codex: 'Codex', vscode: 'VS Code', terminal: 'Terminal', 'codex-vscode': 'VS Code', 'codex-terminal': 'Terminal',
   };
-  const OPENS_IN = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', learningx: 'LearningX' };
-  // The apps' Android packages. LearningX Student 2.0 is the one on Google Play (Xinics).
-  const PACKAGES = {
-    claude: 'com.anthropic.claude',
-    chatgpt: 'com.openai.chatgpt',
-    gemini: 'com.google.android.apps.bard',
-    learningx: 'com.instructure.candroid.xinics2.production',
-  };
-  // eTL's own pages don't open LearningX (it's Canvas Student underneath, which takes no https
-  // links to eTL); it takes the same address under Canvas Student's scheme instead.
-  const SCHEMES = { learningx: 'canvas-courses' };
+  const { hrefOf, appName } = self.phoneLinks;
   const POLL_MS = 4000;
   const LIVE_MS = 15_000;            // longer than this without an answer: the PC is out of reach
   const ANDROID = /Android/i.test(navigator.userAgent);
@@ -45,14 +34,6 @@
   }
 
   // ---------------------------------------------------------- links into the apps
-
-  function hrefOf(open) {
-    if (!open?.url) return null;
-    if (!ANDROID || !PACKAGES[open.app]) return open.url;
-    const u = new URL(open.url);
-    return `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=${SCHEMES[open.app] || 'https'};package=${PACKAGES[open.app]};`
-      + `S.browser_fallback_url=${encodeURIComponent(open.url)};end`;
-  }
 
   function linkRow(cls, open) {
     const href = hrefOf(open);
@@ -308,7 +289,7 @@
     row.setAttribute('role', 'treeitem');
     const label = LABELS[s.status];
     const app = s.siteName || APP_NAME[s.app] || '';
-    row.setAttribute('aria-label', [s.title, app, label, `Opens ${OPENS_IN[s.open?.app] || 'the app'}`].filter(Boolean).join(', '));
+    row.setAttribute('aria-label', [s.title, app, label, `Opens ${appName(s.open?.app) || 'the app'}`].filter(Boolean).join(', '));
     row.append(el('span', 'chevron'), el('span', `app ${s.app}`), el('span', 'name', s.title));
     row.append(label ? el('span', 'state', label) : el('span', 'ago', formatAgo(s.lastActivityAt)));
     return row;

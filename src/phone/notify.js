@@ -2,8 +2,8 @@
 
 // Which changes make the phone buzz (CONSTRAINTS.md, Phone companion): a session that turns Ready,
 // Needs you or Error, and a new eTL bubble of the kinds that matter. What the pet already shows
-// when the phone companion starts doesn't buzz, and neither does a session that only dropped out
-// of the list and came back as it was.
+// when the phone companion starts doesn't buzz, and neither does a session hidden from the sidebar,
+// or one that only dropped out of the list and came back as it was.
 
 const LABELS = { waiting: 'Needs you', failed: 'Error', review: 'Ready' };
 // eTL's bubbles by id (etl/watch.js): 토큰 만료, 새 과제, 마감 변경, 성적, the announcements, and
@@ -27,9 +27,11 @@ function etlPushes(s) {
 }
 
 // `memory`: what the last call returned, null the first time (then nothing buzzes). `sessions`:
-// main.js's merged list (Claude, Codex, web chats and eTL). Returns { memory, events }, each
-// event { id, tag, title, body }.
-function pushEvents(memory, sessions, now = Date.now()) {
+// main.js's merged list (Claude, Codex, web chats and eTL). `muted(id)`: true for a session that
+// doesn't buzz (one hidden from the sidebar); it's still followed, so bringing it back doesn't buzz
+// for what happened while it was hidden. Returns { memory, events }, each event
+// { id, kind, tag, title, body }.
+function pushEvents(memory, sessions, now = Date.now(), muted = () => false) {
   const first = !memory;
   const seen = new Map(memory?.seen);   // session id -> { status, since, at }
   const etl = new Map(memory?.etl);     // eTL id -> when it was first seen
@@ -40,7 +42,7 @@ function pushEvents(memory, sessions, now = Date.now()) {
       if (!etl.has(s.id)) {
         etl.set(s.id, now);
         if (!first && etlPushes(s)) {
-          events.push({ id: s.id, tag: s.id, title: `${s.badge || 'eTL'} · ${s.title || ''}`, body: s.project || 'eTL' });
+          events.push({ id: s.id, kind: s.kind, tag: s.id, title: `${s.badge || 'eTL'} · ${s.title || ''}`, body: s.project || 'eTL' });
         }
       }
       continue;
@@ -49,9 +51,10 @@ function pushEvents(memory, sessions, now = Date.now()) {
     const since = s.since || 0;
     const same = prev && prev.status === s.status && prev.since === since;
     seen.set(s.id, { status: s.status, since, at: now });
-    if (first || same || !LABELS[s.status]) continue;
+    if (first || same || !LABELS[s.status] || muted(s.id)) continue;
     events.push({
       id: s.id,
+      kind: s.kind,
       tag: s.id,
       title: `${LABELS[s.status]} · ${s.title || ''}`,
       body: [sourceOf(s), s.project].filter(Boolean).join(' · '),

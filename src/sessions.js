@@ -23,6 +23,7 @@ const { EventEmitter } = require('node:events');
 const {
   STALE_RUNNING_MS, UNREAD_WINDOW_MS, applyEntry, compareSessions, createTurnState, deriveStatus, describeAsk,
 } = require('./transcript');
+const { steadySkew } = require('./ssh-watcher');
 
 const HOST_ID_RE = /^local_[A-Za-z0-9-]{1,64}$/;
 const BRIDGE_ID_RE = /^session_[A-Za-z0-9]{8,64}$/;   // a Remote Control session: https://claude.ai/code/<id>
@@ -301,6 +302,7 @@ class SessionTracker extends EventEmitter {
     this.metaCache = new Map();        // index file -> { mtimeMs, size, record }
     this.followers = new Map();        // transcript path -> TranscriptFollower
     this.transcriptFor = new Map();    // cliSessionId -> transcript path
+    this.clockSkews = new Map();       // machineKey -> clockSkew's last answer
     this.cliSessions = new Map();      // cliSessionId -> { file, root, machineKey, machine, followed, mtimeMs } (not the desktop's)
     this.cliPeeks = new Map();         // transcript path -> { mtimeMs, size, state }: an older one's quick look
     // VS Code and terminal sessions whose turn ended from then on are Ready until marked done (as
@@ -723,7 +725,7 @@ class SessionTracker extends EventEmitter {
   }
 
   // How far ahead of ours the clock is on the machine behind `machineKey`, measured from the
-  // copies of its transcripts that we follow.
+  // copies of its transcripts that we follow, and kept until it moves by more than a second.
   clockSkew(machineKey) {
     const samples = [];
     for (const r of this.desktop.values()) {
@@ -731,7 +733,9 @@ class SessionTracker extends EventEmitter {
       const f = this.followers.get(this.transcriptFor.get(r.cliSessionId));
       if (f && f.size >= 0) samples.push({ mtimeMs: f.mtimeMs, lastStampAt: f.state.lastStampAt });
     }
-    return estimateSkew(samples);
+    const skew = steadySkew(this.clockSkews.get(machineKey), estimateSkew(samples));
+    this.clockSkews.set(machineKey, skew);
+    return skew;
   }
 }
 

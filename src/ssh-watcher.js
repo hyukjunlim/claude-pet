@@ -18,6 +18,14 @@ const BOOTSTRAP = `exec python3 -u -c '${LOADER}'`;
 const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-T'];
 const RETRY_MS = [5000, 30_000, 2 * 60_000, 10 * 60_000];
 const STEADY_MS = 60_000;   // a connection that lasted this long resets the retry delay
+const SKEW_STEP_MS = 1000;
+
+// A host's clock (how far ahead of ours, ms), kept as it was until a new measurement is more than
+// a second off. Each measurement differs from the last by a few ms, and the times moved to our
+// clock with it (when a turn ended, say) should stay put, or they look new each time.
+function steadySkew(kept, measured) {
+  return kept != null && Math.abs(measured - kept) <= SKEW_STEP_MS ? kept : measured;
+}
 
 // JSON with only ASCII in it, which reaches Python intact whatever the host's locale.
 function asciiJson(value) {
@@ -126,10 +134,11 @@ class SshWatcher extends EventEmitter {
     }
     if (typeof m?.now === 'number') {
       this.lastError = '';
-      const skew = Math.round(m.now * 1000 - this.now());
-      const moved = Math.abs(skew - this.skew) > 1000;
-      this.skew = skew;
-      if (moved) this.emit('change');
+      const skew = steadySkew(this.skew, Math.round(m.now * 1000 - this.now()));
+      if (skew !== this.skew) {
+        this.skew = skew;
+        this.emit('change');
+      }
     } else if (m && typeof m === 'object') {
       this.onMessage(m);
     }
@@ -142,4 +151,4 @@ class SshWatcher extends EventEmitter {
   onDisconnect() {}
 }
 
-module.exports = { BOOTSTRAP, LOADER, SshWatcher, asciiJson, sshArgs };
+module.exports = { BOOTSTRAP, LOADER, SshWatcher, asciiJson, sshArgs, steadySkew };

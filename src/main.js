@@ -523,7 +523,7 @@ function mergeSessions() {
   sessions = [...claudeSessions, ...codexSessions, ...etlSessions, ...webSessions].filter((s) => !isDeleted(s.id)).sort(compareSessions);
   sendSessions();
   phone?.changed();
-  phone?.observe(sessions);
+  phone?.observe(sessions, currentHidden());
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
 }
 
@@ -977,7 +977,7 @@ function startPhone() {
   phone.start()
     .then(() => {
       phone.changed();
-      phone.observe(sessions);
+      phone.observe(sessions, currentHidden());
     })
     .catch((err) => log('phone:', err.message));
 }

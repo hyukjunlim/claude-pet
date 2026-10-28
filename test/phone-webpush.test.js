@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { Pusher, encrypt, generateVapidKeys, topicOf, validSubscription, vapidJwt } = require('../src/phone/webpush');
+const { decrypt } = require('./push-decrypt');
 
 const b64u = (s) => Buffer.from(s.replace(/\s+/g, ''), 'base64url');
 
@@ -19,25 +20,6 @@ const RFC = {
   header: 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z 9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml mlMoZIIgDll6e3vCYLocInmYWAmS6Tlz AC8wEqKK6PBru3jl7A8',
   ciphertext: '8pfeW0KbunFT06SuDKoJH9Ql87S1QUrd irN6GcG7sFz1y1sqLgVi1VhjVkHsUoEs bI_0LpXMuGvnzQ',
 };
-
-// What the phone's browser does with a message: the receiving side of RFC 8291.
-function decrypt(body, { uaPrivate, uaPublic, auth }) {
-  const salt = body.subarray(0, 16);
-  const idlen = body[20];
-  const asPublic = body.subarray(21, 21 + idlen);
-  const record = body.subarray(21 + idlen);
-  const ecdh = crypto.createECDH('prime256v1');
-  ecdh.setPrivateKey(uaPrivate);
-  const info = Buffer.concat([Buffer.from('WebPush: info\0'), uaPublic, asPublic]);
-  const ikm = Buffer.from(crypto.hkdfSync('sha256', ecdh.computeSecret(asPublic), auth, info, 32));
-  const cek = Buffer.from(crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16));
-  const nonce = Buffer.from(crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12));
-  const decipher = crypto.createDecipheriv('aes-128-gcm', cek, nonce);
-  decipher.setAuthTag(record.subarray(record.length - 16));
-  const padded = Buffer.concat([decipher.update(record.subarray(0, record.length - 16)), decipher.final()]);
-  assert.equal(padded.at(-1), 2, 'the last record ends in the 0x02 delimiter');
-  return padded.subarray(0, -1).toString();
-}
 
 test('encrypts exactly as RFC 8291 Appendix A does', () => {
   const body = encrypt(RFC.plaintext, { p256dh: RFC.uaPublic.replace(/\s/g, ''), auth: RFC.auth }, {

@@ -94,4 +94,29 @@ function phoneView({ hosts = [], notices = [], usage = [], linkOf = () => null }
   };
 }
 
-module.exports = { phoneView, openTarget, ETL_HOME };
+// What a tap on each row opens: id -> `open`, for the notifications, which open the same.
+function opensOf(view) {
+  const opens = new Map();
+  const add = (s) => opens.set(s.id, s.open);
+  const walk = (n) => {
+    n.sessions.forEach(add);
+    n.children.forEach(walk);
+  };
+  for (const h of view.hosts) {
+    h.folders.forEach(walk);
+    h.loose.forEach(add);
+  }
+  view.notices.forEach(add);
+  return opens;
+}
+
+// For a notification whose session has no row (a Codex thread in the cloud, say): its app's own
+// screen, by the kind of session (notify.js's events). Null for the rest; the page opens instead.
+function openOfKind(kind) {
+  if (kind === 'codex') return openTarget('codex');
+  if (kind === 'desktop' || kind === 'cli') return openTarget('claude');
+  if (kind === 'etl') return { app: 'learningx', url: ETL_HOME };
+  return null;
+}
+
+module.exports = { phoneView, openTarget, opensOf, openOfKind, ETL_HOME };

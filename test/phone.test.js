@@ -9,10 +9,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { pushEvents } = require('../src/phone/notify');
-const { phoneView, openTarget } = require('../src/phone/view');
+const { phoneView, openTarget, opensOf, openOfKind } = require('../src/phone/view');
 const { PhoneFeature } = require('../src/phone/feature');
 const { allowedHost } = require('../src/phone/server');
 const { TAILSCALE_LINK } = require('../src/onboarding');
+const { decrypt } = require('./push-decrypt');
 
 // ---------------------------------------------------------------- what buzzes
 
@@ -51,6 +52,21 @@ test('a session that drops out and comes back as it was doesn\'t buzz again; its
   ({ memory, events } = pushEvents(memory, [{ ...ready, status: 'running', since: 6 }], 4));
   ({ memory, events } = pushEvents(memory, [{ ...ready, since: 7 }], 5));
   assert.equal(events.length, 1);
+});
+
+test('a session hidden from the sidebar doesn\'t buzz, nor for what it did while hidden once it\'s back', () => {
+  const s = { id: 'codex:h', kind: 'codex', status: 'running', since: 1, title: 'H' };
+  const hidden = new Set(['codex:h']);
+  let { memory } = pushEvents(null, [s], 0);
+  let events;
+  ({ memory, events } = pushEvents(memory, [{ ...s, status: 'review', since: 500_000 }], 1, (id) => hidden.has(id)));
+  assert.equal(events.length, 0);
+  hidden.clear();
+  ({ memory, events } = pushEvents(memory, [{ ...s, status: 'review', since: 500_000 }], 2, (id) => hidden.has(id)));
+  assert.equal(events.length, 0);
+  ({ memory, events } = pushEvents(memory, [{ ...s, status: 'running', since: 600_000 }], 3));
+  ({ memory, events } = pushEvents(memory, [{ ...s, status: 'waiting', since: 700_000 }], 4));
+  assert.deepEqual(events.map((e) => [e.title, e.kind]), [['Needs you · H', 'codex']]);
 });
 
 test('eTL: new notices, assignments, grades, deadline changes and 마감 임박 buzz; classes and handed-in work don\'t', () => {
@@ -116,6 +132,21 @@ test('the view keeps the tree, drops the eTL assistant, and sends eTL notices to
   assert.deepEqual(view.notices[0].open, { app: 'learningx', url: 'https://myetl.snu.ac.kr/courses/1/discussion_topics/2' });
   assert.equal(view.notices[2].open.url, 'https://myetl.snu.ac.kr/', 'a link outside eTL goes to eTL\'s front page');
   assert.deepEqual(view.usage, [{ app: 'claude', name: 'Claude', percent: 42, elapsed: 55, resetsIn: '3d', age: null }]);
+
+  const opens = opensOf(view);
+  assert.deepEqual(opens.get('local_1'), { app: 'claude', url: 'https://claude.ai/code/session_01AbCdEfGhIjKlMn' });
+  assert.deepEqual(opens.get('web:1'), { app: 'chatgpt', url: 'https://chatgpt.com/c/1' });
+  assert.deepEqual(opens.get('etl:ann:1'), { app: 'learningx', url: 'https://myetl.snu.ac.kr/courses/1/discussion_topics/2' });
+  assert.equal(opens.has('etl:assistant'), false);
+});
+
+test('a notification without a row opens its kind\'s app, or the page', () => {
+  assert.deepEqual(openOfKind('codex'), { app: 'chatgpt', url: 'https://chatgpt.com/codex' });
+  assert.deepEqual(openOfKind('cli'), { app: 'claude', url: 'https://claude.ai/code' });
+  assert.deepEqual(openOfKind('desktop'), { app: 'claude', url: 'https://claude.ai/code' });
+  assert.equal(openOfKind('etl').app, 'learningx');
+  assert.equal(openOfKind('web'), null);
+  assert.equal(openOfKind('practice'), null);
 });
 
 test('only this PC and its tailnet name may ask', () => {
@@ -178,11 +209,16 @@ function call(port, { method = 'GET', path: p = '/', host = `127.0.0.1:${port}`,
   });
 }
 
-function subscription() {
+// A phone's subscription, and how that phone reads what's pushed to it.
+function phoneSubscription() {
   const ua = crypto.createECDH('prime256v1');
   ua.generateKeys();
-  return { endpoint: 'https://fcm.googleapis.com/fcm/send/xyz', keys: { p256dh: ua.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } };
+  const auth = crypto.randomBytes(16);
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/xyz', keys: { p256dh: ua.getPublicKey().toString('base64url'), auth: auth.toString('base64url') } };
+  return { sub, read: (body) => JSON.parse(decrypt(body, { uaPrivate: ua.getPrivateKey(), uaPublic: ua.getPublicKey(), auth })) };
 }
+
+const subscription = () => phoneSubscription().sub;
 
 test('the page is served; data only to a paired phone, and only from this PC or the tailnet', async (t) => {
   const { f, port } = await running(t, () => ({ hosts: [], notices: [], usage: [{ app: 'claude', name: 'Claude', percent: 10 }] }));
@@ -253,6 +289,35 @@ test('a paired phone subscribes, gets pushes for what turns Ready, and can unpai
   assert.equal((await call(port, { path: '/api/state', cookie })).status, 401);
 });
 
+test('a notification opens what its row opens; a hidden session sends none', async (t) => {
+  const row = { id: 'cli:a', app: 'terminal', title: 'A', status: 'review', since: 2 };
+  const hosts = [{
+    key: 'ssh:lab:22', kind: 'ssh', label: 'lab', attention: 1, busy: 0, loose: [],
+    folders: [{ key: 'ssh:lab:22|~/p', label: '~/p', path: '~/p', open: true, attention: 1, busy: 0, sessions: [row], children: [] }],
+  }];
+  const link = 'https://claude.ai/code/session_01AbCdEfGhIjKlMn';
+  const { f, push, port } = await running(t, () => ({ hosts, linkOf: (id) => (id === 'cli:a' ? link : null) }));
+  const origin = `http://127.0.0.1:${port}`;
+  const code = f.newCode();
+  const cookie = (await call(port, { method: 'POST', path: '/api/pair', origin, body: { code } })).headers['set-cookie'][0].split(';')[0];
+  const phone = phoneSubscription();
+  await call(port, { method: 'POST', path: '/api/push', origin, cookie, body: { subscription: phone.sub } });
+
+  const at = (status, since) => [
+    { id: 'cli:a', kind: 'cli', client: 'terminal', status, since, title: 'A' },
+    { id: 'codex:hidden', kind: 'codex', status, since, title: 'Hidden' },
+    { id: 'codex:cloud', kind: 'codex', status, since, title: 'Cloud' },
+  ];
+  f.observe(at('running', 1), { 'codex:hidden': 1 });
+  f.observe(at('review', 2), { 'codex:hidden': 1 });
+  await new Promise((r) => setImmediate(r));
+  const got = push.sent.map((p) => phone.read(p.body));
+  assert.deepEqual(got.map((m) => [m.id, m.title, m.open]), [
+    ['cli:a', 'Ready · A', { app: 'claude', url: link }],
+    ['codex:cloud', 'Ready · Cloud', { app: 'chatgpt', url: 'https://chatgpt.com/codex' }],
+  ]);
+});
+
 test('a sample eTL notice shows on the phone for a while and comes as a notification', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'phone-'));
   const data = { phone: true };
@@ -273,7 +338,8 @@ test('a sample eTL notice shows on the phone for a while and comes as a notifica
   const origin = `http://127.0.0.1:${f.listening}`;
   const code = f.newCode();
   const cookie = (await call(f.listening, { method: 'POST', path: '/api/pair', origin, body: { code } })).headers['set-cookie'][0].split(';')[0];
-  await call(f.listening, { method: 'POST', path: '/api/push', origin, cookie, body: { subscription: subscription() } });
+  const phone = phoneSubscription();
+  await call(f.listening, { method: 'POST', path: '/api/push', origin, cookie, body: { subscription: phone.sub } });
 
   const id = f.showSample();
   await new Promise((r) => setImmediate(r));
@@ -281,6 +347,7 @@ test('a sample eTL notice shows on the phone for a while and comes as a notifica
   assert.deepEqual(notices.map((n) => [n.id, n.badge, n.title]), [[id, '테스트', 'HW3'], ['etl:ann:1', '새 공지', '공지']]);
   assert.deepEqual(notices[0].open, { app: 'learningx', url: 'https://myetl.snu.ac.kr/courses/7/assignments/8' });
   assert.equal(push.sent.length, 1, 'and a notification for it');
+  assert.deepEqual(phone.read(push.sent[0].body).open, notices[0].open, 'which opens the same');
 
   clock += 11 * 60_000;
   f.changed();

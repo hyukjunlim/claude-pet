@@ -298,6 +298,19 @@ test("clock skew is estimated from the last day's copies", () => {
   assert.equal(estimateSkew([{ mtimeMs: T0, lastStampAt: T0 - 90_000 }]), -90_000);   // a server that runs behind
 });
 
+test('an SSH machine\'s clock estimate holds until it moves by more than a second', () => {
+  const tracker = new SessionTracker({ sessionsRoot: os.tmpdir(), projectsRoot: os.tmpdir() });
+  tracker.desktop.set('local_a', { machineKey: 'ssh:me@lab:22', cliSessionId: 'c1' });
+  tracker.transcriptFor.set('c1', 'copy.jsonl');
+  const copy = { size: 1, mtimeMs: T0, state: { lastStampAt: T0 + SKEW } };
+  tracker.followers.set('copy.jsonl', copy);
+  assert.equal(tracker.clockSkew('ssh:me@lab:22'), SKEW);
+  copy.state.lastStampAt = T0 + SKEW + 300;   // a copy made a little sooner after its turn
+  assert.equal(tracker.clockSkew('ssh:me@lab:22'), SKEW);
+  copy.state.lastStampAt = T0 + SKEW + 90_000;   // the server's clock was set
+  assert.equal(tracker.clockSkew('ssh:me@lab:22'), SKEW + 90_000);
+});
+
 test('terminal sessions skip SSH copies, deleted sessions and earlier IDs of desktop sessions', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-test-'));
   try {
