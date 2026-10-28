@@ -1,0 +1,257 @@
+/* The phone page, in the sidebar's colors (src/renderer/folder.css), sized for a finger. */
+
+:root {
+  color-scheme: light dark;
+  --page: #fafafa;
+  --surface: #ffffff;
+  --text: #191919;
+  --muted: #6f6a64;
+  --faint: #9a948d;
+  --border: rgba(31, 30, 29, 0.10);
+  --divider: #dcdcdc;
+  --press: rgba(25, 25, 25, 0.08);
+  --running: #c96442;
+  --waiting: #c27c0e;
+  --failed: #d93f3f;
+  --review: #2e8b57;
+  --background: #5e7891;
+  --claude: #c96442;
+  --codex: #3c3a37;
+  --gemini: #3b78e7;
+  --indent: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #1f1f1f;
+    --surface: #30302e;
+    --text: #efefef;
+    --muted: #b2aaa1;
+    --faint: #8a837b;
+    --border: rgba(255, 255, 255, 0.10);
+    --divider: #3a3a3a;
+    --press: rgba(255, 255, 255, 0.08);
+    --running: #e08a68;
+    --waiting: #f0b24a;
+    --failed: #f16d6d;
+    --review: #5cc28b;
+    --background: #93abc4;
+    --claude: #e08a68;
+    --codex: #d8d3cc;
+    --gemini: #7aa7f7;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+button { font: inherit; color: inherit; }
+
+[hidden] { display: none !important; }
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  background: var(--page);
+  border-bottom: 1px solid var(--divider);
+}
+
+h1 { margin: 0; font-size: 18px; font-weight: 600; }
+
+.link { font-size: 13px; color: var(--faint); white-space: nowrap; }
+.link.live { color: var(--review); }
+.link.live::before { content: "● "; }
+
+/* ---------------------------------------------------------- pairing */
+
+.pair { padding: 24px 16px; max-width: 420px; }
+.pair h2 { margin: 0 0 8px; font-size: 20px; }
+.pair p { color: var(--muted); }
+.pair form { display: flex; gap: 8px; margin-top: 16px; }
+
+.pair input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  font-size: 22px;
+  letter-spacing: 0.15em;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pair button, .alerts button {
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--claude);
+  color: #fff;
+  font-weight: 600;
+}
+
+.alerts button:disabled { opacity: 0.5; }
+
+.error { color: var(--failed); }
+
+/* ---------------------------------------------------------- notifications */
+
+.alerts {
+  margin: 12px 16px 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.alerts p { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+.alerts p.error { margin: 10px 0 0; color: var(--failed); }
+
+/* ---------------------------------------------------------- the tree */
+
+.tree { padding: 4px 0 8px; }
+
+.host + .host { border-top: 1px solid var(--divider); }
+
+.host-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px 6px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.host-name { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 16px 8px calc(16px + var(--depth, 0) * var(--indent));
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.row:active { background: var(--press); }
+
+.row.highlight { background: var(--press); box-shadow: inset 3px 0 0 var(--c, var(--review)); }
+
+.chevron {
+  flex: none;
+  width: 12px;
+  font-size: 9px;
+  color: var(--faint);
+  transition: transform 0.15s;
+}
+
+.folder.open > .row .chevron { transform: rotate(90deg); }
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder > .row .name { color: var(--muted); }
+
+.app {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--claude);
+}
+
+.app.codex,
+.app.chatgpt { background: var(--codex); }
+.app.gemini { background: var(--gemini); }
+.app.vscode,
+.app.terminal { background: transparent; box-shadow: inset 0 0 0 1.5px var(--claude); }
+.app.codex-vscode,
+.app.codex-terminal { background: transparent; box-shadow: inset 0 0 0 1.5px var(--codex); }
+
+.state {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c, var(--muted));
+  background: color-mix(in srgb, var(--c, var(--muted)) 14%, transparent);
+}
+
+.ago { flex: none; font-size: 13px; color: var(--faint); }
+
+.status-running { --c: var(--running); }
+.status-waiting { --c: var(--waiting); }
+.status-failed { --c: var(--failed); }
+.status-review { --c: var(--review); }
+.status-background { --c: var(--background); }
+
+.pip { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.pip.attention { --c: var(--waiting); }
+.pip.busy { --c: var(--running); }
+
+.empty { padding: 24px 16px; color: var(--muted); }
+
+/* ---------------------------------------------------------- eTL */
+
+.notices { border-top: 1px solid var(--divider); padding: 8px 0; }
+
+.notice { align-items: flex-start; }
+.notice .state { margin-top: 1px; }
+.notice .text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.notice .sub { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------------------------------------------------------- the weekly limits */
+
+.meter { border-top: 1px solid var(--divider); padding: 12px 16px; display: grid; gap: 12px; }
+
+.gauge-label { display: flex; justify-content: space-between; font-size: 14px; }
+.gauge-label .name { flex: none; }
+.gauge-label .pct { color: var(--muted); }
+.gauge-note { margin-top: 4px; font-size: 12px; color: var(--faint); }
+
+.track { position: relative; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--border); }
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--claude); }
+.gauge.codex .fill { background: var(--codex); }
+.now { position: absolute; top: -3px; width: 2px; height: 10px; margin-left: -1px; background: var(--muted); }
+
+/* ---------------------------------------------------------- footer */
+
+footer { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px; border-top: 1px solid var(--divider); }
+
+.quiet {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+}

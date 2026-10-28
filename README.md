@@ -434,7 +434,8 @@ Hovering the sidebar's meter (in folder mode), or the tray menu (as a floating p
 figures in words, with how far into the week you are, the time until each reset, and how old the
 figures are once they're over an hour old. Tray menu → *Appearance* → *Show weekly limits* turns
 the meter off. The pet reads the figures from files; it contacts no server itself
-(apart from the SSH hosts above, and below, and SNU eTL once you turn [that](#etl-snu) on).
+(apart from the SSH hosts above, and below, SNU eTL once you turn [that](#etl-snu) on, and the
+phones' push services once you turn on the phone companion).
 
 - **Claude:** the pet's mod for Claude Code saves the figures after each reply of every session,
   with when the week resets ([Live Claude usage](#live-claude-usage)). The pet shows the newest,
@@ -444,6 +445,45 @@ the meter off. The pet reads the figures from files; it contacts no server itsel
 - **Codex:** each reply in a rollout records the account's rate limits and when they reset. The
   pet uses the newest reply it can see, on this PC or on an SSH host. After the reset time
   passes, the meter shows 0% until the next reply.
+
+## Phone
+
+The phone companion puts what the sidebar shows on your phone (Android, or an iPhone with iOS
+16.4 or later) and sends a notification when a chat finishes. It's **off** until you turn it on:
+tray menu → *Phone* → *Show the sidebar on my phone, with notifications*. The PC does all the
+watching and the phone only shows what the pet sends it, so the PC has to be on and awake.
+
+- **Setting up:** install [Tailscale](https://tailscale.com/download) on the PC and on the phone,
+  and sign in to both with the same account. Turning the companion on (or tray menu → *Phone* →
+  *Pair a phone…*) offers to run `tailscale serve --bg http://127.0.0.1:47823` once, which puts the
+  pet at `https://<this PC>.<tailnet>.ts.net/` for your own devices only, and then shows a six-digit
+  pairing code that works once, for 10 minutes. On the phone, with Tailscale on, open that address
+  and enter the code. Add the page to the Home Screen (an iPhone needs that for notifications:
+  Share → *Add to Home Screen*, then open it from there) and tap *Turn on notifications*. Tray
+  menu → *Phone* → *Send a test notification* checks that they arrive.
+- **What it shows:** the sidebar's machine › folder tree with each session's status, eTL's notices
+  and the weekly limits. Machines and folders fold as they do in the sidebar. While the page is
+  open it asks the PC every 4 seconds; when the PC is asleep or the phone is off the tailnet, it
+  keeps the last list and says *PC out of reach*.
+- **Tapping** opens the app, not the session in it, since neither app has a link to one Claude
+  Code session or Codex thread on a phone: a Claude Code session opens the Claude app
+  (`https://claude.ai/code`), a Codex thread the ChatGPT app (`https://chatgpt.com/codex`). A web
+  chat opens at its own conversation. An eTL notice opens in LearningX Student 2.0 on Android; on
+  an iPhone it opens on the web, as eTL's site has no links into the app. Where the app isn't
+  installed, the page opens on the web. (On Android the link names the app's package, and Android
+  itself falls back to the web page.)
+- **Notifications:** when a session turns *Ready*, *Needs you* or *Error*, and when a new eTL
+  bubble comes: 마감 임박, 마감 변경, 새 과제, 성적, 새 공지 (보강 공지, 휴강 공지) and 토큰 만료.
+  *Running* and today's classes don't notify, and neither does what's already showing when the
+  companion starts. Tapping one opens the page at that session or notice. The Claude and ChatGPT
+  apps may send notifications of their own for the same chat; turn those off to get one of each.
+- **Privacy:** the pet's server listens on 127.0.0.1 only, so nothing on the LAN or the internet
+  reaches it, and Tailscale Serve passes it only devices on your tailnet. The page's data needs the
+  cookie a paired phone got; the pet keeps only its hash. Notifications go by Web Push through the
+  push service the phone's browser uses (Apple's, Google's or Mozilla's), encrypted so that service
+  can't read them. `%APPDATA%\ttokttok-pet\phone.json` keeps the paired phones and the key the pet
+  signs notifications with. Tray menu → *Phone* → *Paired phones* → *Forget* drops a phone, and
+  `tailscale serve reset` takes the address down.
 
 ## Live Claude usage
 
@@ -699,6 +739,7 @@ src/pets.js         Pet discovery and validation (Codex format)
 src/demo.js         Fake sessions for `npm run demo`
 src/etl/            SNU eTL: API client, notices, timetable, token store, query bridge, chat folder
 src/webchats/       Web chats: the extension's native host, its registration, tab reports → bubbles
+src/phone/          The phone companion: its web server, Web Push, what the phone shows and what notifies, the page (www/)
 tools/make_clay.py  Generates Clay, the built-in pet
 claude-mod/         The mod for Claude Code that saves Claude's usage after each reply
 etl-workspace/      What the eTL chat folder is made from: instructions, skills, etl.js

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1f1f1f" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Ttokttok">
+  <title>Ttokttok Pet</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Ttokttok Pet</h1>
+    <span id="link" class="link" role="status"></span>
+  </header>
+
+  <section id="pair" class="pair" hidden>
+    <h2>Pair this phone</h2>
+    <p>On the PC, choose <b>Phone → Pair a phone…</b> in the pet's tray menu and enter the code it shows.</p>
+    <form id="pair-form" autocomplete="off">
+      <input id="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" placeholder="123 456" aria-label="Pairing code" required>
+      <button type="submit">Pair</button>
+    </form>
+    <p id="pair-error" class="error" role="alert"></p>
+  </section>
+
+  <main id="main" hidden>
+    <div id="alerts" class="alerts" hidden></div>
+    <div id="tree" class="tree" role="tree" aria-label="Sessions by machine and folder"></div>
+    <p id="empty" class="empty" hidden>No sessions yet.</p>
+    <section id="notices" class="notices" aria-label="eTL" hidden></section>
+    <section id="meter" class="meter" aria-label="Weekly limits" hidden></section>
+    <footer>
+      <button id="test" type="button" class="quiet" hidden>Send a test notification</button>
+      <button id="unpair" type="button" class="quiet">Unpair this phone</button>
+    </footer>
+  </main>
+</body>
+</html>

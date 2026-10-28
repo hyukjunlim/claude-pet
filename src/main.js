@@ -7,8 +7,8 @@ const { execFile, execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { format } = require('node:util');
 const {
-  app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage,
-  screen, shell,
+  app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, powerMonitor, protocol,
+  safeStorage, screen, shell,
 } = require('electron');
 const { Settings, DEFAULTS } = require('./settings');
 const { discoverPets, petRoots } = require('./pets');
@@ -27,6 +27,7 @@ const { archiveCodexChat, canDelete, deleteClaudeSession, isChat } = require('./
 const { watchWindowOrder } = require('./window-order');
 const { EtlFeature } = require('./etl/feature');
 const { WebChatsFeature } = require('./webchats/feature');
+const { PhoneFeature } = require('./phone/feature');
 const { FolderWindow, displayChoices } = require('./folder-mode');
 const { buildTree, attentionIds } = require('./folder-tree');
 const { markNewChats, newChatLinks, placeOf, sshTargets } = require('./new-chat');
@@ -90,6 +91,7 @@ let tracker;
 let codex = null;               // Codex threads, when Codex is installed and shown
 let etl = null;                 // SNU eTL notices, when turned on (see etl/feature.js)
 let webchats = null;            // claude.ai and ChatGPT chats, when turned on (see webchats/feature.js)
+let phone = null;               // the sidebar on your phone, when turned on (see phone/feature.js)
 let win = null;
 let tray = null;
 let pets = [];
@@ -521,17 +523,15 @@ function sendSessions() {
 function mergeSessions() {
   sessions = [...claudeSessions, ...codexSessions, ...etlSessions, ...webSessions].filter((s) => !isDeleted(s.id)).sort(compareSessions);
   sendSessions();
+  phone?.changed();
+  phone?.observe(sessions);
   if (DEBUG_CAPTURE_DIR) debugCapture(sessions);
 }
 
-// Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
-function sendTree() {
-  const marked = currentMarks();
-  const hidden = currentHidden();
-  if (!folder?.open) return;
+// Every session under its machine and folder (folder-tree.js), less the hidden and deleted ones.
+function currentTree({ marked = currentMarks(), hidden = currentHidden(), sshHosts = sshConfigHosts() } = {}) {
   const shown = (list) => list.filter((s) => !Object.hasOwn(hidden, s.id) && !isDeleted(s.id));
-  const sshHosts = sshConfigHosts();
-  const hosts = markNewChats(buildTree({
+  return buildTree({
     claude: shown(claudeAll),
     codex: shown(codexAll),
     chats: shown(webAll),
@@ -539,7 +539,17 @@ function sendTree() {
     codexConnections: codex?.connections ?? [],
     defaultWsl: wslDistros()[0] ?? null,
     marked,
-  }), newChatOptions(sshHosts));
+  });
+}
+
+// Folder mode's tree: every session, under its machine and folder (see folder-tree.js).
+function sendTree() {
+  const marked = currentMarks();
+  const hidden = currentHidden();
+  phone?.changed();
+  if (!folder?.open) return;
+  const sshHosts = sshConfigHosts();
+  const hosts = markNewChats(currentTree({ marked, hidden, sshHosts }), newChatOptions(sshHosts));
   treeHosts = [...hosts];   // without the practice sessions, which have no real folders
   const practice = gettingStarted?.folderHost();   // Getting started's practice sessions, on top
   if (practice) hosts.unshift(practice);
@@ -950,6 +960,55 @@ function startWebChats() {
   webchats.start().catch((err) => log('web chats:', err.message));
 }
 
+function startPhone() {
+  phone = new PhoneFeature({
+    electron: { dialog, shell, clipboard },
+    settings,
+    userData: app.getPath('userData'),
+    log,
+    snapshot: phoneSnapshot,
+    sampleNotice: sampleEtlNotice,
+    icon: appIcon,
+  });
+  phone.start()
+    .then(() => {
+      phone.changed();
+      phone.observe(sessions);
+    })
+    .catch((err) => log('phone:', err.message));
+}
+
+// What the phone page shows: the sidebar's tree, eTL's notices and the weekly limits.
+function phoneSnapshot() {
+  const urls = new Map(webAll.map((c) => [c.id, c.url]));
+  return {
+    hosts: currentTree(),
+    notices: etlSessions,
+    usage: settings.get('showUsage') ? currentUsage() : [],
+    chatUrl: (id) => urls.get(id) ?? null,
+  };
+}
+
+// What the phone's sample eTL notice links to: the next assignment due that isn't handed in (any
+// assignment eTL listed, else eTL's front page), so a tap shows where LearningX lands.
+function sampleEtlNotice() {
+  const now = Date.now();
+  const recs = Object.values(etl?.tracker?.watch?.assignments || {}).filter((r) => ETL_LINK.test(r?.url || ''));
+  const next = recs.filter((r) => r.due > now && !r.submitted).sort((a, b) => a.due - b.due)[0] || recs[0];
+  if (!next) return { title: 'eTL', project: '', url: 'https://myetl.snu.ac.kr/' };
+  return { title: String(next.name || 'eTL'), project: typeof next.course === 'string' ? next.course : '', url: next.url };
+}
+
+// The app icon as a square PNG of `size` pixels, for the phone's Home Screen.
+const appIcons = new Map();
+function appIcon(size) {
+  if (!appIcons.has(size)) {
+    const img = nativeImage.createFromPath(path.join(APP_ROOT, 'assets', 'icon.png'));
+    appIcons.set(size, img.isEmpty() ? null : img.resize({ width: size, height: size, quality: 'best' }).toPNG());
+  }
+  return appIcons.get(size);
+}
+
 function trackerFor(id) {
   if (String(id).startsWith('etl:')) return etl;
   if (String(id).startsWith('web:')) return webchats;
@@ -975,6 +1034,7 @@ function sendUsage(force = false) {
   usageKey = key;
   if (win && !win.isDestroyed()) win.webContents.send('pet:usage', items);
   folder?.send('folder:usage', items);
+  phone?.changed();
 }
 
 // "Claude: 42% of the weekly limit used · 55% into the week · resets in 3d 4h · as of 2h ago"
@@ -1747,6 +1807,7 @@ function buildMenu({ markAll = false } = {}) {
   items.push({ type: 'separator' }, appearanceMenu(folderMode));
   const sources = sourcesMenu();
   if (sources) items.push(sources);
+  if (phone) items.push(phone.menu());
   items.push({ type: 'separator' });
   items.push({
     label: 'Start at login',
@@ -2262,6 +2323,7 @@ if (!app.requestSingleInstanceLock()) {
     startCodex();
     if (!DEMO) startEtl();
     if (!DEMO) startWebChats();
+    if (!DEMO) startPhone();
     if (!DEMO) {
       startGettingStarted();
       // A new install: Getting started has the eTL step, so the one-time eTL offer doesn't come too
@@ -2330,6 +2392,7 @@ if (!app.requestSingleInstanceLock()) {
     codex?.stop();
     etl?.stop();
     webchats?.stop();
+    phone?.stop();
     claudeUsage?.stop();
     if (settings) settings.save();
   });

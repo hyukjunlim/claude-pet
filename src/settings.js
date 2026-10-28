@@ -35,6 +35,8 @@ const DEFAULTS = {
   etlAssistantAsked: false,  // asked once, when the first token was saved
   etlTimetableBubble: true,  // a bubble for each of the day's classes (while eTL is on)
   webChats: false,         // claude.ai and ChatGPT chats, from the browser extension
+  phone: false,            // the sidebar on your phone, with notifications (phone/feature.js)
+  phonePort: null,         // ... the local port it serves on; null: 47823
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
   readyFrom: null,         // when opening a session stopped counting as done with it (main.js)
