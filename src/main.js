@@ -137,6 +137,12 @@ let logBytes = 0;
 let update = null;              // what the last check found, when there's an update waiting
 let updateBusy = null;          // 'checking' while looking, 'asking' while a dialog is up
 
+// Started from a terminal or by another program, the pet writes its lines to that program's pipe
+// as well. Once that program has gone, writing there fails (EPIPE), and unhandled, the error would
+// end the pet with a "JavaScript error occurred in the main process" box. The log file has every
+// line, so a console that can't be written to is let go.
+for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {});
+
 // The pet usually runs without a console, so lines also go to ttokttok-pet.log in the app's logs
 // folder (%APPDATA%\ttokttok-pet\logs on Windows).
 function log(...args) {
