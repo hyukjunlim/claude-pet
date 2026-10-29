@@ -51,6 +51,12 @@ test('the index describes SSH and WSL sessions as copied from another machine', 
   assert.equal(parseDesktopSession({ sessionId: 'local_x', cwd: 'C:\\repo' }).mirrored, false);
 });
 
+test('a forked or spawned desktop session names the session it came from', () => {
+  assert.equal(parseDesktopSession({ sessionId: 'local_f', forkedFromSessionId: 'local_p' }).forkOf, 'local_p');
+  assert.equal(parseDesktopSession({ sessionId: 'local_b', spawnedFrom: { sessionId: 'local_p', btw: true } }).forkOf, 'local_p');
+  assert.equal(parseDesktopSession({ sessionId: 'local_x' }).forkOf, null);
+});
+
 test('the index gives the Remote Control session a desktop session was connected to last', () => {
   const r = parseDesktopSession({ sessionId: 'local_x', bridgeSessionIds: ['session_01OldOldOldOld', 'session_01NewNewNewNew', 'bogus id'] });
   assert.equal(r.bridgeSessionId, 'session_01NewNewNewNew');

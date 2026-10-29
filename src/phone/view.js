@@ -50,6 +50,7 @@ function sessionOf(s, linkOf) {
     since: s.since || 0,
     lastActivityAt: s.lastActivityAt || 0,
     ...(s.siteName && { siteName: s.siteName }),
+    ...(s.nest && { nest: s.nest }),
     open: openTarget(s.app, linkOf(s.id)),
   };
 }

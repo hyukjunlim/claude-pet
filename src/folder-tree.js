@@ -116,6 +116,7 @@ function itemOf(s, app) {
     since: s.since || 0,
     lastActivityAt: s.lastActivityAt || 0,
     ...(s.siteName && { siteName: s.siteName }),   // a web chat's site
+    ...(s.forkOf && { forkOf: s.forkOf }),         // the session it was forked from (see nest)
   };
 }
 
@@ -166,9 +167,8 @@ function buildTree({
     .map(({ host, root, loose }) => {
       const folders = [...root.children.values()].map((n) => finish(compact(n, null), now));
       folders.sort(byLatest);
-      loose.sort(byActivity);
       const all = [...folders.flatMap(allSessions), ...loose];
-      return { ...host, folders, loose, ...counts(all), latest: latestOf(all) };
+      return { ...host, folders, loose: nest(loose), ...counts(all), latest: latestOf(all) };
     });
   const wsl = machines.filter((m) => m.kind === 'wsl');
   if (wsl.length > 1) for (const m of wsl) if (m.distro) m.label = `WSL · ${m.distro}`;
@@ -199,7 +199,7 @@ function compact(node, parentPath) {
 
 function finish(n, now) {
   const children = [...n.children.values()].map((c) => finish(c, now)).sort(byLatest);
-  const sessions = [...n.sessions].sort(byActivity);
+  const sessions = nest(n.sessions);
   const all = [...sessions, ...children.flatMap(allSessions)];
   const latest = latestOf(all);
   return {
@@ -212,6 +212,34 @@ function finish(n, now) {
     open: now - latest < OPEN_DAYS * DAY_MS,
     ...counts(all),
   };
+}
+
+// A folder's sessions, newest first, each fork or side chat right under the session it came from
+// when that one is in the same list (Claude's forks, side chats and btw questions; the Codex
+// threads you forked). `nest` says how far below: 1 for a fork, 2 for a fork of that. A family sits
+// where its newest session would.
+function nest(sessions) {
+  const ids = new Set(sessions.map((s) => s.id));
+  const kids = new Map();
+  for (const s of sessions) if (s.forkOf && ids.has(s.forkOf)) kids.set(s.forkOf, [...(kids.get(s.forkOf) ?? []), s]);
+  const newest = (s, seen = new Set()) => {
+    seen.add(s.id);
+    return Math.max(s.lastActivityAt || 0, ...(kids.get(s.id) ?? []).filter((k) => !seen.has(k.id)).map((k) => newest(k, seen)));
+  };
+  const out = [];
+  const placed = new Set();
+  const place = (s, depth) => {
+    if (placed.has(s.id)) return;
+    placed.add(s.id);
+    out.push(depth ? { ...s, nest: depth } : s);
+    for (const k of (kids.get(s.id) ?? []).sort(byActivity)) place(k, depth + 1);
+  };
+  sessions.filter((s) => !s.forkOf || !ids.has(s.forkOf))
+    .map((s) => [s, newest(s)])
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([s]) => place(s, 0));
+  for (const s of [...sessions].sort(byActivity)) place(s, 0);   // forks that name each other in a loop
+  return out;
 }
 
 function allSessions(n) {

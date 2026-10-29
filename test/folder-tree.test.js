@@ -169,3 +169,34 @@ test("a Gemini chat sits under Chat with Gemini's own mark", () => {
   const [c] = buildTree({ chats: [{ id: 'web:gemini:671b3f7b87a71fc7', kind: 'web', site: 'gemini', title: 'MICC', status: 'review', since: ago(0.1), lastActivityAt: ago(0.1) }], now: NOW });
   assert.deepEqual([c.key, c.loose.map((s) => [s.title, s.app, s.status])], ['chat', [['MICC', 'gemini', 'review']]]);
 });
+
+test('a fork sits right under the session it came from, and a family where its newest session would', () => {
+  const at = (days) => ({ lastActivityAt: ago(days), since: ago(days) });
+  const [lab] = build(
+    [
+      claude('local_qiskit', '/data/me/projects', { ...onLab, ...at(3) }),
+      claude('local_btw', '/data/me/projects', { ...onLab, ...at(0.1), forkOf: 'local_qiskit' }),
+      claude('local_fork', '/data/me/projects', { ...onLab, ...at(1), forkOf: 'local_qiskit' }),
+      claude('local_deeper', '/data/me/projects', { ...onLab, ...at(2), forkOf: 'local_fork' }),
+      claude('local_other', '/data/me/projects', { ...onLab, ...at(0.5) }),
+      claude('local_elsewhere', '/data/me/other', { ...onLab, ...at(0.2), forkOf: 'local_qiskit' }),
+    ],
+    [
+      codex('compare', '/data/me/projects', 'remote-ssh-discovered:lab', at(4)),
+      codex('compare (2)', '/data/me/projects', 'remote-ssh-discovered:lab', { ...at(5), forkOf: 'codex:compare' }),
+    ],
+  );
+  const projects = lab.folders[0].children.find((c) => c.label === 'projects');
+  assert.deepEqual(projects.sessions.map((s) => [s.title, s.nest ?? 0]), [
+    ['local_qiskit', 0], ['local_btw', 1], ['local_fork', 1], ['local_deeper', 2],
+    ['local_other', 0],
+    ['compare', 0], ['compare (2)', 1],
+  ]);
+  const other = lab.folders[0].children.find((c) => c.label === 'other');
+  assert.deepEqual(other.sessions.map((s) => [s.title, s.nest ?? 0]), [['local_elsewhere', 0]], 'its parent is in another folder');
+});
+
+test('forks that name each other in a loop are still listed, once each', () => {
+  const [pc] = build([claude('a', 'C:\\x', { forkOf: 'b' }), claude('b', 'C:\\x', { forkOf: 'a', lastActivityAt: ago(0.5) })], []);
+  assert.deepEqual(pc.folders[0].sessions.map((s) => s.title).sort(), ['a', 'b']);
+});

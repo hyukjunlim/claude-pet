@@ -656,6 +656,7 @@ class SessionTracker extends EventEmitter {
         ...base,
         machineKey: r.machineKey,
         machine: name || r.machine,
+        ...(r.forkOf && { forkOf: r.forkOf }),
         lastActivityAt: r.lastActivityAt,
         // Your newest prompt (a task's notice doesn't count), stamped by the CLI's machine.
         lastPromptAt: r.latestUserFrameAt ? r.latestUserFrameAt - skew : 0,
@@ -921,6 +922,8 @@ function parseDesktopSession(j) {
     // Whether each turn gets a summary. The app drops the last one when a turn starts.
     summarized: j.classifierSummaryEnabled === true || Boolean(summary),
     cwd: str(j.cwd),
+    // The session it was forked or spawned from (a fork, a side chat, a btw question).
+    forkOf: str(j.forkedFromSessionId) || str(j.spawnedFrom?.sessionId),
     // The Remote Control session it was last connected to: each new connection is added at the end.
     bridgeSessionId: Array.isArray(j.bridgeSessionIds) ? j.bridgeSessionIds.findLast((id) => BRIDGE_ID_RE.test(id)) ?? null : null,
     remote: ssh ? ssh.sshHost : null,

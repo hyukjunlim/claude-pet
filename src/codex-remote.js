@@ -18,6 +18,8 @@ const { BOOTSTRAP, LOADER, SshWatcher } = require('./ssh-watcher');
 //   {"chats": [[<thread id>, "vscode" or "terminal", <cwd>, <mtime, s>]…]}  the VS Code and
 //                            terminal chats, when the list changes (checked every walk)
 //   {"names": {<thread id>: <name>}}  their names in session_index.jsonl, when they change
+//   {"forks": {<thread id>: <thread id>}}  the threads you forked, and which thread each came from,
+//                            when that changes (checked every walk)
 // It only reads files. It exits when the pet goes away: the pet keeps the watcher's stdin open,
 // and when the pet quits or dies, the pipe closes and stdin ends.
 const WATCHER = String.raw`
@@ -39,17 +41,18 @@ WALK = 30                # look through every rollout this often (for a resumed 
 TAIL = 256 * 1024        # how much of a rollout to send when we start following it
 CHUNK = 4 * 1024 * 1024  # read at most this much of one rollout per round
 files = {}               # path -> [id, offset, partial line (None: skip up to the next newline)]
-chats = {}               # path -> [thread id, client, cwd] for a VS Code or terminal chat, else None
+heads = {}               # path -> [thread id, client, cwd, forked from] from its first line, else None
 last_id = 0
 last_beat = 0
 
 def send(obj):
     sys.stdout.write(json.dumps(obj, separators=(',', ':')) + '\n')
 
-# Whether a rollout is a VS Code or terminal chat, from its first line (as rollout.js's clientOf).
-def chat_of(path):
-    if path in chats:
-        return chats[path]
+# What a rollout's first line says: its thread, whether it's a VS Code or terminal chat (as
+# rollout.js's clientOf) and the thread you forked it from.
+def head_of(path):
+    if path in heads:
+        return heads[path]
     try:
         with open(path, 'rb') as f:
             head = f.readline(8 * 1024 * 1024)
@@ -63,11 +66,20 @@ def chat_of(path):
         p = None
     p = p if isinstance(p, dict) else {}
     source = p.get('source')
-    client = None
-    if isinstance(p.get('id'), str) and not isinstance(source, dict):
+    if not isinstance(p.get('id'), str):
+        heads[path] = None
+        return None
+    client = forked = None
+    if not isinstance(source, dict):     # a subagent's names the thread that spawned it
         client = 'vscode' if p.get('originator') == 'codex_vscode' else 'terminal' if source == 'cli' else None
-    chats[path] = [p['id'], client, p.get('cwd')] if client else None
-    return chats[path]
+        forked = p.get('forked_from_id') if isinstance(p.get('forked_from_id'), str) else None
+    heads[path] = [p['id'], client, p.get('cwd'), forked]
+    return heads[path]
+
+# [thread id, client, cwd] for a VS Code or terminal chat, else None.
+def chat_of(path):
+    head = head_of(path)
+    return head[:3] if head and head[1] else None
 
 def names_of(ids):
     names = {}
@@ -144,6 +156,7 @@ def newest_limits():
 limits = newest_limits()
 last_walk = 0
 listed = None
+forked = None
 index_stamp = None
 named = None
 
@@ -169,6 +182,14 @@ while True:
         if found != listed:
             send({'chats': found})
             listed = found
+        forks = {}
+        for path in candidates:
+            head = head_of(path)
+            if head and head[3]:
+                forks[head[0]] = head[3]
+        if forks != forked:
+            send({'forks': forks})
+            forked = forks
         ids = set(c[0] for c in found)
         try:
             st = os.stat(INDEX)
@@ -233,6 +254,7 @@ class CodexRemote extends SshWatcher {
     this.limits = null;         // the newest rate limits seen on the host, on its clock
     this.chats = new Map();     // threadId -> { client, cwd, mtimeMs }: its VS Code and terminal chats, on its clock
     this.names = new Map();     // threadId -> the chat's name
+    this.forks = new Map();     // threadId -> the thread you forked it from
   }
 
   onDisconnect() {
@@ -260,6 +282,9 @@ class CodexRemote extends SshWatcher {
         if (!Array.isArray(c) || typeof c[0] !== 'string' || (c[1] !== 'vscode' && c[1] !== 'terminal')) continue;
         this.chats.set(c[0], { client: c[1], cwd: typeof c[2] === 'string' ? c[2] : null, mtimeMs: (Number(c[3]) || 0) * 1000 });
       }
+      this.emit('change');
+    } else if (m.forks && typeof m.forks === 'object') {
+      this.forks = new Map(Object.entries(m.forks).filter(([, from]) => typeof from === 'string'));
       this.emit('change');
     } else if (m.names && typeof m.names === 'object') {
       this.names = new Map(Object.entries(m.names).filter(([, name]) => typeof name === 'string'));

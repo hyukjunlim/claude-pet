@@ -118,14 +118,14 @@ async function firstEntry(file) {
   return null;
 }
 
-// What a rollout's first line says about the thread: { threadId, client, cwd }, `client` null for
-// one that isn't a VS Code or terminal chat. Null if it can't be read yet.
+// What a rollout's first line says about the thread: { threadId, client, cwd, forkedFrom }, `client`
+// null for one that isn't a VS Code or terminal chat. Null if it can't be read yet.
 async function chatMetaOf(file) {
   const entry = await firstEntry(file);
   if (!entry) return null;
   const state = createRolloutState();
   if (entry.type === 'session_meta') applyRolloutEntry(state, entry);
-  return { threadId: state.threadId, client: state.threadId ? clientOf(state) : null, cwd: state.cwd };
+  return { threadId: state.threadId, client: state.threadId ? clientOf(state) : null, cwd: state.cwd, forkedFrom: state.forkedFrom };
 }
 
 // Reads the newest rate limits from the tail of a rollout we don't follow.
@@ -331,7 +331,7 @@ class CodexTracker extends EventEmitter {
     this.followers = new Map();       // rollout path -> RolloutFollower
     this.recentFiles = new Set();     // the rollouts here written in the last hour, all followed
     this.chatRoots = [];              // WSL's sessions folders: { root, machineKey, machine, active }
-    this.metas = new Map();           // rollout path -> chatMetaOf (a first line doesn't change)
+    this.metas = new Map();           // rollout path -> chatMetaOf (a first line doesn't change); also says which threads are forks
     this.localChats = new Map();      // threadId -> { threadId, client, cwd, file, mtimeMs, followed }: the VS Code and terminal chats here
     this.rootChats = new Map();       // ... and in WSL, with the root's { root, machineKey, machine }
     this.rootNames = new Map();       // root -> { stamp, names } from that machine's session_index.jsonl
@@ -861,6 +861,16 @@ class CodexTracker extends EventEmitter {
     for (const c of this.rootChats.values()) chat(c.threadId, { ...c, at: c.mtimeMs }, 'local', c);
     for (const [hostId, remote] of this.remotes) {
       for (const [threadId, t] of remote.chats ?? []) chat(threadId, { ...t, at: t.mtimeMs - remote.skew }, hostId);
+    }
+    // A thread you forked names the one it came from in its rollout's first line, here or on its host:
+    // a new one's as soon as it's followed, an older one's from the last look through every rollout.
+    const forks = new Map();
+    for (const m of this.metas.values()) if (m.forkedFrom) forks.set(m.threadId, m.forkedFrom);
+    for (const remote of this.remotes.values()) for (const [id, from] of remote.forks ?? []) forks.set(id, from);
+    for (const [id, f] of followed) if (f.state.forkedFrom) forks.set(id, f.state.forkedFrom);
+    for (const s of all) {
+      const from = forks.get(s.id.slice('codex:'.length));
+      if (from) s.forkOf = `codex:${from}`;
     }
     all.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     this.all = all;

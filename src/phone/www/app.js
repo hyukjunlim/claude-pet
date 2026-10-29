@@ -285,12 +285,12 @@
   function sessionEl(s, depth) {
     const row = linkRow(`row session status-${s.status}`, s.open);
     row.dataset.id = s.id;
-    row.style.setProperty('--depth', String(depth));
+    row.style.setProperty('--depth', String(depth + (s.nest || 0)));   // a fork, under the session it came from
     row.setAttribute('role', 'treeitem');
     const label = LABELS[s.status];
     const app = s.siteName || APP_NAME[s.app] || '';
     row.setAttribute('aria-label', [s.title, app, label, `Opens ${appName(s.open?.app) || 'the app'}`].filter(Boolean).join(', '));
-    row.append(el('span', 'chevron'), el('span', `app ${s.app}`), el('span', 'name', s.title));
+    row.append(el('span', 'chevron', s.nest ? '└' : null), el('span', `app ${s.app}`), el('span', 'name', s.title));
     row.append(label ? el('span', 'state', label) : el('span', 'ago', formatAgo(s.lastActivityAt)));
     return row;
   }

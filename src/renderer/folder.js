@@ -265,18 +265,21 @@
     return wrap;
   }
 
+  // A fork sits under the session it came from, marked └; a search, which can leave out that
+  // session, lists every match flat.
   function sessionEl(s, depth) {
+    const nest = query ? 0 : s.nest || 0;
     const row = el('button', `row session status-${s.status}${s.id === current ? ' current' : ''}`);
     row.type = 'button';
     row.dataset.id = s.id;
-    row.style.setProperty('--depth', String(depth));
+    row.style.setProperty('--depth', String(depth + nest));
     row.setAttribute('role', 'treeitem');
     const state = LABELS[s.status];
     const app = s.siteName || APP_NAME[s.app];
     const action = APP_NAME[s.app] === 'Terminal' ? 'Terminal session, nothing to open' : `Click to open in ${app}`;
     row.setAttribute('aria-label', [s.title, CLIENT_TITLE[s.app] || app, state, action].filter(Boolean).join(', '));
     if (CLIENT_TITLE[s.app]) row.title = CLIENT_TITLE[s.app];
-    row.append(el('span', 'chevron'), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
+    row.append(el('span', 'chevron', nest ? '└' : null), el('span', `app ${s.app}`), withMatches(el('span', 'name'), s.title));
     if (state) row.append(el('span', 'state', state));
     else {
       const ago = el('span', 'ago', formatAgo(s.lastActivityAt));

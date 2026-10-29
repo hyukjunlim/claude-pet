@@ -200,8 +200,12 @@ maximized beside it, so the conversation you open fills the rest of the screen.
   turned them on and loaded the browser extension ([Web chats](#web-chats-claudeai-chatgpt-gemini)).
   Claude Code sessions and Codex chats run in VS Code or a terminal have a hollow dot in their
   app's color.
-- **Order:** the sessions in a folder are newest first. Machines and folders keep the order they
-  first showed in, so a folder doesn't jump when a session in it gets busy. Drag a machine's
+- **Order:** the sessions in a folder are newest first, and a fork sits right under the session it
+  came from, marked └: a Claude Code session you forked, a side chat or a btw question, or a Codex
+  thread you forked. A session and its forks move together, placed by the newest of them. A fork
+  whose original is in another folder, archived or hidden stays on its own, and a search lists its
+  matches flat. Machines and folders keep the order they first showed in, so a folder doesn't
+  jump when a session in it gets busy. Drag a machine's
   heading or a folder's row to move it among its neighbors (Escape cancels); a folder that turns
   up later goes on top.
 - **Status:** each session shows what its bubble would (*Needs you*, *Error*, *Ready*, *Running*,

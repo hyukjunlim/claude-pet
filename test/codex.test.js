@@ -160,6 +160,13 @@ test("Codex's own helper threads are recognized", () => {
   assert.equal(s.subagent, true);
 });
 
+test('a thread you forked names the thread it came from; a helper thread names none', () => {
+  const parent = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4000';
+  assert.equal(rollout([meta({ forked_from_id: parent, thread_source: 'user' })]).forkedFrom, parent);
+  assert.equal(rollout([meta({ forked_from_id: parent, parent_thread_id: parent, source: { subagent: { thread_spawn: { parent_thread_id: parent } } } })]).forkedFrom, null);
+  assert.equal(rollout([meta()]).forkedFrom, null);
+});
+
 test("the unread list maps each thread to its host, and skips ChatGPT chats", () => {
   const hash = 'a'.repeat(64);
   const unread = parseUnread({
@@ -843,9 +850,11 @@ test("the SSH watcher reports the host's VS Code and terminal chats and their na
   const say = (m) => child.stdout.write(`${JSON.stringify(m)}\n`);
   say({ chats: [[CHAT, 'vscode', '/data/proj', 1_790_000_000.5], ['broken'], ['x', 'desktop', null, 1]] });
   say({ names: { [CHAT]: 'Port the tokenizer', y: 5 } });
+  say({ forks: { [CHAT]: THREAD, y: 5 } });
   await flush();
   assert.deepEqual([...remote.chats], [[CHAT, { client: 'vscode', cwd: '/data/proj', mtimeMs: 1_790_000_000_500 }]]);
   assert.deepEqual([...remote.names], [[CHAT, 'Port the tokenizer']]);
+  assert.deepEqual([...remote.forks], [[CHAT, THREAD]]);
   remote.stop();
 });
 
@@ -854,9 +863,12 @@ test("an SSH host's chats are listed under the host, on our clock", async () => 
   const fake = new EventEmitter();
   const now = Date.now();
   Object.assign(fake, {
-    files: new Map(),
+    // Followed since it was written a minute ago: its first line, read then, says it's a fork. The
+    // watcher's look through every rollout, every 30 s, hasn't come round to it yet.
+    files: new Map([[1, { path: '/x/rollout.jsonl', state: rollout([vscodeMeta(CHAT, { forked_from_id: THREAD })]) }]]),
     chats: new Map([[CHAT, { client: 'vscode', cwd: '/data/proj', mtimeMs: now + SKEW - 3600_000 }]]),
     names: new Map([[CHAT, 'Port the tokenizer']]),
+    forks: new Map(),
     skew: SKEW,
     target: 'lab-server',
     port: null,
@@ -876,6 +888,7 @@ test("an SSH host's chats are listed under the host, on our clock", async () => 
       `codex:${CHAT}`, 'vscode', 'remote-ssh-discovered:lab-server', 'lab-server', 'Port the tokenizer', `vscode://openai.chatgpt/local/${CHAT}`,
     ]);
     assert.ok(Math.abs(s.lastActivityAt - (now - 3600_000)) < 1000, 'on our clock');
+    assert.equal(s.forkOf, `codex:${THREAD}`, 'forked from a thread on the host');
   } finally {
     tracker.stop();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
@@ -886,10 +899,12 @@ test("the watcher script lists the VS Code and terminal chats and follows the la
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-watch-'));
   const root = path.join(home, 'sessions');
   const now = Date.now();
-  const [old, app] = ['c01', 'c02'].map((n) => `0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4${n}`);
+  const [old, app, fork, helper] = ['c01', 'c02', 'c03', 'c04'].map((n) => `0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4${n}`);
   const recent = writeRollout(root, CHAT, [vscodeMeta(), started(1), complete(9)], now - 2 * 86_400_000);
   writeRollout(root, old, [meta({ id: old, originator: 'codex-tui', source: 'cli' })], now - 20 * 86_400_000);
   writeRollout(root, app, [meta({ id: app })], now - 2 * 86_400_000);
+  writeRollout(root, fork, [meta({ id: fork, forked_from_id: app })], now - 20 * 86_400_000);
+  writeRollout(root, helper, [meta({ id: helper, forked_from_id: app, source: { subagent: { thread_spawn: { parent_thread_id: app } } } })], now - 20 * 86_400_000);
   fs.writeFileSync(path.join(home, 'session_index.jsonl'), `${JSON.stringify({ id: CHAT, thread_name: 'Port the tokenizer' })}\n${JSON.stringify({ id: app, thread_name: 'Not a chat' })}\n`);
   const child = spawn(python, ['-u', '-c', LOADER], { env: { ...process.env, CODEX_HOME: home }, windowsHide: true });
   try {
@@ -908,6 +923,7 @@ test("the watcher script lists the VS Code and terminal chats and follows the la
     const chats = messages.find((m) => m.chats)?.chats ?? [];
     assert.deepEqual(chats.map(([id, client, cwd]) => [id, client, cwd]).sort(), [[CHAT, 'vscode', '/home/me/urban-map'], [old, 'terminal', '/mnt/c/Users/me/proj']].sort());
     assert.deepEqual(messages.find((m) => m.names)?.names, { [CHAT]: 'Port the tokenizer' });
+    assert.deepEqual(messages.find((m) => m.forks)?.forks, { [fork]: app }, 'the fork you made, however old; not the helper');
     assert.deepEqual(messages.filter((m) => m.open != null).map((m) => path.resolve(m.path)), [path.resolve(recent)], "only this week's chat is followed");
   } finally {
     child.kill();

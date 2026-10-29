@@ -23,7 +23,8 @@ function createRolloutState() {
     cwd: null,
     subagent: false,       // Codex's own helper threads (e.g. the auto-reviewer)
     fromDesktop: false,
-    originator: null,      // what started the thread: "Codex Desktop", "codex_vscode", "codex-tui"…
+    forkedFrom: null,      // the thread id it was forked from
+    originator: null,     // what started the thread: "Codex Desktop", "codex_vscode", "codex-tui"…
     source: null,          // how: "vscode" (the app and the VS Code extension), "cli", "exec"…
     turnActive: false,
     turnStartedAt: 0,
@@ -66,6 +67,8 @@ function applyRolloutEntry(state, entry) {
     state.fromDesktop = DESKTOP_ORIGINATOR_RE.test(String(p.originator || ''));
     state.originator = typeof p.originator === 'string' ? p.originator : null;
     state.source = typeof p.source === 'string' ? p.source : null;
+    // The thread you forked this one from (a subagent's is the thread that spawned it).
+    state.forkedFrom = !state.subagent && typeof p.forked_from_id === 'string' ? p.forked_from_id : null;
     return;
   }
   // Reading a long rollout from its tail can start after a turn's task_started. Work from a
