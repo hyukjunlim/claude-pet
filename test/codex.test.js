@@ -283,6 +283,41 @@ test('the full list has the threads the app lists, quiet ones included, but not 
   }
 });
 
+test("the app's thread list is read from the file its build wrote last", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttokttok-pet-codex-'));
+  try {
+    fs.writeFileSync(path.join(home, '.codex-global-state.json'), '{}');
+    fs.mkdirSync(path.join(home, 'sqlite'));
+    const { DatabaseSync } = require('node:sqlite');
+    const catalog = (name, threadId, title) => {
+      const file = path.join(home, 'sqlite', name);
+      const db = new DatabaseSync(file);
+      db.exec('create table local_thread_catalog (host_id text, thread_id text, display_title text, source_updated_at real, cwd text)');
+      db.prepare('insert into local_thread_catalog values (?, ?, ?, ?, ?)').run('local', threadId, title, Date.now() / 1000, '/home/me/proj');
+      db.close();
+      return file;
+    };
+    const touch = (file, ms) => fs.utimesSync(file, new Date(ms), new Date(ms));
+    const dev = catalog('codex-dev.db', 'th-dev', 'Left by the dev build');
+    const prod = catalog('codex.db', 'th-prod', 'From the production build');
+    touch(dev, Date.now() - 86_400_000);
+    touch(prod, Date.now() - 60_000);
+
+    let clock = Date.now();
+    const tracker = new CodexTracker({ ...pathsIn(home), watchHosts: false, now: () => clock });
+    await tracker.tick();
+    assert.deepEqual(tracker.all.map((s) => s.title), ['From the production build']);
+
+    // Back on the other build, its file is written again and read from then on.
+    touch(dev, Date.now());
+    clock += 10_000;
+    await tracker.tick();
+    assert.deepEqual(tracker.all.map((s) => s.title), ['Left by the dev build']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 // ------------------------------------------------------------------ dot
 
 const DOT = '0199d0d0-0001-7000-8000-00000000d071';
@@ -444,7 +479,7 @@ function pathsIn(home) {
   return {
     home,
     appState: path.join(home, '.codex-global-state.json'),
-    catalog: path.join(home, 'sqlite', 'codex-dev.db'),
+    catalogs: [path.join(home, 'sqlite', 'codex.db'), path.join(home, 'sqlite', 'codex-dev.db')],
     sessionsRoot: path.join(home, 'sessions'),
     sessionIndex: path.join(home, 'session_index.jsonl'),
   };

@@ -7,7 +7,8 @@
 //   - ~/.codex/.codex-global-state.json: the desktop app's unread threads, per host. The app
 //     adds a thread when a turn finishes while you aren't looking at it, and removes it once you
 //     open the thread. It also lists the SSH hosts the app works on.
-//   - ~/.codex/sqlite/codex-dev.db (local_thread_catalog): each thread's title and host.
+//   - ~/.codex/sqlite/codex.db, or codex-dev.db in the app's other builds (local_thread_catalog):
+//     each thread's title and host.
 //   - ~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl: the live history of threads that run on
 //     this PC (the app's local host, and the Codex CLI).
 //   - The same rollouts on each SSH host, streamed by a small watcher (see codex-remote.js).
@@ -55,7 +56,8 @@ function codexPaths() {
   return {
     home,
     appState: path.join(home, '.codex-global-state.json'),
-    catalog: path.join(home, 'sqlite', 'codex-dev.db'),
+    // The app's production build keeps its thread list in codex.db, its other builds in codex-dev.db.
+    catalogs: [path.join(home, 'sqlite', 'codex.db'), path.join(home, 'sqlite', 'codex-dev.db')],
     sessionsRoot: path.join(home, 'sessions'),
     sessionIndex: path.join(home, 'session_index.jsonl'),
   };
@@ -300,14 +302,14 @@ function readCatalog(file) {
 
 class CodexTracker extends EventEmitter {
   constructor({
-    home, appState, catalog, sessionsRoot, sessionIndex,
+    home, appState, catalogs, sessionsRoot, sessionIndex,
     watchHosts = true, remoteFactory = (o) => new CodexRemote(o), pollMs = 1000, now = Date.now, dismissed = {}, readyFrom = null,
     cliReadyFrom = null,
   } = {}) {
     super();
     this.home = home;
     this.appStateFile = appState;
-    this.catalogFile = catalog;
+    this.catalogFiles = catalogs;
     this.sessionsRoot = sessionsRoot;
     this.sessionIndexFile = sessionIndex;
     this.watchHosts = watchHosts;
@@ -453,7 +455,9 @@ class CodexTracker extends EventEmitter {
       if (!name || files.includes(name)) this.kick();
     };
     watch(this.home, {}, kickFor([path.basename(this.appStateFile), path.basename(this.sessionIndexFile)]));
-    watch(path.dirname(this.catalogFile), {}, kickFor([path.basename(this.catalogFile), `${path.basename(this.catalogFile)}-wal`]));
+    for (const dir of new Set(this.catalogFiles.map((f) => path.dirname(f)))) {
+      watch(dir, {}, kickFor(this.catalogFiles.flatMap((f) => [path.basename(f), `${path.basename(f)}-wal`])));
+    }
     watch(this.sessionsRoot, { recursive: true }, (name) => this.onRolloutChange(name));
   }
 
@@ -640,8 +644,16 @@ class CodexTracker extends EventEmitter {
     return name;
   }
 
+  // The app writes one of `catalogFiles`, as its build says. The other stays behind as the build
+  // you ran before left it, so the one written last is read (with its -wal, where the writes land).
   async loadCatalog(now) {
-    const stamp = await this.stampOf(this.catalogFile, `${this.catalogFile}-wal`);
+    let file = this.catalogFiles[0];
+    let newest = -1;
+    for (const f of this.catalogFiles) {
+      const at = Math.max(...(await Promise.all([f, `${f}-wal`].map(statSafe))).map((st) => st?.mtimeMs ?? -1));
+      if (at > newest) [file, newest] = [f, at];
+    }
+    const stamp = `${file}|${await this.stampOf(file, `${file}-wal`)}`;
     if (stamp === this.stamps.catalog) return;
     const wait = CATALOG_MIN_MS - (now - this.lastCatalogRead);
     if (wait > 0) {
@@ -649,7 +661,7 @@ class CodexTracker extends EventEmitter {
       return;
     }
     this.lastCatalogRead = now;
-    const catalog = readCatalog(this.catalogFile);
+    const catalog = readCatalog(file);
     if (catalog) {
       this.catalog = catalog;
       this.stamps.catalog = stamp;
