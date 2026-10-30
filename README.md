@@ -363,8 +363,9 @@ without Claude too: then clicking the pet opens Codex, and the menu has no Claud
   dot starts, and the one its upkeep runs in on a timer (*Heartbeat Dreamer*), don't make it Ready
   either; only its own replies do. Clicking opens the dot's conversation (`codex://threads/<id>` on the
   dot's host; `codex://dots` would only open the app's dots home).
-- **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex-dev.db`)
-  and the names you gave your connections.
+- **Titles and host names** come from the app's thread list (`~/.codex/sqlite/codex.db`, or
+  `codex-dev.db` from the app's other builds; the pet reads whichever the app wrote last) and the
+  names you gave your connections.
 - **VS Code and terminal chats:** chats in the Codex VS Code extension, or `codex` in a terminal,
   on this PC, in WSL or on a host Codex works on, get a bubble and a sidebar row, marked
   "Codex · VS Code" or "Codex · Terminal". The sidebar lists every one Codex hasn't archived: the
@@ -497,7 +498,9 @@ watching and the phone only shows what the pet sends it, so the PC has to be on 
   one button into its app: the session in Claude or ChatGPT, the notice in LearningX. (A phone
   opens an app only from a tap in a page, never straight from a notification.) The phone makes
   that page itself, so it opens with Tailscale off. The Claude and ChatGPT apps may send
-  notifications of their own for the same chat; turn those off to get one of each.
+  notifications of their own for the same chat; turn those off to get one of each. They come
+  silently; tray menu → *Phone* → *Notification sound* turns the sound on (the phone picks this up
+  the next time it opens the pet's page).
 - **When it doesn't work:** if the page doesn't load, Tailscale is off on the phone, or another VPN
   (WARP, an ad blocker) is using the phone's one VPN slot. *PC out of reach* means the PC is asleep
   or off. No notifications on an iPhone: open the page from its Home Screen icon, not in Safari. If
