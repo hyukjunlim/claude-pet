@@ -80,11 +80,6 @@ class PhoneFeature extends EventEmitter {
     return this.settings.get('phone') === true;
   }
 
-  // Notifications come silently unless the sound is turned on (tray menu → Phone).
-  get sound() {
-    return this.settings.get('phoneSound') === true;
-  }
-
   get port() {
     if (this.fixedPort != null) return this.fixedPort;
     const p = Number(this.settings.get('phonePort'));
@@ -387,13 +382,6 @@ class PhoneFeature extends EventEmitter {
         checked: on,
         click: (mi) => this.setEnabled(mi.checked).catch((err) => this.log('phone:', err.message)),
       },
-      {
-        label: 'Notification sound',
-        type: 'checkbox',
-        checked: this.sound,
-        enabled: on,
-        click: (mi) => this.settings.set({ phoneSound: mi.checked }),
-      },
       { label: 'Pair a phone…', enabled: on, click: () => this.showPairing().catch((err) => this.log('phone:', err.message)) },
       {
         label: 'Send a test notification',
@@ -447,7 +435,7 @@ class PhoneFeature extends EventEmitter {
 
   async #push(device, message) {
     if (!device.subscription) throw new Error('notifications are off on this phone');
-    const r = await this.pusher.send(device.subscription, { ...message, silent: !this.sound }, { topic: message.tag });
+    const r = await this.pusher.send(device.subscription, message, { topic: message.tag });
     if (r.gone) {
       device.subscription = null;
       this.#save();

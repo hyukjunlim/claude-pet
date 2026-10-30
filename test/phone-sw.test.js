@@ -19,13 +19,12 @@ const ANDROID_LINK = 'intent://claude.ai/code/session_01AbCdEfGhIjKlMn#Intent;sc
 function worker(userAgent, { windows = [] } = {}) {
   const handlers = {};
   const opened = [];
-  const shown = [];
   const self = {
     navigator: { userAgent },
     location: new URL(`${ORIGIN}/sw.js`),
     addEventListener: (type, fn) => { handlers[type] = fn; },
     skipWaiting() {},
-    registration: { showNotification: async (title, options) => { shown.push({ title, silent: options.silent }); } },
+    registration: { showNotification: async () => {} },
     clients: {
       claim: async () => {},
       matchAll: async () => windows,
@@ -48,14 +47,7 @@ function worker(userAgent, { windows = [] } = {}) {
     handlers.fetch({ request: { url: new URL(url, ORIGIN).href, mode: 'navigate' }, respondWith: (r) => { answer = r; } });
     return answer && { headers: answer.headers, html: await answer.text() };
   };
-  // What the phone shows for a push of `data`.
-  const push = async (data) => {
-    let work = null;
-    handlers.push({ data: { json: () => data, text: () => JSON.stringify(data) }, waitUntil: (p) => { work = p; } });
-    await work;
-    return shown.at(-1);
-  };
-  return { click, visit, push };
+  return { click, visit };
 }
 
 const hrefs = (html) => [...html.matchAll(/<a class="(\w+)" href="([^"]*)"/g)].map(([, cls, href]) => [cls, href.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))]);
@@ -93,13 +85,6 @@ test('the page shows text as text, and an address off the app\'s own site gets n
   for (const url of ['javascript:alert(1)', 'http://claude.ai/code', 'https://claude.ai.evil.example/']) {
     assert.deepEqual(hrefs((await w.visit(`/open?${new URLSearchParams({ app: 'claude', url })}`)).html), [['list', '/']], url);
   }
-});
-
-test('a notification comes silently when the pet says so, else with the phone\'s sound', async () => {
-  const w = worker(ANDROID);
-  assert.deepEqual(await w.push({ title: 'Ready · A', tag: 'cli:a', silent: true }), { title: 'Ready · A', silent: true });
-  assert.deepEqual(await w.push({ title: 'Ready · A', tag: 'cli:a', silent: false }), { title: 'Ready · A', silent: false });
-  assert.deepEqual(await w.push({ title: 'Ready · A', tag: 'cli:a' }), { title: 'Ready · A', silent: false }, 'a push from an older pet');
 });
 
 test('the worker answers only for that page; the pet\'s own pages come from the PC', async () => {

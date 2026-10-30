@@ -498,9 +498,7 @@ watching and the phone only shows what the pet sends it, so the PC has to be on 
   one button into its app: the session in Claude or ChatGPT, the notice in LearningX. (A phone
   opens an app only from a tap in a page, never straight from a notification.) The phone makes
   that page itself, so it opens with Tailscale off. The Claude and ChatGPT apps may send
-  notifications of their own for the same chat; turn those off to get one of each. They come
-  silently; tray menu → *Phone* → *Notification sound* turns the sound on (the phone picks this up
-  the next time it opens the pet's page).
+  notifications of their own for the same chat; turn those off to get one of each.
 - **When it doesn't work:** if the page doesn't load, Tailscale is off on the phone, or another VPN
   (WARP, an ad blocker) is using the phone's one VPN slot. *PC out of reach* means the PC is asleep
   or off. No notifications on an iPhone: open the page from its Home Screen icon, not in Safari. If
