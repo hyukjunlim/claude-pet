@@ -20,7 +20,8 @@ const TAPPED_HEADERS = {
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
-// Every push shows a notification (an iPhone takes notifications away from a page that doesn't).
+// Every push shows a notification (an iPhone takes notifications away from a page that doesn't),
+// with no sound or vibration when the pet says `silent`.
 self.addEventListener('push', (e) => {
   let d = {};
   try {
@@ -32,6 +33,7 @@ self.addEventListener('push', (e) => {
     body: d.body || '',
     tag: d.tag || undefined,
     renotify: Boolean(d.tag),
+    silent: d.silent === true,
     icon: '/icon-192.png',
     data: { id: d.id || null, open: d.open || null },
   }));

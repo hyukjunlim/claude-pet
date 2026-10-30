@@ -37,6 +37,7 @@ const DEFAULTS = {
   webChats: false,         // claude.ai and ChatGPT chats, from the browser extension
   phone: false,            // the sidebar on your phone, with notifications (phone/feature.js)
   phonePort: null,         // ... the local port it serves on; null: 47823
+  phoneSound: false,       // ... its notifications make a sound on the phone; off: they come silently
   shortcut: 'CommandOrControl+Alt+P',
   dismissed: {},
   readyFrom: null,         // when opening a session stopped counting as done with it (main.js)

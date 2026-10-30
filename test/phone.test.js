@@ -289,6 +289,23 @@ test('a paired phone subscribes, gets pushes for what turns Ready, and can unpai
   assert.equal((await call(port, { path: '/api/state', cookie })).status, 401);
 });
 
+test('notifications come silently until the sound is turned on in the Phone menu', async (t) => {
+  const { f, push, port } = await running(t);
+  const origin = `http://127.0.0.1:${port}`;
+  const code = f.newCode();
+  const cookie = (await call(port, { method: 'POST', path: '/api/pair', origin, body: { code } })).headers['set-cookie'][0].split(';')[0];
+  const phone = phoneSubscription();
+  await call(port, { method: 'POST', path: '/api/push', origin, cookie, body: { subscription: phone.sub } });
+  const sound = () => f.menu().submenu.find((i) => i.label === 'Notification sound');
+
+  assert.equal(sound().checked, false);
+  await call(port, { method: 'POST', path: '/api/test-push', origin, cookie, body: {} });
+  sound().click({ checked: true });
+  assert.equal(sound().checked, true);
+  await call(port, { method: 'POST', path: '/api/test-push', origin, cookie, body: {} });
+  assert.deepEqual(push.sent.map((p) => phone.read(p.body).silent), [true, false]);
+});
+
 test('a notification opens what its row opens; a hidden session sends none', async (t) => {
   const row = { id: 'cli:a', app: 'terminal', title: 'A', status: 'review', since: 2 };
   const hosts = [{
